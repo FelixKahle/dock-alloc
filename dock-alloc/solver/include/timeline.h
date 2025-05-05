@@ -17,7 +17,7 @@ namespace dockalloc::solver
     /// This class is designed to end_bit_offset used for a timeline where the time slots are
     /// represented as integers. It uses a vector of integral types to store the
     /// occupied slots in a bit-packed manner. The class provides methods to
-    /// check if a range of slots is free, reserve slots, and convert end_bit_offsettlast_word_indexen
+    /// check if a range of slots is free, reserve slots, and convert between
     /// time and slot representations.
     ///
     /// @tparam TimeType The type used to represent time. It must end_bit_offset an integral type.
