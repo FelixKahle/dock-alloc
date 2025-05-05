@@ -1,0 +1,47 @@
+# Copyright 2025 Felix Kahle. All rights reserved.
+
+cc_library(
+    name = "solver",
+    hdrs = [
+        "include/timeline.h",
+    ],
+    copts = [
+        "-O3",
+        "-march=native",
+        "-flto",
+    ],
+    include_prefix = "dockalloc/solver",
+    strip_include_prefix = "include",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@abseil-cpp//absl/log:check",
+        "@abseil-cpp//absl/log:log",
+        "@highway//:hwy",
+    ],
+)
+
+cc_test(
+    name = "solver-test",
+    srcs = [
+        "test/timeline_test.cc",
+    ],
+    deps = [
+        "//dock-alloc/solver",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_binary(
+    name = "solver-benchmark",
+    srcs = ["benchmark/timeline_benchmark.cc"],
+    copts = [
+        "-std=c++2c",
+        "-O3",
+        "-march=native",
+        "-flto",
+    ],
+    deps = [
+        "//dock-alloc/solver",
+        "@google_benchmark//:benchmark_main",
+    ],
+)

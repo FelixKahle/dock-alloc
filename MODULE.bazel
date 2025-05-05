@@ -1,0 +1,12 @@
+# Copyright 2025 Felix Kahle. All rights reserved.
+
+module(
+    name = "dock-alloc",
+    version = "1.0",
+)
+
+bazel_dep(name = "rules_cc", version = "0.1.1")
+bazel_dep(name = "abseil-cpp", version = "20250127.1")
+bazel_dep(name = "googletest", version = "1.16.0.bcr.1")
+bazel_dep(name = "google_benchmark", version = "1.9.2")
+bazel_dep(name = "highway", version = "1.2.0")

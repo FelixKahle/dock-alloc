@@ -1,0 +1,25 @@
+# Copyright 2025 Felix Kahle. All rights reserved.
+
+name: Test
+
+on: [ push ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+
+      - name: Setup Bazel
+        uses: bazel-contrib/setup-bazel@0.14.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+
+      - name: Run Bazel Build
+        run: bazel build //...
+      - name: Run Bazel Test
+        run: bazel test //... --test_output=all
