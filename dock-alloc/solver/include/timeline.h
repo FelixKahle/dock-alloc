@@ -64,14 +64,6 @@ namespace dockalloc::solver
         /// @brief Returns the total number of slots in the timeline.
         ///
         /// @return The total number of slots in the timeline.
-        TimeType TotalSlots() const noexcept
-        {
-            return occupied_.size() * kBitsPerStorageType;
-        }
-
-        /// @brief Returns the total number of slots in the timeline.
-        ///
-        /// @return The total number of slots in the timeline.
         TimeType TimeHorizon() const noexcept
         {
             return time_horizon_;
@@ -83,6 +75,14 @@ namespace dockalloc::solver
         TimeType SlotSize() const noexcept
         {
             return slot_size_;
+        }
+
+        /// @brief Returns the total number of slots in the timeline.
+        ///
+        /// @return The total number of slots in the timeline.
+        TimeType TotalSlots() const noexcept
+        {
+            return total_slots_;
         }
 
         /// @brief Checks if a range of slots is free.
@@ -101,7 +101,11 @@ namespace dockalloc::solver
                 return true;
             }
 
-            TimeType end_slot = start_slot + dur_slots;
+            // prevent wraparound
+            TimeType end_slot = (dur_slots > std::numeric_limits<TimeType>::max() - start_slot)
+                                    ? std::numeric_limits<TimeType>::max()
+                                    : start_slot + dur_slots;
+
             auto first_word_index = start_slot / kBitsPerStorageType;
             auto last_word_index = (end_slot - 1) / kBitsPerStorageType;
 
@@ -122,7 +126,7 @@ namespace dockalloc::solver
             }
 
             // head word
-            StorageType head_mask = ~StorageType{0} << start_bit_offset;
+            StorageType head_mask = MaskFrom(start_bit_offset);
             if ((occupied_[first_word_index] & head_mask) != 0)
             {
                 return false;
@@ -136,7 +140,7 @@ namespace dockalloc::solver
                 }
             }
             // tail word
-            StorageType tail_mask = (StorageType{1} << (end_bit_offset + 1)) - 1;
+            StorageType tail_mask = MaskTo(end_bit_offset);
             return (occupied_[last_word_index] & tail_mask) == 0;
         }
 
@@ -152,7 +156,10 @@ namespace dockalloc::solver
                 return;
             }
 
-            TimeType end_slot = start_slot + dur_slots;
+            // prevent wraparound
+            TimeType end_slot = (dur_slots > std::numeric_limits<TimeType>::max() - start_slot)
+                                    ? std::numeric_limits<TimeType>::max()
+                                    : start_slot + dur_slots;
             auto first_word_index = start_slot / kBitsPerStorageType;
             auto last_word_index = (end_slot - 1) / kBitsPerStorageType;
             auto start_bit_offset = start_slot % kBitsPerStorageType;
@@ -172,11 +179,11 @@ namespace dockalloc::solver
             }
 
             // head word
-            occupied_[first_word_index] |= (~StorageType{0} << start_bit_offset);
+            occupied_[first_word_index] |= MaskFrom(start_bit_offset);
             // middle words: bulk set to all-ones
             std::fill_n(&occupied_[first_word_index + 1], last_word_index - first_word_index - 1, ~StorageType{0});
             // tail word
-            occupied_[last_word_index] |= ((StorageType{1} << (end_bit_offset + 1)) - 1);
+            occupied_[last_word_index] |= MaskTo(end_bit_offset);
         }
 
         /// @brief Frees a range of slots.
@@ -191,7 +198,10 @@ namespace dockalloc::solver
                 return;
             }
 
-            TimeType end_slot = start_slot + dur_slots;
+            // prevent wraparound
+            TimeType end_slot = (dur_slots > std::numeric_limits<TimeType>::max() - start_slot)
+                                    ? std::numeric_limits<TimeType>::max()
+                                    : start_slot + dur_slots;
             auto first_word_index = start_slot / kBitsPerStorageType;
             auto last_word_index = (end_slot - 1) / kBitsPerStorageType;
             auto start_bit_offset = start_slot % kBitsPerStorageType;
@@ -211,11 +221,11 @@ namespace dockalloc::solver
             }
 
             // head word
-            occupied_[first_word_index] &= ~(~StorageType{0} << start_bit_offset);
+            occupied_[first_word_index] &= ~MaskFrom(start_bit_offset);
             // middle words: bulk clear to zero
             std::fill_n(&occupied_[first_word_index + 1], last_word_index - first_word_index - 1, StorageType{0});
             // tail word
-            occupied_[last_word_index] &= ~((StorageType{1} << (end_bit_offset + 1)) - 1);
+            occupied_[last_word_index] &= ~MaskTo(end_bit_offset);
         }
 
     private:
@@ -254,6 +264,16 @@ namespace dockalloc::solver
             return ((StorageType{1} << (to - from + 1)) - 1) << from;
         }
 
+        static constexpr StorageType MaskFrom(TimeType start) noexcept
+        {
+            return ~StorageType{0} << start;
+        }
+
+        static constexpr StorageType MaskTo(TimeType end) noexcept
+        {
+            return (StorageType{1} << (end + 1)) - 1;
+        }
+
         static constexpr TimeType kBitsPerStorageType = static_cast<TimeType>(std::numeric_limits<StorageType>::digits);
 
         TimeType slot_size_;
@@ -262,5 +282,6 @@ namespace dockalloc::solver
         std::vector<StorageType> occupied_;
     };
 }
+
 
 #endif
