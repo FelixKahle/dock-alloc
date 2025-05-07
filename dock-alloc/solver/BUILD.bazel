@@ -3,45 +3,27 @@
 cc_library(
     name = "solver",
     hdrs = [
-        "include/timeline.h",
-    ],
-    copts = [
-        "-O3",
-        "-march=native",
-        "-flto",
+        "include/slot_timeline.h",
+        "include/slot_timeline_segment_tree.h",
     ],
     include_prefix = "dockalloc/solver",
     strip_include_prefix = "include",
     visibility = ["//visibility:public"],
     deps = [
+        "//third_party/xsimd",
         "@abseil-cpp//absl/log:check",
         "@abseil-cpp//absl/log:log",
-        "@highway//:hwy",
     ],
 )
 
 cc_test(
     name = "solver-test",
     srcs = [
-        "test/timeline_test.cc",
+        "test/slot_timeline_segment_tree_test.cc",
+        "test/slot_timeline_test.cc",
     ],
     deps = [
         "//dock-alloc/solver",
         "@googletest//:gtest_main",
-    ],
-)
-
-cc_binary(
-    name = "solver-benchmark",
-    srcs = ["benchmark/timeline_benchmark.cc"],
-    copts = [
-        "-std=c++2c",
-        "-O3",
-        "-march=native",
-        "-flto",
-    ],
-    deps = [
-        "//dock-alloc/solver",
-        "@google_benchmark//:benchmark_main",
     ],
 )
