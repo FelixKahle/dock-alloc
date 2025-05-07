@@ -4,7 +4,6 @@ cc_library(
     name = "solver",
     hdrs = [
         "include/slot_timeline.h",
-        "include/slot_timeline_segment_tree.h",
     ],
     include_prefix = "dockalloc/solver",
     strip_include_prefix = "include",
@@ -18,10 +17,7 @@ cc_library(
 
 cc_test(
     name = "solver-test",
-    srcs = [
-        "test/slot_timeline_segment_tree_test.cc",
-        "test/slot_timeline_test.cc",
-    ],
+    srcs = ["test/slot_timeline_test.cc"],
     deps = [
         "//dock-alloc/solver",
         "@googletest//:gtest_main",
