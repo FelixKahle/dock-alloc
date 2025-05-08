@@ -6,7 +6,6 @@
 #include <type_traits>
 #include <algorithm>
 #include <optional>
-#include <format>
 #include "absl/strings/str_format.h"
 
 namespace dockalloc::solver
@@ -54,8 +53,8 @@ namespace dockalloc::solver
         ///
         /// @param start The start time of the interval.
         /// @param end The end time of the interval.
-        constexpr explicit TimeInterval(const TimeType start, const TimeType end) noexcept
-            : start_(std::min(start, end)), end_(std::max(start, end))
+        constexpr explicit TimeInterval(const TimeType start, const TimeType end) noexcept :
+            start_(std::min(start, end)), end_(std::max(start, end))
         {
         }
 
@@ -129,7 +128,7 @@ namespace dockalloc::solver
             requires std::is_arithmetic_v<OtherTimeType>
         [[nodiscard]] bool Contains(OtherTimeType value) const noexcept
         {
-            return value >= GetStart() && value <= GetEnd();
+            return value >= start_ && value <= end_;
         }
 
         /// @brief Checks whether this interval fully contains another interval.
@@ -146,7 +145,7 @@ namespace dockalloc::solver
             requires std::is_arithmetic_v<OtherTimeType>
         [[nodiscard]] constexpr bool Contains(const TimeInterval<OtherTimeType>& other) const noexcept
         {
-            return Contains(other.GetStart()) && Contains(other.GetEnd());
+            return Contains(other.start_) && Contains(other.end_);
         }
 
         /// @brief Checks whether this time interval intersects with another time interval.
@@ -159,7 +158,7 @@ namespace dockalloc::solver
             requires std::is_arithmetic_v<OtherTimeType>
         [[nodiscard]] constexpr bool Intersects(const TimeInterval<OtherTimeType>& other) const noexcept
         {
-            return !(GetEnd() < other.GetStart() || other.GetEnd() < GetStart());
+            return !(end_ < other.start_ || other.end_ < start_);
         }
 
         /// @brief Returns the intersection of this \c TimeInterval with another \c TimeInterval.
@@ -170,7 +169,7 @@ namespace dockalloc::solver
         ///
         /// @note If the intervals do not intersect, this function returns an empty \c std::optional.
         ///
-        /// @return \c std::optional<TimeInterval> containing the intersection interval, or empty if they do not intersect.
+        /// @return \c std::optional<TimeInterval> with the intersection interval, or empty if they do not intersect.
         template <typename OtherTimeType>
             requires std::is_arithmetic_v<OtherTimeType>
         [[nodiscard]] constexpr std::optional<TimeInterval> Intersection(
@@ -181,9 +180,9 @@ namespace dockalloc::solver
                 return {};
             }
 
-            TimeType s = std::max(GetStart(), static_cast<TimeType>(other.GetStart()));
-            TimeType e = std::min(GetEnd(), static_cast<TimeType>(other.GetEnd()));
-            return TimeInterval(s, e);
+            TimeType start = std::max(start_, static_cast<TimeType>(other.start_));
+            TimeType end = std::min(end_, static_cast<TimeType>(other.end_));
+            return TimeInterval(start, end);
         }
 
         /// @brief Returns a new \c TimeInterval shifted by a specified value.
@@ -199,7 +198,7 @@ namespace dockalloc::solver
             OtherTimeType delta) const noexcept
         {
             using R = decltype(TimeType{} + OtherTimeType{});
-            return TimeInterval<R>(GetStart() + delta, GetEnd() + delta);
+            return TimeInterval<R>(start_ + delta, end_ + delta);
         }
 
         /// @brief Clamps the \c TimeInterval to fit within a specified boundary.
@@ -210,14 +209,14 @@ namespace dockalloc::solver
         ///
         /// @note This function returns \c std::optional<TimeInterval> to indicate whether the clamping was successful.
         ///
-        /// @return \c std::optional<TimeInterval> if the clamped interval if successful, or an empty optional if failed.
+        /// @return \c std::optional<TimeInterval> if successful, or an empty optional if failed.
         template <typename OtherTimeType>
             requires std::is_arithmetic_v<OtherTimeType>
         [[nodiscard]] constexpr std::optional<TimeInterval> Clamp(
             const TimeInterval<OtherTimeType>& boundary) const noexcept
         {
-            const TimeType clamped_start = std::max(GetStart(), static_cast<TimeType>(boundary.GetStart()));
-            const TimeType clamped_end = std::min(GetEnd(), static_cast<TimeType>(boundary.GetEnd()));
+            const TimeType clamped_start = std::max(start_, static_cast<TimeType>(boundary.start_));
+            const TimeType clamped_end = std::min(end_, static_cast<TimeType>(boundary.end_));
 
             if (clamped_start > clamped_end)
             {
@@ -237,7 +236,7 @@ namespace dockalloc::solver
         template <typename H>
         friend constexpr H AbslHashValue(H h, const TimeInterval& time_interval) noexcept
         {
-            return H::combine(std::move(h), time_interval.GetStart(), time_interval.GetEnd());
+            return H::combine(std::move(h), time_interval.start_, time_interval.end_);
         }
 
         /// @brief Equality operator.
@@ -251,9 +250,9 @@ namespace dockalloc::solver
         /// @return \c true if the intervals are equal, \c false otherwise.
         template <typename OtherTimeType>
             requires std::is_arithmetic_v<OtherTimeType>
-        friend bool operator==(const TimeInterval& lhs, const TimeInterval<OtherTimeType>& rhs) noexcept
+        friend constexpr bool operator==(const TimeInterval& lhs, const TimeInterval<OtherTimeType>& rhs) noexcept
         {
-            return lhs.GetStart() == rhs.GetStart() && lhs.GetEnd() == rhs.GetEnd();
+            return lhs.start_ == rhs.start_ && lhs.end_ == rhs.end_;
         }
 
         /// @brief Inequality operator.
@@ -267,7 +266,7 @@ namespace dockalloc::solver
         /// @return \c true if the intervals are not equal, \c false otherwise.
         template <typename OtherTimeType>
             requires std::is_arithmetic_v<OtherTimeType>
-        friend bool operator!=(const TimeInterval& lhs, const TimeInterval<OtherTimeType>& rhs) noexcept
+        friend constexpr bool operator!=(const TimeInterval& lhs, const TimeInterval<OtherTimeType>& rhs) noexcept
         {
             return !(lhs == rhs);
         }
@@ -286,7 +285,7 @@ namespace dockalloc::solver
         }
 
         // Delete copy and move assignment operators to prevent reassigning the interval.
-        // We want to keep the class immutable after construction.
+        // The TimeInterval class is designed to be immutable after construction.
 
         TimeInterval& operator=(const TimeInterval& other) noexcept = delete;
         TimeInterval& operator=(TimeInterval&& other) noexcept = delete;
