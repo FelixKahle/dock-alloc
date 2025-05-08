@@ -285,6 +285,9 @@ namespace dockalloc::solver
             absl::Format(&sink, "[%v, %v]", interval.start_, interval.end_);
         }
 
+        // Delete copy and move assignment operators to prevent reassigning the interval.
+        // We want to keep the class immutable after construction.
+
         TimeInterval& operator=(const TimeInterval& other) noexcept = delete;
         TimeInterval& operator=(TimeInterval&& other) noexcept = delete;
 
