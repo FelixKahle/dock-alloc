@@ -3,21 +3,21 @@
 cc_library(
     name = "solver",
     hdrs = [
-        "include/slot_timeline.h",
+        "include/time_interval.h",
     ],
     include_prefix = "dockalloc/solver",
     strip_include_prefix = "include",
     visibility = ["//visibility:public"],
     deps = [
-        "//third_party/xsimd",
         "@abseil-cpp//absl/log:check",
         "@abseil-cpp//absl/log:log",
+        "@abseil-cpp//absl/strings:str_format",
     ],
 )
 
 cc_test(
     name = "solver-test",
-    srcs = ["test/slot_timeline_test.cc"],
+    srcs = ["test/time_interval_test.cc"],
     deps = [
         "//dock-alloc/solver",
         "@googletest//:gtest_main",
