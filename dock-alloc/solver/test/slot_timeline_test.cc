@@ -7,8 +7,11 @@ namespace dockalloc::solver
 {
     TEST(SlotTimelineTest, ConstructorSetsCorrectDepth)
     {
-        const SlotTimeline<4, uint16_t> timeline(100, true);
-        EXPECT_EQ(timeline.kDepth, 4);
+        const SlotTimeline<4, uint16_t> timeline1(100, true);
+        EXPECT_EQ(timeline1.kSummaryDepth, 4);
+
+        const SlotTimeline<0, uint16_t> timeline2(100, true);
+        EXPECT_EQ(timeline2.kSummaryDepth, 0);
     }
 
     TEST(SlotTimelineTest, ConstructorSetsCorrectSlotCount)
