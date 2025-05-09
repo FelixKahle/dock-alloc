@@ -86,15 +86,6 @@ namespace dockalloc::solver
         EXPECT_FALSE(empty_intersection.has_value());
     }
 
-    TEST(TimeIntervalTest, ShiftByIsCorrect)
-    {
-        constexpr TimeInterval<uint32_t> interval(5, 10);
-        constexpr auto shifted_interval = interval.ShiftBy(3);
-
-        EXPECT_EQ(shifted_interval.GetStart(), 8);
-        EXPECT_EQ(shifted_interval.GetEnd(), 13);
-    }
-
     TEST(TimeIntervalTest, ClampIsCorrect)
     {
         constexpr TimeInterval<uint32_t> interval(5, 10);
@@ -115,5 +106,13 @@ namespace dockalloc::solver
         constexpr auto result = interval2.Clamp(empty_boundary);
 
         EXPECT_FALSE(result.has_value());
+    }
+
+    TEST(TimeIntervalTest, EqualityIsCorrect)
+    {
+        constexpr TimeInterval<uint32_t> interval(5, 10);
+        constexpr TimeInterval<uint64_t> same_interval(5, 10);
+
+        EXPECT_TRUE(interval == same_interval);
     }
 }
