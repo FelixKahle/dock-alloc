@@ -11,6 +11,16 @@
 
 namespace dockalloc::solver
 {
+    /// @brief A class representing a half-open time interval.
+    ///
+    /// This class represents a half-open time interval [start, end), where the start time is inclusive
+    /// and the end time is exclusive. It provides methods to create intervals, check for containment,
+    /// compute the midpoint, duration, and intersection with other intervals.
+    ///
+    /// @tparam TimeType The type of the time values. It must be an unsigned integral type.
+    ///
+    /// @author Felix Kahle (felix.kahle21@gmail.com)
+    /// @date May 09, 2025
     template <typename TimeType>
         requires std::unsigned_integral<TimeType>
     class TimeInterval
@@ -266,6 +276,9 @@ namespace dockalloc::solver
         {
             return H::combine(std::move(h), time_interval.start_time_inclusive_, time_interval.end_time_exclusive_);
         }
+
+        // TimeInterval is designed to be non-copyable and non-movable
+        // to meet an immutable design.
 
         TimeInterval& operator=(const TimeInterval&) = delete;
         TimeInterval& operator=(TimeInterval&&) = delete;
