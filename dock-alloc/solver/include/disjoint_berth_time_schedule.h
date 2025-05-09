@@ -4,8 +4,10 @@
 #define DOCK_ALLOC_SOLVER_DISJOINT_BERTH_SCHEDULE_H_
 
 #include <type_traits>
+
+#include "berth_time_schedule.h"
 #include "absl/container/btree_set.h"
-#include "dockalloc/solver/berth_schedule.h"
+#include "dockalloc/solver/berth_time_schedule.h"
 #include "dockalloc/solver/time_interval.h"
 
 namespace dockalloc::solver
@@ -32,7 +34,7 @@ namespace dockalloc::solver
 
     /// @brief A schedule model that enforces non-overlapping, exclusive berth assignments.
     ///
-    /// The \c DisjointBerthSchedule represents a berth schedule where no two time intervals
+    /// The \c DisjointBerthTimeSchedule represents a berth schedule where no two time intervals
     /// are allowed to overlap or touch. It guarantees exclusivity by storing time intervals
     /// in a sorted container (\c absl::btree_set) using a comparator that enforces strict
     /// non-overlapping semantics.
@@ -53,26 +55,26 @@ namespace dockalloc::solver
     /// @author Felix Kahle (felix.kahle21@gmail.com)
     template <typename TimeType>
         requires std::is_arithmetic_v<TimeType>
-    class DisjointBerthSchedule final : public BerthSchedule<TimeType>
+    class DisjointBerthTimeSchedule final : public BerthTimeSchedule<TimeType>
     {
     public:
-        explicit DisjointBerthSchedule() noexcept = default;
+        explicit DisjointBerthTimeSchedule() noexcept = default;
 
         /// @brief Copy constructor.
         ///
-        /// This constructor creates a new instance of the DisjointBerthSchedule class
+        /// This constructor creates a new instance of the \c DisjointBerthTimeSchedule class
         /// by copying the contents of another instance.
         ///
-        /// @param other The DisjointBerthSchedule instance to copy from.
-        DisjointBerthSchedule(const DisjointBerthSchedule& other) = default;
+        /// @param other The \c DisjointBerthTimeSchedule instance to copy from.
+        DisjointBerthTimeSchedule(const DisjointBerthTimeSchedule& other) = default;
 
         /// @brief Move constructor.
         ///
-        /// This constructor creates a new instance of the DisjointBerthSchedule class
+        /// This constructor creates a new instance of the \c DisjointBerthTimeSchedule class
         /// by transferring ownership of the contents from another instance.
         ///
-        /// @param other The DisjointBerthSchedule instance to move from.
-        DisjointBerthSchedule(DisjointBerthSchedule&& other) noexcept = default;
+        /// @param other The \c DisjointBerthTimeSchedule instance to move from.
+        DisjointBerthTimeSchedule(DisjointBerthTimeSchedule&& other) noexcept = default;
 
         /// @brief Checks whether a given time interval is entirely free (unoccupied).
         ///
@@ -122,6 +124,35 @@ namespace dockalloc::solver
         void Clear() noexcept override
         {
             occupied_.clear();
+        }
+
+        [[nodiscard]] BerthTimeScheduleGap<TimeType>
+        FindGap(TimeType earliest_start, TimeType length) const noexcept override
+        {
+            const TimeInterval<TimeType> probe{earliest_start, earliest_start};
+            auto it = occupied_.lower_bound(probe);
+
+            TimeType cursor = earliest_start;
+            if (it != occupied_.end() && it->GetStart() <= cursor && cursor <= it->GetEnd())
+            {
+                cursor = it->GetEnd() + 1;
+                it = std::next(it);
+            }
+
+            for (; it != occupied_.end(); ++it)
+            {
+                TimeType gap_start = cursor;
+                TimeType next_occ_start = it->GetStart();
+
+                if (next_occ_start - gap_start >= length)
+                {
+                    TimeType gap_end = next_occ_start - 1;
+                    return BerthTimeScheduleGap<TimeType>(gap_start, gap_end);
+                }
+                cursor = std::max(cursor, it->GetEnd() + 1);
+            }
+
+            return BerthTimeScheduleGap<TimeType>(cursor, std::nullopt);
         }
 
     private:
