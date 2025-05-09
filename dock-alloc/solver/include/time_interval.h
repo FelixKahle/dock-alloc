@@ -4,120 +4,110 @@
 #define DOCK_ALLOC_SOLVER_TIME_INTERVAL_H_
 
 #include <type_traits>
+#include <concepts>
 #include <algorithm>
 #include <optional>
 #include "absl/strings/str_format.h"
 
 namespace dockalloc::solver
 {
-    /// @brief Represents a closed time interval [\p start, \p end].
-    ///
-    /// The \c TimeInterval class models a closed interval of time, where both the \p start and \p end
-    /// points are inclusive. It is a value-type utility that can be used to represent periods,
-    /// ranges, or durations in a consistent and type-safe manner.
-    ///
-    /// The constructor automatically normalizes the interval by ensuring that the \p start is always
-    /// less than or equal to the \p end, regardless of the order of inputs. This guarantees a well-formed
-    /// interval without requiring the caller to pre-sort the values.
-    ///
-    /// The class is immutable after construction: assignment operators are explicitly deleted to
-    /// prevent reassigning the time interval after creation. However, copying and moving at
-    /// construction time are allowed, making it safe to pass \c TimeInterval objects by value.
-    ///
-    /// @tparam TimeType A scalar arithmetic type representing time values (e.g., \c int, \c float, \c double).
-    ///
-    /// @author Felix Kahle (felix.kahle21@gmail.com)
     template <typename TimeType>
-        requires std::is_arithmetic_v<TimeType>
+        requires std::unsigned_integral<TimeType>
     class TimeInterval
     {
     public:
         /// @brief Copy constructor.
         ///
-        /// Constructs a new \c TimeInterval object as a copy of an existing one.
+        /// Constructs the interval by copying another \c TimeInterval.
         ///
-        /// @param other The \c TimeInterval object to copy.
-        constexpr TimeInterval(const TimeInterval& other) noexcept = default;
+        /// @param other The \c TimeInterval to copy.
+        constexpr TimeInterval(const TimeInterval& other) = default;
 
         /// @brief Move constructor.
         ///
-        /// Constructs a new \c TimeInterval object by moving an existing one.
+        /// Constructs the interval by moving another \c TimeInterval.
         ///
-        /// @param other The \c TimeInterval object to move.
-        constexpr TimeInterval(TimeInterval&& other) noexcept = default;
+        /// @param other The \c TimeInterval to move.
+        constexpr TimeInterval(TimeInterval&& other) = default;
 
-        /// @brief Constructs a \c TimeInterval object with the specified \a start and \a end times.
+        /// @brief Constructor.
         ///
-        /// The constructor takes two time values and normalizes the interval by ensuring that
-        /// the \p start time is less than or equal to the \p end time.
+        /// Constructs the interval with the given start and end times.
+        /// The start time is inclusive, and the end time is exclusive, and the
+        /// constructor ensures that the start time is less than or equal to the end time.
+        /// If the start time is greater than the end time, they are swapped.
         ///
-        /// @param start The start time of the interval.
-        /// @param end The end time of the interval.
-        constexpr explicit TimeInterval(const TimeType start, const TimeType end) noexcept :
-            start_(std::min(start, end)), end_(std::max(start, end))
+        /// @param inclusive_start The start time of the interval (inclusive).
+        /// @param exclusive_end The end time of the interval (exclusive).
+        constexpr explicit TimeInterval(const TimeType inclusive_start, const TimeType exclusive_end)
+            : start_time_inclusive_(std::min<TimeType>(inclusive_start, exclusive_end)),
+              end_time_exclusive_(std::max<TimeType>(inclusive_start, exclusive_end))
         {
         }
 
-        /// @brief Getter for the start time of the interval.
+        /// @brief Getter for the start time.
         ///
-        /// Returns the start time of the interval.
+        /// Returns the inclusive start time of the interval.
         ///
-        /// @return The start time of the interval.
+        ///@return The inclusive start time of the interval.
         [[nodiscard]] constexpr TimeType GetStart() const noexcept
         {
-            return start_;
+            return start_time_inclusive_;
         }
 
-        /// @brief Getter for the end time of the interval.
+        /// @brief Getter for the end time.
         ///
-        /// Returns the end time of the interval.
+        /// Returns the exclusive end time of the interval.
         ///
-        /// @return The end time of the interval.
+        ///@return The exclusive end time of the interval.
         [[nodiscard]] constexpr TimeType GetEnd() const noexcept
         {
-            return end_;
+            return end_time_exclusive_;
         }
 
-        /// @brief Getter for the duration of the interval.
+        /// @brief Computes the midpoint of the interval.
         ///
-        /// Returns the duration of the interval, which is the difference between the end and start times.
+        /// Returns the midpoint of the interval, which is the average of the start and end times.
+        /// This method is safe from unsigned integer overflow.
         ///
-        /// @return The duration of the interval.
-        [[nodiscard]] constexpr TimeType GetDuration() const noexcept
+        /// @tparam ReturnTimeType The type of the return value. It must be an arithmetic type.
+        ///
+        /// @return The midpoint of the interval.
+        template <typename ReturnTimeType = TimeType>
+            requires std::is_arithmetic_v<ReturnTimeType>
+        [[nodiscard]] constexpr ReturnTimeType Midpoint() const noexcept
         {
-            return end_ - start_;
+            return static_cast<ReturnTimeType>(start_time_inclusive_) + static_cast<ReturnTimeType>(end_time_exclusive_
+                - start_time_inclusive_) / ReturnTimeType{2};
         }
 
         /// @brief Checks if the interval is empty.
         ///
-        /// Returns \c true if the interval is empty (i.e., start and end times are equal), \c false otherwise.
+        /// An interval is considered empty if its inclusive start time is equal to its exclusive end time,
+        /// meaning it spans zero units of time.
+        ///
+        /// @return \c true if the interval is empty, \c false otherwise.
         [[nodiscard]] constexpr bool IsEmpty() const noexcept
         {
-            return start_ == end_;
+            return start_time_inclusive_ == end_time_exclusive_;
         }
 
-        /// @brief Gets the midpoint of the interval.
+        /// @brief Computes the duration of the interval.
         ///
-        /// Returns the midpoint of the interval, which is calculated as the average of the start and end times.
+        /// Returns the duration of the interval as the difference between the exclusive end
+        /// and the inclusive start. For a half-open interval \c [start, end), the result is
+        /// guaranteed to be non-negative.
         ///
-        /// @return The midpoint of the interval.
-        [[nodiscard]] constexpr TimeType GetMidpoint() const noexcept
+        /// @return The duration of the interval.
+        [[nodiscard]] constexpr TimeType Duration() const noexcept
         {
-            // floating point types do not overflow.
-            // dividing them this way will yield more accurate results.
-            if constexpr (std::is_floating_point_v<TimeType>)
-            {
-                return (start_ + end_) / static_cast<TimeType>(2);
-            }
-            else
-            {
-                return start_ + (end_ - start_) / 2;
-            }
+            return end_time_exclusive_ - start_time_inclusive_;
         }
 
         /// @brief Checks if a given time value is contained within the interval.
         ///
-        /// Returns \c true if the specified time value is within the interval (inclusive), \c false otherwise.
+        /// Returns \c true if the specified time value is within the interval (inclusive start, exclusive end),
+        /// \c false otherwise.
         ///
         /// @tparam OtherTimeType The time type of the value to check.
         ///
@@ -125,27 +115,27 @@ namespace dockalloc::solver
         ///
         /// @return \c true if the value is contained within the interval, \c false otherwise.
         template <typename OtherTimeType>
-            requires std::is_arithmetic_v<OtherTimeType>
+            requires std::convertible_to<OtherTimeType, TimeType>
         [[nodiscard]] bool Contains(OtherTimeType value) const noexcept
         {
-            return value >= start_ && value <= end_;
+            return value >= start_time_inclusive_ && value < end_time_exclusive_;
         }
 
-        /// @brief Checks whether this interval fully contains another interval.
+        /// @brief Checks if another interval is fully contained within this interval.
         ///
-        /// Returns \c true if the entire \p other interval lies within the bounds
-        /// of this interval (i.e., its start is not before this start, and its end is not after this end).
+        /// For half-open intervals [start, end), this method returns \c true if the other interval's
+        /// start is greater than or equal to this interval's start, and its end is less than or equal to this interval's end.
         ///
-        /// @tparam OtherTimeType The arithmetic type of the other interval's time values.
-        ///
+        /// @tparam OtherTimeType The time type of the other interval.
         /// @param other The interval to check for containment.
         ///
-        /// @return \c true if this interval fully contains the \p other interval, \c false otherwise.
+        /// @return \c true if \p other is fully contained within this interval, \c false otherwise.
         template <typename OtherTimeType>
-            requires std::is_arithmetic_v<OtherTimeType>
-        [[nodiscard]] constexpr bool Contains(const TimeInterval<OtherTimeType>& other) const noexcept
+            requires std::convertible_to<OtherTimeType, TimeType>
+        [[nodiscard]] constexpr bool ContainsInterval(const TimeInterval<OtherTimeType>& other) const noexcept
         {
-            return Contains(other.start_) && Contains(other.end_);
+            return other.start_time_inclusive_ >= start_time_inclusive_
+                && other.end_time_exclusive_ <= end_time_exclusive_;
         }
 
         /// @brief Checks whether this time interval intersects with another time interval.
@@ -158,31 +148,36 @@ namespace dockalloc::solver
             requires std::is_arithmetic_v<OtherTimeType>
         [[nodiscard]] constexpr bool Intersects(const TimeInterval<OtherTimeType>& other) const noexcept
         {
-            return !(end_ < other.start_ || other.end_ < start_);
+            return std::max(start_time_inclusive_, static_cast<TimeType>(other.GetStart())) <
+                std::min(end_time_exclusive_, static_cast<TimeType>(other.GetEnd()));
         }
 
         /// @brief Returns the intersection of this \c TimeInterval with another \c TimeInterval.
         ///
         /// @tparam OtherTimeType The type of the other \c TimeInterval.
+        /// @tparam ReturnTimeType The type of the return value. Must be an unsigned integral type.
         ///
         /// @param other The other \c TimeInterval to find the intersection with.
         ///
         /// @note If the intervals do not intersect, this function returns an empty \c std::optional.
         ///
         /// @return \c std::optional<TimeInterval> with the intersection interval, or empty if they do not intersect.
-        template <typename OtherTimeType>
-            requires std::is_arithmetic_v<OtherTimeType>
-        [[nodiscard]] constexpr std::optional<TimeInterval> Intersection(
+        template <typename OtherTimeType, typename ReturnTimeType = TimeType>
+            requires std::unsigned_integral<OtherTimeType> && std::unsigned_integral<ReturnTimeType>
+        [[nodiscard]] constexpr std::optional<TimeInterval<ReturnTimeType>> Intersection(
             const TimeInterval<OtherTimeType>& other) const noexcept
         {
-            if (!Intersects(other))
+            const ReturnTimeType start = std::max(static_cast<ReturnTimeType>(start_time_inclusive_),
+                                                  static_cast<ReturnTimeType>(other.GetStart()));
+            const ReturnTimeType end = std::min(static_cast<ReturnTimeType>(end_time_exclusive_),
+                                                static_cast<ReturnTimeType>(other.GetEnd()));
+
+            if (start >= end)
             {
-                return {};
+                return std::nullopt;
             }
 
-            TimeType start = std::max(start_, static_cast<TimeType>(other.start_));
-            TimeType end = std::min(end_, static_cast<TimeType>(other.end_));
-            return TimeInterval(start, end);
+            return TimeInterval<ReturnTimeType>(start, end);
         }
 
         /// @brief Returns a new \c TimeInterval shifted by a specified value.
@@ -193,37 +188,70 @@ namespace dockalloc::solver
         ///
         /// @return A new shifted \c TimeInterval object.
         template <typename OtherTimeType>
-            requires std::is_arithmetic_v<OtherTimeType>
+            requires std::is_convertible_v<OtherTimeType, TimeType>
         [[nodiscard]] constexpr TimeInterval<decltype(TimeType{} + OtherTimeType{})> ShiftBy(
             OtherTimeType delta) const noexcept
         {
             using R = decltype(TimeType{} + OtherTimeType{});
-            return TimeInterval<R>(start_ + delta, end_ + delta);
+            return TimeInterval<R>(start_time_inclusive_ + delta, end_time_exclusive_ + delta);
         }
 
         /// @brief Clamps the \c TimeInterval to fit within a specified boundary.
         ///
+        /// The resulting interval is the intersection of this interval with the boundary.
+        /// If there is no overlap, returns \c std::nullopt.
+        ///
         /// @tparam OtherTimeType The type of the boundary \c TimeInterval.
         ///
-        /// @param boundary The boundary \c TimeInterval to clamp to.
-        ///
-        /// @note This function returns \c std::optional<TimeInterval> to indicate whether the clamping was successful.
-        ///
-        /// @return \c std::optional<TimeInterval> if successful, or an empty optional if failed.
+        /// @return \c std::optional<TimeInterval> if overlap exists, or std::nullopt otherwise.
         template <typename OtherTimeType>
             requires std::is_arithmetic_v<OtherTimeType>
-        [[nodiscard]] constexpr std::optional<TimeInterval> Clamp(
+        [[nodiscard]] constexpr std::optional<TimeInterval<TimeType>> Clamp(
             const TimeInterval<OtherTimeType>& boundary) const noexcept
         {
-            const TimeType clamped_start = std::max(start_, static_cast<TimeType>(boundary.start_));
-            const TimeType clamped_end = std::min(end_, static_cast<TimeType>(boundary.end_));
+            const TimeType clamped_start = std::max(start_time_inclusive_, static_cast<TimeType>(boundary.GetStart()));
+            const TimeType clamped_end = std::min(end_time_exclusive_, static_cast<TimeType>(boundary.GetEnd()));
 
-            if (clamped_start > clamped_end)
+            if (clamped_start >= clamped_end)
             {
-                return {};
+                return std::nullopt;
             }
 
-            return TimeInterval(clamped_start, clamped_end);
+            return TimeInterval<TimeType>(clamped_start, clamped_end);
+        }
+
+
+        /// @brief Compares two intervals for equality.
+        ///
+        /// Compares the start and end times of two intervals to determine if they are equal.
+        /// Two intervals are considered equal if their start and end times are the same.
+        ///
+        /// @param lhs The left-hand side interval.
+        /// @param rhs The right-hand side interval.
+        ///
+        /// @return \c true if the intervals are equal, \c false otherwise.
+        template <typename OtherTimeType>
+            requires std::is_arithmetic_v<OtherTimeType>
+        friend constexpr bool operator ==(const TimeInterval& lhs, const TimeInterval<OtherTimeType>& rhs) noexcept
+        {
+            return lhs.start_time_inclusive_ == rhs.start_time_inclusive_
+                && lhs.end_time_exclusive_ == rhs.end_time_exclusive_;
+        }
+
+        /// @brief Compares two intervals for inequality.
+        ///
+        /// Compares the start and end times of two intervals to determine if they are not equal.
+        /// Two intervals are considered not equal if their start or end times are different.
+        ///
+        /// @param lhs The left-hand side interval.
+        /// @param rhs The right-hand side interval.
+        ///
+        /// @return \c true if the intervals are not equal, \c false otherwise.
+        template <typename OtherTimeType>
+            requires std::is_arithmetic_v<OtherTimeType>
+        friend constexpr bool operator !=(const TimeInterval& lhs, const TimeInterval<OtherTimeType>& rhs) noexcept
+        {
+            return !(lhs == rhs);
         }
 
         /// @brief Hash function for \c absl::flat_hash_* containers.
@@ -236,63 +264,28 @@ namespace dockalloc::solver
         template <typename H>
         friend constexpr H AbslHashValue(H h, const TimeInterval& time_interval) noexcept
         {
-            return H::combine(std::move(h), time_interval.start_, time_interval.end_);
+            return H::combine(std::move(h), time_interval.start_time_inclusive_, time_interval.end_time_exclusive_);
         }
 
-        /// @brief Equality operator.
-        ///
-        /// Compares two \c TimeInterval objects for equality.
-        /// Two intervals are considered equal if their start and end times are the same.
-        ///
-        /// @param lhs The left-hand side \c TimeInterval object.
-        /// @param rhs The right-hand side \c TimeInterval object.
-        ///
-        /// @return \c true if the intervals are equal, \c false otherwise.
-        template <typename OtherTimeType>
-            requires std::is_arithmetic_v<OtherTimeType>
-        friend constexpr bool operator==(const TimeInterval& lhs, const TimeInterval<OtherTimeType>& rhs) noexcept
-        {
-            return lhs.start_ == rhs.start_ && lhs.end_ == rhs.end_;
-        }
-
-        /// @brief Inequality operator.
-        ///
-        /// Compares two \c TimeInterval objects for inequality.
-        /// Two intervals are considered unequal if their start or end times differ.
-        ///
-        /// @param lhs The left-hand side \c TimeInterval object.
-        /// @param rhs The right-hand side \c TimeInterval object.
-        ///
-        /// @return \c true if the intervals are not equal, \c false otherwise.
-        template <typename OtherTimeType>
-            requires std::is_arithmetic_v<OtherTimeType>
-        friend constexpr bool operator!=(const TimeInterval& lhs, const TimeInterval<OtherTimeType>& rhs) noexcept
-        {
-            return !(lhs == rhs);
-        }
+        TimeInterval& operator=(const TimeInterval&) = delete;
+        TimeInterval& operator=(TimeInterval&&) = delete;
 
         /// @brief Absl::Format function for stringification.
         ///
         /// This function allows the \c TimeInterval object to be formatted as a string using
-        /// the \c absl::Format function.
+        /// the \c absl::Format function. Formats the interval as "[start, end)".
         ///
         /// @param sink The sink to which the formatted string will be written.
         /// @param interval The \c TimeInterval object to format.
         template <typename Sink>
         friend void AbslStringify(Sink& sink, const TimeInterval& interval) noexcept
         {
-            absl::Format(&sink, "[%v, %v]", interval.start_, interval.end_);
+            absl::Format(&sink, "[%v, %v)", interval.start_time_inclusive_, interval.end_time_exclusive_);
         }
 
-        // Delete copy and move assignment operators to prevent reassigning the interval.
-        // The TimeInterval class is designed to be immutable after construction.
-
-        TimeInterval& operator=(const TimeInterval& other) noexcept = delete;
-        TimeInterval& operator=(TimeInterval&& other) noexcept = delete;
-
     private:
-        TimeType start_;
-        TimeType end_;
+        TimeType start_time_inclusive_;
+        TimeType end_time_exclusive_;
     };
 }
 

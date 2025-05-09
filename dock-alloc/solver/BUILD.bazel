@@ -3,8 +3,6 @@
 cc_library(
     name = "solver",
     hdrs = [
-        "include/berth_time_schedule.h",
-        "include/disjoint_berth_time_schedule.h",
         "include/time_interval.h",
     ],
     include_prefix = "dockalloc/solver",
@@ -21,7 +19,6 @@ cc_library(
 cc_test(
     name = "solver-test",
     srcs = [
-        "test/disjoint_berth_time_schedule_test.cc",
         "test/time_interval_test.cc",
     ],
     deps = [

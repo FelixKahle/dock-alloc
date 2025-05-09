@@ -5,144 +5,115 @@
 
 namespace dockalloc::solver
 {
-    TEST(TimeInterval, InitializesCorrectly)
-    {
-        constexpr TimeInterval<uint32_t> first_interval(1, 5);
-        EXPECT_EQ(first_interval.GetStart(), 1);
-        EXPECT_EQ(first_interval.GetEnd(), 5);
-
-        constexpr TimeInterval<uint32_t> second_interval(10, 8);
-        EXPECT_EQ(second_interval.GetStart(), 8);
-        EXPECT_EQ(second_interval.GetEnd(), 10);
-
-        constexpr TimeInterval<uint32_t> third_interval = first_interval;
-        EXPECT_EQ(third_interval.GetStart(), 1);
-        EXPECT_EQ(third_interval.GetEnd(), 5);
-
-        constexpr auto fourth_interval = TimeInterval<uint32_t>(1, 5);
-        EXPECT_EQ(fourth_interval.GetStart(), 1);
-        EXPECT_EQ(fourth_interval.GetEnd(), 5);
-    }
-
-    TEST(TimeInterval, Duration)
-    {
-        constexpr TimeInterval<uint32_t> first_interval(1, 5);
-        EXPECT_EQ(first_interval.GetDuration(), 4);
-
-        constexpr TimeInterval<uint32_t> second_interval(10, 10);
-        EXPECT_EQ(second_interval.GetDuration(), 0);
-    }
-
-    TEST(TimeInterval, Midpoint)
-    {
-        constexpr TimeInterval<uint32_t> int_interval(2, 6);
-        EXPECT_EQ(int_interval.GetMidpoint(), 4);
-
-        constexpr TimeInterval<float> float_interval(2.5, 7.5);
-        EXPECT_DOUBLE_EQ(float_interval.GetMidpoint(), 5.0);
-    }
-
-    TEST(TimeInterval, IsEmpty)
-    {
-        constexpr TimeInterval<uint32_t> interval(3, 3);
-        EXPECT_TRUE(interval.IsEmpty());
-
-        constexpr TimeInterval<uint32_t> non_empty(2, 5);
-        EXPECT_FALSE(non_empty.IsEmpty());
-    }
-
-    TEST(TimeInterval, EqualityAndInequality)
-    {
-        constexpr TimeInterval<uint32_t> a(1, 5);
-        constexpr TimeInterval<uint32_t> b(1, 5);
-        constexpr TimeInterval<uint32_t> c(2, 6);
-
-        EXPECT_TRUE(a == b);
-        EXPECT_FALSE(a != b);
-        EXPECT_FALSE(a == c);
-        EXPECT_TRUE(a != c);
-    }
-
-    TEST(TimeInterval, ContainsPoint)
-    {
-        constexpr TimeInterval<uint32_t> interval(3, 7);
-
-        EXPECT_TRUE(interval.Contains(3));
-        EXPECT_TRUE(interval.Contains(5));
-        EXPECT_TRUE(interval.Contains(7));
-        EXPECT_FALSE(interval.Contains(2));
-        EXPECT_FALSE(interval.Contains(8));
-    }
-
-    TEST(TimeInterval, ContainsInterval)
-    {
-        constexpr TimeInterval<uint32_t> outer(2, 10);
-        constexpr TimeInterval<uint32_t> inner(4, 8);
-        constexpr TimeInterval<uint32_t> edge_touch(2, 10);
-        constexpr TimeInterval<uint32_t> outside(0, 11);
-
-        EXPECT_TRUE(outer.Contains(inner));
-        EXPECT_TRUE(outer.Contains(edge_touch));
-        EXPECT_FALSE(outer.Contains(outside));
-    }
-
-    TEST(TimeInterval, Intersects)
-    {
-        constexpr TimeInterval<uint32_t> a(1, 5);
-        constexpr TimeInterval<uint32_t> b(4, 8);
-        constexpr TimeInterval<uint32_t> c(6, 9);
-        constexpr TimeInterval<uint32_t> d(5, 5);
-
-        EXPECT_TRUE(a.Intersects(b));
-        EXPECT_FALSE(a.Intersects(c));
-        EXPECT_TRUE(a.Intersects(d));
-    }
-
-    TEST(TimeInterval, Intersection)
-    {
-        constexpr TimeInterval<uint32_t> a(1, 5);
-        constexpr TimeInterval<uint32_t> b(3, 7);
-
-        constexpr auto result = a.Intersection(b);
-
-        ASSERT_TRUE(result.has_value());
-        EXPECT_EQ(result->GetStart(), 3);
-        EXPECT_EQ(result->GetEnd(), 5);
-
-        constexpr TimeInterval<uint32_t> c(6, 8);
-        constexpr auto no_result = a.Intersection(c);
-
-        EXPECT_FALSE(no_result.has_value());
-    }
-
-    TEST(TimeInterval, ShiftBy)
+    TEST(TimeIntervalTest, ConstructsCorrectly)
     {
         constexpr TimeInterval<uint32_t> interval(5, 10);
-        constexpr auto shifted = interval.ShiftBy(3);
-
-        EXPECT_EQ(shifted.GetStart(), 8);
-        EXPECT_EQ(shifted.GetEnd(), 13);
+        EXPECT_EQ(interval.GetStart(), 5);
+        EXPECT_EQ(interval.GetEnd(), 10);
     }
 
-    TEST(TimeInterval, Clamp)
+    TEST(TimeIntervalTest, MidpointIsCorrect)
     {
-        constexpr TimeInterval<uint32_t> source(5, 15);
-        constexpr TimeInterval<uint32_t> bounds(8, 12);
-        constexpr auto clamped = source.Clamp(bounds);
+        constexpr TimeInterval<uint32_t> interval1(10, 20);
+        EXPECT_EQ(interval1.Midpoint(), 15);
 
-        ASSERT_TRUE(clamped.has_value());
-        EXPECT_EQ(clamped->GetStart(), 8);
-        EXPECT_EQ(clamped->GetEnd(), 12);
-
-        constexpr TimeInterval<uint32_t> outside(1, 3);
-        constexpr auto fail = outside.Clamp(bounds);
-        EXPECT_FALSE(fail.has_value());
+        constexpr TimeInterval<uint32_t> interval2(5, 10);
+        EXPECT_EQ(interval2.Midpoint<double>(), 7.5);
     }
 
-    TEST(TimeInterval, AbslStringify)
+    TEST(TimeIntervalTest, IsEmptyIsCorrect)
     {
-        constexpr TimeInterval<uint32_t> interval(4, 10);
-        const std::string formatted = absl::StrFormat("%v", interval);
-        EXPECT_EQ(formatted, "[4, 10]");
+        constexpr TimeInterval<uint32_t> interval1(5, 10);
+        EXPECT_FALSE(interval1.IsEmpty());
+
+        constexpr TimeInterval<uint32_t> interval2(5, 5);
+        EXPECT_TRUE(interval2.IsEmpty());
+    }
+
+    TEST(TimeIntervalTest, DurationIsCorrect)
+    {
+        constexpr TimeInterval<uint32_t> interval(5, 10);
+        EXPECT_EQ(interval.Duration(), 5);
+    }
+
+    TEST(TimeIntervalTest, ContainsIsCorrect)
+    {
+        constexpr TimeInterval<uint32_t> interval(2, 100);
+        for (uint32_t i = 2; i < 100; ++i)
+        {
+            EXPECT_TRUE(interval.Contains(i));
+        }
+        EXPECT_FALSE(interval.Contains(1));
+        EXPECT_FALSE(interval.Contains(100));
+        EXPECT_FALSE(interval.Contains(101));
+    }
+
+    TEST(TimeIntervalTest, ContainsIntervalIsCorrect)
+    {
+        constexpr TimeInterval<uint32_t> interval1(2, 100);
+        constexpr TimeInterval<uint32_t> interval2(5, 10);
+
+        EXPECT_TRUE(interval1.ContainsInterval(interval2));
+        EXPECT_FALSE(interval2.ContainsInterval(interval1));
+
+        constexpr TimeInterval<uint32_t> interval3(5, 105);
+        EXPECT_FALSE(interval1.ContainsInterval(interval3));
+    }
+
+    TEST(TimeIntervalTest, IntersectsIsCorrect)
+    {
+        constexpr TimeInterval<uint32_t> interval1(2, 100);
+        constexpr TimeInterval<uint32_t> interval2(5, 10);
+        EXPECT_TRUE(interval1.Intersects(interval2));
+
+        constexpr TimeInterval<uint32_t> interval3(101, 200);
+        EXPECT_FALSE(interval1.Intersects(interval3));
+    }
+
+    TEST(TimeIntervalTest, IntersectionIsCorrect)
+    {
+        constexpr TimeInterval<uint32_t> interval1(2, 100);
+        constexpr TimeInterval<uint32_t> interval2(5, 10);
+        constexpr auto intersection = interval1.Intersection(interval2);
+
+        ASSERT_TRUE(intersection.has_value());
+        EXPECT_EQ(intersection->GetStart(), 5);
+        EXPECT_EQ(intersection->GetEnd(), 10);
+
+        constexpr TimeInterval<uint32_t> interval3(101, 200);
+        constexpr auto empty_intersection = interval1.Intersection(interval3);
+
+        EXPECT_FALSE(empty_intersection.has_value());
+    }
+
+    TEST(TimeIntervalTest, ShiftByIsCorrect)
+    {
+        constexpr TimeInterval<uint32_t> interval(5, 10);
+        constexpr auto shifted_interval = interval.ShiftBy(3);
+
+        EXPECT_EQ(shifted_interval.GetStart(), 8);
+        EXPECT_EQ(shifted_interval.GetEnd(), 13);
+    }
+
+    TEST(TimeIntervalTest, ClampIsCorrect)
+    {
+        constexpr TimeInterval<uint32_t> interval(5, 10);
+        constexpr TimeInterval<uint32_t> boundary(7, 12);
+        constexpr auto clamped_interval = interval.Clamp(boundary);
+
+        ASSERT_TRUE(clamped_interval.has_value());
+        EXPECT_EQ(clamped_interval->GetStart(), 7);
+        EXPECT_EQ(clamped_interval->GetEnd(), 10);
+
+        constexpr TimeInterval<uint32_t> no_overlap_boundary(11, 15);
+        constexpr auto no_overlap_clamp = interval.Clamp(no_overlap_boundary);
+
+        EXPECT_FALSE(no_overlap_clamp.has_value());
+
+        constexpr TimeInterval<uint32_t> interval2(10, 20);
+        constexpr TimeInterval<uint32_t> empty_boundary(15, 15);
+        constexpr auto result = interval2.Clamp(empty_boundary);
+
+        EXPECT_FALSE(result.has_value());
     }
 }
