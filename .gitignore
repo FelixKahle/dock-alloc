@@ -38,3 +38,4 @@ user.bazelrc
 *.DS_Store
 # MODULE.bazel.lock
 MODULE.bazel.lock
+.bazelrc
