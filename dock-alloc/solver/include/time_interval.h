@@ -1,7 +1,7 @@
 // Copyright 2025 Felix Kahle. All rights reserved.
 
-#ifndef DOCK_ALLOC_SOLVER_INCLUDE_TIME_INTERVAL_H_
-#define DOCK_ALLOC_SOLVER_INCLUDE_TIME_INTERVAL_H_
+#ifndef DOCK_ALLOC_SOLVER_TIME_INTERVAL_H_
+#define DOCK_ALLOC_SOLVER_TIME_INTERVAL_H_
 
 #include <type_traits>
 #include <algorithm>
@@ -293,34 +293,6 @@ namespace dockalloc::solver
     private:
         TimeType start_;
         TimeType end_;
-    };
-
-    /// @brief Comparator for sorting time intervals by their start time.
-    ///
-    /// This struct provides a comparison operator that can be used to sort \c TimeInterval objects
-    /// based on their start times. It is useful for algorithms that require ordering of time intervals.
-    ///
-    /// @tparam LhsTimeType The time type of the left-hand side interval.
-    /// @tparam RhsTimeType The time type of the right-hand side interval.
-    ///
-    /// @author Felix Kahle (felix.kahle21@gmail.com)
-    template <typename LhsTimeType, typename RhsTimeType>
-        requires std::is_arithmetic_v<LhsTimeType> && std::is_arithmetic_v<RhsTimeType>
-    struct CompareTimeIntervalByStart
-    {
-        /// @brief Invokes the comparison operator.
-        ///
-        /// This function compares two \c TimeInterval objects based on their start times.
-        ///
-        /// @param lhs The left-hand side \c TimeInterval object.
-        /// @param rhs The right-hand side \c TimeInterval object.
-        ///
-        /// @return \c true if the start time of \p lhs is less than that of \p rhs, \c false otherwise.
-        [[nodiscard]] constexpr bool operator()(const TimeInterval<LhsTimeType>& lhs,
-                                                const TimeInterval<RhsTimeType>& rhs) const
-        {
-            return lhs.GetStart() < rhs.GetStart();
-        }
     };
 }
 
