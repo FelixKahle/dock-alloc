@@ -20,6 +20,6 @@ jobs:
           repository-cache: true
 
       - name: Run Bazel Build
-        run: bazel build //...
+        run: bazel build //... --cxxopt='-std=c++23'
       - name: Run Bazel Test
-        run: bazel test //... --test_output=all
+        run: bazel test //... --cxxopt='-std=c++23' --test_output=all
