@@ -9,6 +9,7 @@ cc_library(
     strip_include_prefix = "include",
     visibility = ["//visibility:public"],
     deps = [
+        "//third_party/xsimd",
         "@abseil-cpp//absl/container:btree",
         "@abseil-cpp//absl/log:check",
         "@abseil-cpp//absl/log:log",
