@@ -3,6 +3,7 @@
 cc_library(
     name = "solver",
     hdrs = [
+        "include/slot_timeline.h",
         "include/time_interval.h",
     ],
     include_prefix = "dockalloc/solver",
@@ -20,6 +21,7 @@ cc_library(
 cc_test(
     name = "solver-test",
     srcs = [
+        "test/slot_timeline_test.cc",
         "test/time_interval_test.cc",
     ],
     deps = [
