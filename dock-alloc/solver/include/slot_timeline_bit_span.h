@@ -66,7 +66,7 @@ namespace dockalloc::solver
         explicit SlotTimelineBitSpan(Storage* const data, const size_t word_count) noexcept
             : data_(data), word_count_(word_count)
         {
-            DCHECK_NE(data, nullptr) << "Data pointer cannot be null";
+            DCHECK_NE(data, nullptr);
         }
 
         /// @brief Constructor.
@@ -77,6 +77,7 @@ namespace dockalloc::solver
         explicit SlotTimelineBitSpan(std::vector<Storage>& vec) noexcept
             : data_(vec.data()), word_count_(vec.size())
         {
+            DCHECK_NE(data_, nullptr);
         }
 
         /// @brief Constructor.
@@ -87,6 +88,7 @@ namespace dockalloc::solver
         explicit SlotTimelineBitSpan(std::span<Storage> span) noexcept
             : data_(span.data()), word_count_(span.size())
         {
+            DCHECK_NE(data_, nullptr);
         }
 
         /// @brief Getter for the data pointer.
@@ -116,9 +118,9 @@ namespace dockalloc::solver
         /// @param index The index of the bit to set.
         ///
         /// @pre The index must be within the bounds of the bit span.
-        void SetBit(const size_t index) noexcept
+        void SetBit(const size_t index) const noexcept
         {
-            DCHECK(index / kBitsPerWord < word_count_) << "Index out of bounds";
+            DCHECK_LT(index, word_count_ * kBitsPerWord);
 
             const size_t word = index / kBitsPerWord;
             const size_t bit = index % kBitsPerWord;
@@ -132,10 +134,10 @@ namespace dockalloc::solver
         /// @param range The range of bits to set.
         ///
         /// @pre Range must not be empty and must be within the bounds of the bit span.
-        void SetBitRange(const TimeSlotRange& range) noexcept
+        void SetBitRange(const TimeSlotRange& range) const noexcept
         {
-            DCHECK(!range.IsEmpty()) << "Range must not be empty";
-            DCHECK_LE(range.GetEnd(), word_count_ * kBitsPerWord) << "Index out of bounds";
+            DCHECK(!range.IsEmpty());
+            DCHECK_LE(range.GetEnd(), word_count_ * kBitsPerWord);
 
             const size_t first_word = range.GetStart() / kBitsPerWord;
             const size_t last_word = (range.GetEnd() - 1) / kBitsPerWord;
@@ -153,15 +155,17 @@ namespace dockalloc::solver
             // Head.
             data_[first_word] |= HighBitsFrom(start_bit);
 
+            const size_t second_word = first_word + 1;
+
 #if DOCK_ALLOC_SOLVER_SLOT_TIMELINE_BIT_SPAN_USE_SIMD
             SimdType ones = SimdType(~Storage{0});
 
             // aligned_last is the first word we cannot include in a full SIMD block
             // SIMD loop will process words in [first_word+1, aligned_last), step kSimdWidth
-            const size_t aligned_last = last_word - ((last_word - (first_word + 1)) % kSimdWidth);
+            const size_t aligned_last = last_word - ((last_word - second_word) % kSimdWidth);
 
             // SIMD over aligned region
-            for (size_t w = first_word + 1; w + kSimdWidth <= aligned_last; w += kSimdWidth)
+            for (size_t w = second_word; w + kSimdWidth <= aligned_last; w += kSimdWidth)
             {
                 xsimd::store_unaligned(&data_[w], ones);
             }
@@ -173,7 +177,7 @@ namespace dockalloc::solver
             }
 #else
             // scalar fallback
-            for (size_t w = first_word + 1; w < last_word; ++w)
+            for (size_t w = second_word; w < last_word; ++w)
             {
                 data_[w] = ~Storage{0};
             }
@@ -195,7 +199,7 @@ namespace dockalloc::solver
         /// @return \c true if the bit is set, \c false otherwise.
         [[nodiscard]] bool IsBitSet(const size_t index) const noexcept
         {
-            DCHECK(index / kBitsPerWord < word_count_) << "Index out of bounds";
+            DCHECK_LT(index, word_count_ * kBitsPerWord);
 
             const size_t word = index / kBitsPerWord;
             const size_t bit = index % kBitsPerWord;
@@ -213,8 +217,8 @@ namespace dockalloc::solver
         /// @return \c true if all bits in the range are set, \c false otherwise.
         [[nodiscard]] bool IsBitRangeSet(const TimeSlotRange& range) const noexcept
         {
-            DCHECK(!range.IsEmpty()) << "Range must not be empty";
-            DCHECK_LE(range.GetEnd(), word_count_ * kBitsPerWord) << "Index out of bounds";
+            DCHECK(!range.IsEmpty());
+            DCHECK_LE(range.GetEnd(), word_count_ * kBitsPerWord);
 
             const size_t first_word = range.GetStart() / kBitsPerWord;
             const size_t last_word = (range.GetEnd() - 1) / kBitsPerWord;
@@ -236,13 +240,15 @@ namespace dockalloc::solver
                 return false;
             }
 
+            const size_t second_word = first_word + 1;
+
 #if DOCK_ALLOC_SOLVER_SLOT_TIMELINE_BIT_SPAN_USE_SIMD
             // aligned_last is the first word we cannot include in a full SIMD block
             // SIMD loop will process words in [first_word+1, aligned_last), step kSimdWidth
-            const size_t aligned_last = last_word - ((last_word - (first_word + 1)) % kSimdWidth);
+            const size_t aligned_last = last_word - ((last_word - second_word) % kSimdWidth);
 
             // SIMD over aligned region
-            for (size_t w = first_word + 1; w + kSimdWidth <= aligned_last; w += kSimdWidth)
+            for (size_t w = second_word; w + kSimdWidth <= aligned_last; w += kSimdWidth)
             {
                 SimdType vec = xsimd::load_unaligned(&data_[w]);
                 if (!xsimd::all(vec == SimdType{~Storage{0}}))
@@ -260,7 +266,7 @@ namespace dockalloc::solver
                 }
             }
 #else
-            for (size_t w = first_word + 1; w < last_word; ++w)
+            for (size_t w = second_word; w < last_word; ++w)
             {
                 if (data_[w] != ~Storage{0})
                 {
@@ -284,8 +290,8 @@ namespace dockalloc::solver
         /// @return \c true if all bits in the range are clear, \c false otherwise.
         [[nodiscard]] bool IsBitRangeClear(const TimeSlotRange& range) const noexcept
         {
-            DCHECK(!range.IsEmpty()) << "Range must not be empty";
-            DCHECK_LE(range.GetEnd(), word_count_ * kBitsPerWord) << "Index out of bounds";
+            DCHECK(!range.IsEmpty());
+            DCHECK_LE(range.GetEnd(), word_count_ * kBitsPerWord);
 
             const size_t first_word = range.GetStart() / kBitsPerWord;
             const size_t last_word = (range.GetEnd() - 1) / kBitsPerWord;
@@ -307,13 +313,15 @@ namespace dockalloc::solver
                 return false;
             }
 
+            const size_t second_word = first_word + 1;
+
             // SIMD check of full words in the middle
 #if DOCK_ALLOC_SOLVER_SLOT_TIMELINE_BIT_SPAN_USE_SIMD
             // aligned_last is the first word we cannot include in a full SIMD block
             // SIMD loop will process words in [first_word+1, aligned_last), step kSimdWidth
-            const size_t aligned_last = last_word - ((last_word - (first_word + 1)) % kSimdWidth);
+            const size_t aligned_last = last_word - ((last_word - second_word) % kSimdWidth);
 
-            for (size_t w = first_word + 1; w + kSimdWidth <= aligned_last; w += kSimdWidth)
+            for (size_t w = second_word; w + kSimdWidth <= aligned_last; w += kSimdWidth)
             {
                 SimdType vec = xsimd::load_unaligned(&data_[w]);
                 if (!xsimd::all(vec == SimdType{0}))
@@ -331,7 +339,7 @@ namespace dockalloc::solver
             }
 #else
             // Scalar fallback: middle words must be entirely zero
-            for (size_t w = first_word + 1; w < last_word; ++w)
+            for (size_t w = second_word; w < last_word; ++w)
             {
                 if (data_[w] != Storage{0})
                 {
@@ -352,9 +360,9 @@ namespace dockalloc::solver
         /// @param index The index of the bit to clear.
         ///
         /// @pre The index must be within the bounds of the bit span.
-        void ClearBit(const size_t index) noexcept
+        void ClearBit(const size_t index) const noexcept
         {
-            DCHECK(index / kBitsPerWord < word_count_) << "Index out of bounds";
+            DCHECK_LT(index, word_count_ * kBitsPerWord);
 
             const size_t word = index / kBitsPerWord;
             const size_t bit = index % kBitsPerWord;
@@ -368,10 +376,10 @@ namespace dockalloc::solver
         /// @param range The range of bits to clear.
         ///
         /// @pre Range must not be empty and must be within the bounds of the bit span.
-        void ClearBitRange(const TimeSlotRange& range) noexcept
+        void ClearBitRange(const TimeSlotRange& range) const noexcept
         {
-            DCHECK(!range.IsEmpty()) << "Range must not be empty";
-            DCHECK_LE(range.GetEnd(), word_count_ * kBitsPerWord) << "Index out of bounds";
+            DCHECK(!range.IsEmpty());
+            DCHECK_LE(range.GetEnd(), word_count_ * kBitsPerWord);
 
             const size_t first_word = range.GetStart() / kBitsPerWord;
             const size_t last_word = (range.GetEnd() - 1) / kBitsPerWord;
@@ -389,15 +397,17 @@ namespace dockalloc::solver
             // Head.
             data_[first_word] &= ~HighBitsFrom(start_bit);
 
+            const size_t second_word = first_word + 1;
+
 #if DOCK_ALLOC_SOLVER_SLOT_TIMELINE_BIT_SPAN_USE_SIMD
             SimdType zeros = SimdType(Storage{0});
 
             // aligned_last is the first word we cannot include in a full SIMD block
             // SIMD loop will process words in [first_word+1, aligned_last), step kSimdWidth
-            const size_t aligned_last = last_word - ((last_word - (first_word + 1)) % kSimdWidth);
+            const size_t aligned_last = last_word - ((last_word - second_word) % kSimdWidth);
 
             // SIMD over aligned region
-            for (size_t w = first_word + 1; w + kSimdWidth <= aligned_last; w += kSimdWidth)
+            for (size_t w = second_word; w + kSimdWidth <= aligned_last; w += kSimdWidth)
             {
                 xsimd::store_unaligned(&data_[w], zeros);
             }
@@ -409,7 +419,7 @@ namespace dockalloc::solver
             }
 #else
             // scalar fallback
-            for (size_t w = first_word + 1; w < last_word; ++w)
+            for (size_t w = second_word; w < last_word; ++w)
             {
                 data_[w] = Storage{0};
             }
@@ -430,7 +440,7 @@ namespace dockalloc::solver
         /// @return \c true if the bit is cleared, \c false otherwise.
         [[nodiscard]] bool IsBitCleared(const size_t index) const noexcept
         {
-            DCHECK(index / kBitsPerWord < word_count_) << "Index out of bounds";
+            DCHECK_LT(index, word_count_ * kBitsPerWord);
 
             const size_t word = index / kBitsPerWord;
             const size_t bit = index % kBitsPerWord;
@@ -448,7 +458,7 @@ namespace dockalloc::solver
         /// @return \c true if the bit is set, \c false otherwise.
         [[nodiscard]] bool GetBit(const size_t index) const noexcept
         {
-            DCHECK(index / kBitsPerWord < word_count_) << "Index out of bounds";
+            DCHECK_LT(index, word_count_ * kBitsPerWord);
 
             size_t word = index / kBitsPerWord;
             size_t bit = index % kBitsPerWord;
@@ -463,9 +473,9 @@ namespace dockalloc::solver
         /// @param index The index of the bit to toggle.
         ///
         /// @pre The index must be within the bounds of the bit span.
-        void ToggleBit(const size_t index) noexcept
+        void ToggleBit(const size_t index) const noexcept
         {
-            DCHECK(index / kBitsPerWord < word_count_) << "Index out of bounds";
+            DCHECK_LT(index, word_count_ * kBitsPerWord);
 
             const size_t word = index / kBitsPerWord;
             const size_t bit = index % kBitsPerWord;
@@ -493,6 +503,8 @@ namespace dockalloc::solver
         /// This operator allows access to a specific bit in the bit span using the \c [] operator.
         ///
         /// @param index The index of the bit to access.
+        ///
+        /// @pre The index must be within the bounds of the bit span.
         [[nodiscard]] bool operator[](const size_t index) const noexcept
         {
             return GetBit(index);
@@ -519,7 +531,9 @@ namespace dockalloc::solver
         /// @return A bitmask with bits [\p bit, \c kBitsPerWord - 1] set to \c 1 and bits [0, \p bit - 1] set to \c 0.
         static constexpr Storage HighBitsFrom(const size_t bit) noexcept
         {
-            return bit < kBitsPerWord ? ~Storage{0} << bit : Storage{0};
+            DCHECK_LT(bit, kBitsPerWord);
+
+            return ~Storage{0} << bit;
         }
 
         /// @brief Creates a bitmask with all bits from the least significant bit up to and
@@ -535,7 +549,9 @@ namespace dockalloc::solver
         /// @return A bitmask with bits [0, \p bit] set to \c 1 and bits [\p bit + 1, \c kBitsPerWord - 1] set to \c 0.
         static constexpr Storage LowBitsTo(const size_t bit) noexcept
         {
-            return bit < kBitsPerWord ? (Storage{1} << (bit + 1)) - 1 : ~Storage{0};
+            DCHECK_LT(bit, kBitsPerWord);
+
+            return (Storage{1} << (bit + 1)) - 1;
         }
 
         /// @brief Creates a bitmask with all bits in the closed interval [\p from, \p to] set to 1.
@@ -550,9 +566,15 @@ namespace dockalloc::solver
         /// @param from The starting bit index of the interval (inclusive).
         /// @param to The ending bit index of the interval (inclusive).
         ///
+        /// @pre \p from and \p to must be less than \c kBitsPerWord.
+        ///
         /// @return A bitmask with bits [\p from, \p to] set to \c 1 and all other bits set to \c 0.
         static constexpr Storage BitsBetweenInclusive(const size_t from, const size_t to) noexcept
         {
+            DCHECK_LE(from, to);
+            DCHECK_LT(from, kBitsPerWord);
+            DCHECK_LT(to, kBitsPerWord);
+
             return HighBitsFrom(from) & LowBitsTo(to);
         }
 
