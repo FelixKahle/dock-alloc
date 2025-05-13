@@ -4,7 +4,9 @@ cc_library(
     name = "solver",
     hdrs = [
         "include/slot_timeline.h",
+        "include/slot_timeline_bit_span.h",
         "include/time_interval.h",
+        "include/time_slot_range.h",
     ],
     include_prefix = "dockalloc/solver",
     strip_include_prefix = "include",
@@ -21,8 +23,10 @@ cc_library(
 cc_test(
     name = "solver-test",
     srcs = [
+        "test/slot_timeline_bit_span.cc",
         "test/slot_timeline_test.cc",
         "test/time_interval_test.cc",
+        "test/time_slot_range_test.cc",
     ],
     deps = [
         "//dock-alloc/solver",
