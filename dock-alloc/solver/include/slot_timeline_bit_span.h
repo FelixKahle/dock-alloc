@@ -27,7 +27,7 @@ namespace dockalloc::solver
     ///
     /// This class provides an efficient, low-level interface to manipulate and query
     /// a contiguous range of bits. It does not own the underlying memory, but acts
-    /// as a view over externally managed bit storage (e.g., a bitmap vector).
+    /// as a view or editor over externally managed bit storage (e.g., a bitmap vector).
     ///
     /// The caller is responsible for ensuring the validity and lifetime of the underlying
     /// data pointer and for ensuring that \c word_count accurately reflects the storage size.
@@ -118,7 +118,7 @@ namespace dockalloc::solver
         /// @param index The index of the bit to set.
         ///
         /// @pre The index must be within the bounds of the bit span.
-        void SetBit(const size_t index) const noexcept
+        void SetBit(const size_t index) noexcept
         {
             DCHECK_LT(index, word_count_ * kBitsPerWord);
 
@@ -134,7 +134,7 @@ namespace dockalloc::solver
         /// @param range The range of bits to set.
         ///
         /// @pre Range must not be empty and must be within the bounds of the bit span.
-        void SetBitRange(const TimeSlotRange& range) const noexcept
+        void SetBitRange(const TimeSlotRange& range) noexcept
         {
             DCHECK(!range.IsEmpty());
             DCHECK_LE(range.GetEnd(), word_count_ * kBitsPerWord);
@@ -245,7 +245,7 @@ namespace dockalloc::solver
 #if DOCK_ALLOC_SOLVER_SLOT_TIMELINE_BIT_SPAN_USE_SIMD
             // aligned_last is the first word we cannot include in a full SIMD block
             // SIMD loop will process words in [first_word+1, aligned_last), step kSimdWidth
-            const size_t aligned_last = last_word - ((last_word - second_word) % kSimdWidth);
+            const size_t aligned_last = SimdLastAlignedWord(second_word, last_word);
 
             // SIMD over aligned region
             for (size_t w = second_word; w + kSimdWidth <= aligned_last; w += kSimdWidth)
@@ -319,7 +319,7 @@ namespace dockalloc::solver
 #if DOCK_ALLOC_SOLVER_SLOT_TIMELINE_BIT_SPAN_USE_SIMD
             // aligned_last is the first word we cannot include in a full SIMD block
             // SIMD loop will process words in [first_word+1, aligned_last), step kSimdWidth
-            const size_t aligned_last = last_word - ((last_word - second_word) % kSimdWidth);
+            const size_t aligned_last = SimdLastAlignedWord(second_word, last_word);
 
             for (size_t w = second_word; w + kSimdWidth <= aligned_last; w += kSimdWidth)
             {
@@ -360,7 +360,7 @@ namespace dockalloc::solver
         /// @param index The index of the bit to clear.
         ///
         /// @pre The index must be within the bounds of the bit span.
-        void ClearBit(const size_t index) const noexcept
+        void ClearBit(const size_t index) noexcept
         {
             DCHECK_LT(index, word_count_ * kBitsPerWord);
 
@@ -376,7 +376,7 @@ namespace dockalloc::solver
         /// @param range The range of bits to clear.
         ///
         /// @pre Range must not be empty and must be within the bounds of the bit span.
-        void ClearBitRange(const TimeSlotRange& range) const noexcept
+        void ClearBitRange(const TimeSlotRange& range) noexcept
         {
             DCHECK(!range.IsEmpty());
             DCHECK_LE(range.GetEnd(), word_count_ * kBitsPerWord);
@@ -404,7 +404,7 @@ namespace dockalloc::solver
 
             // aligned_last is the first word we cannot include in a full SIMD block
             // SIMD loop will process words in [first_word+1, aligned_last), step kSimdWidth
-            const size_t aligned_last = last_word - ((last_word - second_word) % kSimdWidth);
+            const size_t aligned_last = SimdLastAlignedWord(second_word, last_word);
 
             // SIMD over aligned region
             for (size_t w = second_word; w + kSimdWidth <= aligned_last; w += kSimdWidth)
@@ -473,7 +473,7 @@ namespace dockalloc::solver
         /// @param index The index of the bit to toggle.
         ///
         /// @pre The index must be within the bounds of the bit span.
-        void ToggleBit(const size_t index) const noexcept
+        void ToggleBit(const size_t index) noexcept
         {
             DCHECK_LT(index, word_count_ * kBitsPerWord);
 
@@ -485,7 +485,7 @@ namespace dockalloc::solver
         /// @brief Sets all bits in the bit span to \c 0.
         ///
         /// This function clears all bits in the bit span, setting them to \c 0.
-        void ClearAll() const noexcept
+        void ClearAll() noexcept
         {
             std::memset(data_, 0x00, word_count_ * sizeof(Storage));
         }
@@ -493,7 +493,7 @@ namespace dockalloc::solver
         /// @brief Sets all bits in the bit span to \c 1.
         ///
         /// This function sets all bits in the bit span to \c 1.
-        void SetAll() const noexcept
+        void SetAll() noexcept
         {
             std::memset(data_, 0xFF, word_count_ * sizeof(Storage));
         }
@@ -576,6 +576,21 @@ namespace dockalloc::solver
             DCHECK_LT(to, kBitsPerWord);
 
             return HighBitsFrom(from) & LowBitsTo(to);
+        }
+
+        /// @brief Computes the last aligned word index for a given range for SIMD operations.
+        ///
+        /// This function calculates the last word index that can be aligned to the SIMD width
+        /// for a given range of words. It is used to optimize SIMD operations by ensuring that
+        /// the last word processed is aligned to the SIMD width.
+        ///
+        /// @param first_word The starting word index of the range.
+        /// @param last_word The ending word index of the range.
+        ///
+        /// @return The last word index that is aligned to the SIMD width.
+        static constexpr size_t SimdLastAlignedWord(const size_t first_word, const size_t last_word) noexcept
+        {
+            return last_word - ((last_word - first_word) % kSimdWidth);
         }
 
         Storage* data_;

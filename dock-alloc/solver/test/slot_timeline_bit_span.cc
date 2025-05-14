@@ -17,7 +17,7 @@ namespace dockalloc::solver
     TEST(SlotTimelineBitSpanTest, ConstructorFromPointer)
     {
         std::array<uint32_t, 4> data = {0, 1, 2, 3};
-        SlotTimelineBitSpan<uint32_t> span(data.data(), data.size());
+        const SlotTimelineBitSpan<uint32_t> span(data.data(), data.size());
         EXPECT_EQ(span.GetData(), data.data());
         EXPECT_EQ(span.GetWordCount(), data.size());
     }
@@ -69,9 +69,13 @@ namespace dockalloc::solver
         for (size_t i = 0; i < 32; ++i)
         {
             if (i >= 5 && i < 10)
+            {
                 EXPECT_TRUE(span.IsBitSet(i));
+            }
             else
+            {
                 EXPECT_FALSE(span.IsBitSet(i));
+            }
         }
     }
 
