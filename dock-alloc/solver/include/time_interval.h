@@ -7,6 +7,7 @@
 #include <concepts>
 #include <algorithm>
 #include <optional>
+#include <ranges>
 #include "absl/strings/str_format.h"
 
 namespace dockalloc::solver

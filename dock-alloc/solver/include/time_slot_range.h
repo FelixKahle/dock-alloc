@@ -41,6 +41,19 @@ namespace dockalloc::solver
         {
         }
 
+        /// @brief Factory function to create a \c TimeSlotRange from a start index and length.
+        ///
+        /// This function creates a \c TimeSlotRange object with the specified start index and length.
+        ///
+        /// @param start_inclusive The inclusive start index of the range.
+        /// @param length The length of the range.
+        ///
+        /// @return A \c TimeSlotRange object representing the range [start, start + length).
+        static constexpr TimeSlotRange FromLength(const size_t start_inclusive, const size_t length) noexcept
+        {
+            return TimeSlotRange(start_inclusive, start_inclusive + length);
+        }
+
         /// @brief Getter for the start index.
         ///
         /// This function returns the inclusive start index of the range.
