@@ -1165,8 +1165,7 @@ namespace dockalloc::solver
             return const_reverse_iterator(begin());
         }
 
-    private
-    :
+    private:
 #if DOCK_ALLOC_SOLVER_BIT_SPAN_USE_SIMD
         /// @brief The SIMD type used for vectorized operations.
         using SimdType = xsimd::batch<StorageType>;
