@@ -816,7 +816,7 @@ namespace dockalloc::solver
         /// @pre bit_index < GetBitCount()
         void ClearBit(const size_t bit_index) noexcept
         {
-            DCHECK_LE(bit_index, bit_count_);
+            DCHECK_LT(bit_index, bit_count_);
 
             const size_t word = bit_index / kBitsPerWord;
             const size_t bit = bit_index % kBitsPerWord;
@@ -1046,72 +1046,120 @@ namespace dockalloc::solver
         using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
         /// @brief Begin iterator
+        ///
+        /// This function returns an iterator pointing to the start of the bit span.
+        ///
+        /// @return An iterator pointing to the start of the bit span.
         iterator begin() noexcept
         {
             return iterator(data_, 0);
         }
 
         /// @brief End iterator
+        ///
+        /// This function returns an iterator pointing to the end of the bit span.
+        ///
+        /// @return An iterator pointing to the end of the bit span.
         iterator end() noexcept
         {
             return iterator(data_, bit_count_);
         }
 
         /// @brief Begin iterator (const)
+        ///
+        /// This function returns a const iterator pointing to the start of the bit span.
+        ///
+        /// @return A const iterator pointing to the start of the bit span.
         const_iterator begin() const noexcept
         {
             return const_iterator(data_, 0);
         }
 
         /// @brief End iterator (const)
+        ///
+        /// This function returns a const iterator pointing to the end of the bit span.
+        ///
+        /// @return A const iterator pointing to the end of the bit span.
         const_iterator end() const noexcept
         {
             return const_iterator(data_, bit_count_);
         }
 
         /// @brief Const begin iterator
+        ///
+        /// This function returns a const iterator pointing to the start of the bit span.
+        ///
+        /// @return A const iterator pointing to the start of the bit span.
         const_iterator cbegin() const noexcept
         {
             return const_iterator(data_, 0);
         }
 
         /// @brief Const end iterator
+        ///
+        /// This function returns a const iterator pointing to the end of the bit span.
+        ///
+        /// @return A const iterator pointing to the end of the bit span.
         const_iterator cend() const noexcept
         {
             return const_iterator(data_, bit_count_);
         }
 
         /// @brief Start reverse iterator
+        ///
+        /// This function returns a reverse iterator pointing to the start of the bit span.
+        ///
+        /// @return A reverse iterator pointing to the start of the bit span.
         reverse_iterator rbegin() noexcept
         {
             return reverse_iterator(end());
         }
 
         /// @brief End reverse iterator
+        ///
+        /// This function returns a reverse iterator pointing to the end of the bit span.
+        ///
+        /// @return A reverse iterator pointing to the end of the bit span.
         reverse_iterator rend() noexcept
         {
             return reverse_iterator(begin());
         }
 
         /// @brief Start reverse iterator (const)
+        ///
+        /// This function returns a const reverse iterator pointing to the start of the bit span.
+        ///
+        /// @return A const reverse iterator pointing to the start of the bit span.
         const_reverse_iterator rbegin() const noexcept
         {
             return const_reverse_iterator(end());
         }
 
         /// @brief End reverse iterator (const)
+        ///
+        /// This function returns a const reverse iterator pointing to the end of the bit span.
+        ///
+        /// @return A const reverse iterator pointing to the end of the bit span.
         const_reverse_iterator rend() const noexcept
         {
             return const_reverse_iterator(begin());
         }
 
         /// @brief Const start reverse iterator
+        ///
+        /// This function returns a const reverse iterator pointing to the start of the bit span.
+        ///
+        /// @return A const reverse iterator pointing to the start of the bit span.
         const_reverse_iterator crbegin() const noexcept
         {
             return const_reverse_iterator(end());
         }
 
         /// @brief Const end reverse iterator
+        ///
+        /// This function returns a const reverse iterator pointing to the end of the bit span.
+        ///
+        /// @return A const reverse iterator pointing to the end of the bit span.
         const_reverse_iterator crend() const noexcept
         {
             return const_reverse_iterator(begin());
