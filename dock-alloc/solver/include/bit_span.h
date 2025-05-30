@@ -10,6 +10,7 @@
 #include <concepts>
 #include <limits>
 #include <iterator>
+#include <bit>
 #include "absl/log/check.h"
 #if DOCK_ALLOC_SOLVER_BIT_SPAN_USE_SIMD
 #include "xsimd/xsimd.hpp"
@@ -84,7 +85,7 @@ namespace dockalloc::solver
             /// @note This operator does not modify the bit. It only reads its current value.
             operator bool() const noexcept // NOLINT(*-explicit-constructor)
             {
-                return (word_ >> bit_) & StorageType{1};
+                return word_ >> bit_ & StorageType{1};
             }
 
             /// @brief Overload of the assignment operator for boolean values.
@@ -357,7 +358,7 @@ namespace dockalloc::solver
             {
                 size_t word = index_ / kBitsPerWord;
                 size_t bit = index_ % kBitsPerWord;
-                return ((data_[word] >> bit) & StorageType{1}) != 0;
+                return (data_[word] >> bit & StorageType{1}) != 0;
             }
 
             /// @brief Advances iterator to the next bit (pre-increment).
@@ -558,7 +559,7 @@ namespace dockalloc::solver
 
             const size_t word = bit_index / kBitsPerWord;
             const size_t bit = bit_index % kBitsPerWord;
-            return (data_[word] >> bit) & StorageType{1};
+            return data_[word] >> bit & StorageType{1};
         }
 
         /// @brief Checks if a range of bits is set.
@@ -570,7 +571,7 @@ namespace dockalloc::solver
         /// @param to The ending index of the range (exclusive).
         ///
         /// @pre to <= GetBitCount()
-        /// @pre from < to
+        /// @pre from <= to
         ///
         /// @return \c true if all bits in the range are set, \c false otherwise.
         [[nodiscard]] bool AreBitsSet(const size_t from, const size_t to) const noexcept
@@ -601,7 +602,7 @@ namespace dockalloc::solver
 #if DOCK_ALLOC_SOLVER_BIT_SPAN_USE_SIMD
             // aligned_last is the first word we cannot include in a full SIMD block
             // SIMD loop will process words in [first_word+1, aligned_last), step kSimdWidth
-            const size_t aligned_last = last_word - ((last_word - second_word) % kSimdWidth);
+            const size_t aligned_last = last_word - (last_word - second_word) % kSimdWidth;
 
             for (size_t w = second_word; w < aligned_last; w += kSimdWidth)
             {
@@ -648,7 +649,7 @@ namespace dockalloc::solver
 
             const size_t word = bit_index / kBitsPerWord;
             const size_t bit = bit_index % kBitsPerWord;
-            data_[word] |= (StorageType{1} << bit);
+            data_[word] |= StorageType{1} << bit;
         }
 
         /// @brief Sets a range of bits to \c 1.
@@ -659,7 +660,7 @@ namespace dockalloc::solver
         /// @param from The starting index of the range (inclusive).
         /// @param to The ending index of the range (exclusive).
         ///
-        /// @pre from < to
+        /// @pre from <= to
         void SetBits(const size_t from, const size_t to) noexcept
         {
             DCHECK_LE(to, bit_count_);
@@ -690,7 +691,7 @@ namespace dockalloc::solver
 
             // aligned_last is the first word we cannot include in a full SIMD block
             // SIMD loop will process words in [first_word+1, aligned_last), step kSimdWidth
-            const size_t aligned_last = last_word - ((last_word - second_word) % kSimdWidth);
+            const size_t aligned_last = last_word - (last_word - second_word) % kSimdWidth;
 
             // SIMD over aligned region
             for (size_t w = second_word; w < aligned_last; w += kSimdWidth)
@@ -730,7 +731,7 @@ namespace dockalloc::solver
 
             const size_t word = bit_index / kBitsPerWord;
             const size_t bit = bit_index % kBitsPerWord;
-            return ((data_[word] >> bit) & StorageType{1}) == 0;
+            return (data_[word] >> bit & StorageType{1}) == 0;
         }
 
         /// @brief Checks if a range of bits is set to \c 0.
@@ -742,7 +743,7 @@ namespace dockalloc::solver
         /// @param to The ending index of the range (exclusive).
         ///
         /// @pre to <= GetBitCount()
-        /// @pre from < to
+        /// @pre from <= to
         ///
         /// @return \c true if all bits in the range are clear, \c false otherwise.
         [[nodiscard]] bool AreBitsClear(const size_t from, const size_t to) const noexcept
@@ -773,7 +774,7 @@ namespace dockalloc::solver
 #if DOCK_ALLOC_SOLVER_BIT_SPAN_USE_SIMD
             // aligned_last is the first word we cannot include in a full SIMD block
             // SIMD loop will process words in [first_word+1, aligned_last), step kSimdWidth
-            const size_t aligned_last = last_word - ((last_word - second_word) % kSimdWidth);
+            const size_t aligned_last = last_word - (last_word - second_word) % kSimdWidth;
 
             for (size_t w = second_word; w < aligned_last; w += kSimdWidth)
             {
@@ -830,7 +831,7 @@ namespace dockalloc::solver
         /// @param from The starting index of the range (inclusive).
         /// @param to The ending index of the range (exclusive).
         ///
-        /// @pre from < to
+        /// @pre from <= to
         void ClearBits(const size_t from, const size_t to) noexcept
         {
             DCHECK_LE(to, bit_count_);
@@ -861,7 +862,7 @@ namespace dockalloc::solver
 
             // aligned_last is the first word we cannot include in a full SIMD block
             // SIMD loop will process words in [first_word+1, aligned_last), step kSimdWidth
-            const size_t aligned_last = last_word - ((last_word - second_word) % kSimdWidth);
+            const size_t aligned_last = last_word - (last_word - second_word) % kSimdWidth;
 
             // SIMD over aligned region
             for (size_t w = second_word; w < aligned_last; w += kSimdWidth)
@@ -884,6 +885,104 @@ namespace dockalloc::solver
 
             // Tail.
             data_[last_word] &= ~LowBitsTo(end_bit);
+        }
+
+        /// @brief Finds a clear range of bits.
+        ///
+        /// This function searches for a contiguous range of \p n bits that are clear (set to \c 0)
+        ///
+        /// @param from The starting index of the search range (inclusive).
+        /// @param to The ending index of the search range (exclusive).
+        /// @param n The number of contiguous bits to find.
+        ///
+        /// @pre to <= GetBitCount()
+        /// @pre from <= to
+        ///
+        /// @return A \c std::optional containing the starting index of the found range,
+        /// or \c std::nullopt if no such range exists.
+        [[nodiscard]] std::optional<size_t> FindClearRange(const size_t from, const size_t to,
+                                                           const size_t n) const noexcept
+        {
+            DCHECK_LE(to, bit_count_);
+            DCHECK_LE(from, to);
+
+            if (n == 0)
+            {
+                return from < to ? std::optional{from} : std::nullopt;
+            }
+            if (from + n > to || to > bit_count_)
+            {
+                return std::nullopt;
+            }
+
+            size_t run = 0;
+            size_t run_start = from;
+            size_t pos = from;
+
+            const size_t last_word = (to - 1) / kBitsPerWord;
+            const size_t last_bit = (to - 1) % kBitsPerWord;
+
+            while (pos < to)
+            {
+                const size_t w = pos / kBitsPerWord;
+                const size_t b = pos % kBitsPerWord;
+                const size_t base = w * kBitsPerWord;
+
+                StorageType mask = HighBitsFrom(b);
+                if (w == last_word)
+                {
+                    mask &= LowBitsTo(last_bit);
+                }
+
+                StorageType word = data_[w];
+
+                if ((word & mask) == StorageType{0})
+                {
+                    const size_t chunk = std::min<size_t>(
+                        w * kBitsPerWord + kBitsPerWord - pos,
+                        to - pos
+                    );
+                    if (run == 0)
+                    {
+                        run_start = pos;
+                    }
+                    run += chunk;
+                    if (run >= n)
+                    {
+                        return run_start;
+                    }
+                    pos += chunk;
+                    continue;
+                }
+
+                StorageType inv = ~word & mask;
+                while (inv)
+                {
+                    const int off = std::countr_zero(inv);
+                    inv &= inv - 1;
+                    const size_t p = base + off;
+
+                    if (p == pos)
+                    {
+                        ++run;
+                    }
+                    else
+                    {
+                        run_start = p;
+                        run = 1;
+                    }
+                    if (run >= n)
+                    {
+                        return run_start;
+                    }
+                    pos = p + 1;
+                }
+
+                run = 0;
+                pos = base + kBitsPerWord;
+            }
+
+            return std::nullopt;
         }
 
         /// @brief Checks if a bit is set.
@@ -1018,7 +1117,8 @@ namespace dockalloc::solver
             return const_reverse_iterator(begin());
         }
 
-    private:
+    private
+    :
 #if DOCK_ALLOC_SOLVER_BIT_SPAN_USE_SIMD
         /// @brief The SIMD type used for vectorized operations.
         using SimdType = xsimd::batch<StorageType>;
