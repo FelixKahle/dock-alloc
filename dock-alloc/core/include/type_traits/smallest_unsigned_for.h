@@ -4,6 +4,7 @@
 #define DOCK_ALLOC_CORE_TYPE_TRAITS_SMALLEST_UNSIGNED_FOR_H_
 
 #include <type_traits>
+#include <cstdint>
 #include <limits>
 
 namespace dockalloc::core
