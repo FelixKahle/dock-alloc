@@ -1,0 +1,27 @@
+# Copyright 2025 Felix Kahle. All rights reserved.
+
+cc_library(
+    name = "core",
+    hdrs = [
+        "include/time/time_interval.h",
+        "include/type_traits/smallest_unsigned_for.h",
+    ],
+    include_prefix = "dockalloc/core",
+    strip_include_prefix = "include",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@abseil-cpp//absl/strings:str_format",
+    ],
+)
+
+cc_test(
+    name = "core-test",
+    srcs = [
+        "test/time/time_interval_test.cc",
+        "test/type_traits/smallest_unsigned_for_test.cc",
+    ],
+    deps = [
+        "//dock-alloc/core",
+        "@googletest//:gtest_main",
+    ],
+)

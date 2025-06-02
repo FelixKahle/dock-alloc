@@ -1,16 +1,15 @@
 // Copyright 2025 Felix Kahle. All rights reserved.
 
-#ifndef DOCK_ALLOC_SOLVER_TIME_INTERVAL_H_
-#define DOCK_ALLOC_SOLVER_TIME_INTERVAL_H_
+#ifndef DOCK_ALLOC_CORE_TIME_INTERVAL_H_
+#define DOCK_ALLOC_CORE_TIME_INTERVAL_H_
 
 #include <type_traits>
 #include <concepts>
 #include <algorithm>
 #include <optional>
-#include <ranges>
 #include "absl/strings/str_format.h"
 
-namespace dockalloc::solver
+namespace dockalloc::core
 {
     /// @brief A class representing a half-open time interval.
     ///

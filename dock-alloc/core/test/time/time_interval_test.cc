@@ -1,9 +1,9 @@
 // Copyright 2025 Felix Kahle. All rights reserved.
 
 #include "gtest/gtest.h"
-#include "dockalloc/solver/time_interval.h"
+#include "dockalloc/core/time/time_interval.h"
 
-namespace dockalloc::solver
+namespace dockalloc::core::test
 {
     TEST(TimeIntervalTest, ConstructsCorrectly)
     {

@@ -4,14 +4,12 @@ cc_library(
     name = "solver",
     hdrs = [
         "include/bit_span.h",
-        "include/slot_timeline_gap.h",
-        "include/time_interval.h",
-        "include/time_slot_range.h",
     ],
     include_prefix = "dockalloc/solver",
     strip_include_prefix = "include",
     visibility = ["//visibility:public"],
     deps = [
+        "//dock-alloc/core",
         "//third_party:xsimd",
         "@abseil-cpp//absl/container:btree",
         "@abseil-cpp//absl/log:check",
@@ -24,9 +22,6 @@ cc_test(
     name = "solver-test",
     srcs = [
         "test/bit_span_test.cc",
-        "test/slot_timeline_gap_test.cc",
-        "test/time_interval_test.cc",
-        "test/time_slot_range_test.cc",
     ],
     deps = [
         "//dock-alloc/solver",
