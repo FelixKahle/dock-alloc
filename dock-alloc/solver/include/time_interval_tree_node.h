@@ -4,6 +4,7 @@
 #define DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_H_
 
 #include <concepts>
+#include "absl/log/check.h"
 #include "dockalloc/core/type_traits/smallest_unsigned_for.h"
 #include "dockalloc/core/time/time_interval.h"
 
@@ -104,18 +105,40 @@ namespace dockalloc::solver
             static constexpr size_t kMaxChildren = kMaxEntries + 1;
         };
 
+        using IndexType = typename Layout::IndexType;
+
     public:
-        /// TODO: Remove
-        TimeIntervalTreeNode() = default;
+        [[nodiscard]] bool IsLeaf() const noexcept
+        {
+            return children_[0] == nullptr;
+        }
+
+        IndexType Size() const noexcept
+        {
+            return finish_ - start_;
+        }
+
+        const core::TimeInterval<TimeType>& Interval(IndexType i) const
+        {
+            DCHECK_LT(i, Size());
+            return intervals_[start_ + i];
+        }
+
+        TimeIntervalTreeNode* Child(IndexType i) const
+        {
+            DCHECK_LE(i, Size());
+            return children_[i];
+        }
 
     private:
-        using IndexType = typename Layout::IndexType;
-        TimeType min_start_time_;
-        TimeType max_end_time_;
-        TimeType max_gap_;
-        TimeIntervalTreeNode* parent_;
+        TimeType min_start_time_{0};
+        TimeType max_end_time_{0};
+        TimeType max_gap_{0};
+        IndexType start_{0};
+        IndexType finish_{0};
+        TimeIntervalTreeNode* parent_{nullptr};
         core::TimeInterval<TimeType> intervals_[Layout::kMaxEntries];
-        TimeIntervalTreeNode* children_[Layout::kMaxChildren];
+        TimeIntervalTreeNode* children_[Layout::kMaxChildren]{nullptr};
     };
 }
 
