@@ -105,6 +105,7 @@ namespace dockalloc::solver
         };
 
     public:
+        /// TODO: Remove
         TimeIntervalTreeNode() = default;
 
     private:
