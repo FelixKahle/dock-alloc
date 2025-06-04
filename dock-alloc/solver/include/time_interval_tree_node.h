@@ -129,6 +129,46 @@ namespace dockalloc::solver
         /// This value governs the static array size for \c children_.
         static constexpr size_t kMaxChildren = Layout::kMaxChildren;
 
+        /// @brief Gets the minimum start time of all intervals in this node.
+        ///
+        /// This function retrieves the earliest start time of any interval stored in this node.
+        ///
+        /// @return The minimum start time of all intervals in this node.
+        [[nodiscard]] TimeType GetMinStartTime() const noexcept
+        {
+            return min_start_time_;
+        }
+
+        /// @brief Gets the maximum end time of all intervals in this node.
+        ///
+        /// This function retrieves the latest end time of any interval stored in this node.
+        ///
+        /// @return The maximum end time of all intervals in this node.
+        [[nodiscard]] TimeType GetMaxEndTime() const noexcept
+        {
+            return max_end_time_;
+        }
+
+        /// @brief Gets the maximum gap between any two consecutive intervals in this node.
+        ///
+        /// This function retrieves the largest time gap between any two consecutive intervals.
+        ///
+        /// @return The maximum gap between any two consecutive intervals in this node.
+        [[nodiscard]] TimeType GetMaxGap() const noexcept
+        {
+            return max_gap_;
+        }
+
+        /// @brief Gets a pointer to the parent node of this node.
+        ///
+        /// This function retrieves the parent node of this node in the tree structure.
+        ///
+        /// @return A pointer to the parent node, or \c nullptr if this node is the root.
+        [[nodiscard]] TimeIntervalTreeNode* GetParent() const noexcept
+        {
+            return parent_;
+        }
+
         /// @brief Checks if this node is a leaf node.
         ///
         /// A leaf node has no children, meaning it does not have any subtrees.
@@ -136,7 +176,7 @@ namespace dockalloc::solver
         /// @return \c true if this node is a leaf (no children), \c false otherwise.
         [[nodiscard]] bool IsLeaf() const noexcept
         {
-            return children_[start_] == nullptr;
+            return children_[0] == nullptr;
         }
 
         /// @brief Returns the amount of entries in this node.
@@ -191,8 +231,8 @@ namespace dockalloc::solver
         /// @param right The second time interval to compare.
         ///
         /// @return \c true if \p left is less than \p right, \c false otherwise.
-        static constexpr bool Less(const core::TimeInterval<TimeType>& left,
-                                   const core::TimeInterval<TimeType>& right) noexcept
+        static constexpr bool CompareTimeIntervals(const core::TimeInterval<TimeType>& left,
+                                                   const core::TimeInterval<TimeType>& right) noexcept
         {
             if (left.start() < right.start())
             {
@@ -203,6 +243,90 @@ namespace dockalloc::solver
                 return false;
             }
             return left.end() < right.end();
+        }
+
+        /// @brief Updates the metadata of this node based on its intervals and children.
+        ///
+        /// This function recalculates the minimum start time, maximum end time,
+        /// and maximum gap between intervals in this node.
+        /// It should be called whenever the intervals or children of this node change.
+        void UpdateMetadata() noexcept
+        {
+            // Reset metadata to default values.
+            if (Size() == 0)
+            {
+                min_start_time_ = 0;
+                max_end_time_ = 0;
+                max_gap_ = 0;
+                return;
+            }
+
+            // If this is a leaf node, we compute the min/max times and gaps directly from the intervals.
+            // Because the intervals are sorted, we know that the first interval's start time
+            // is the minimum start time, and the last interval's end time is the maximum end time.
+            // We than compute the maximum gap using a run through the intervals.
+            if (IsLeaf())
+            {
+                const auto& first_interval = intervals_[start_];
+
+                IndexType lastIdx = start_ + (Size() - 1);
+                min_start_time_ = first_interval.GetStart();
+                max_end_time_ = intervals_[lastIdx].GetEnd();
+
+                TimeType max_gap = 0;
+                for (IndexType i = 1; i < Size(); ++i)
+                {
+                    TimeType prev_end = intervals_[start_ + (i - 1)].GetEnd();
+                    TimeType this_start = intervals_[start_ + i].GetStart();
+                    TimeType gap = this_start - prev_end;
+                    if (gap > max_gap)
+                    {
+                        max_gap = gap;
+                    }
+                }
+                max_gap_ = max_gap;
+            }
+            // If this is not a leaf node, we compute the min/max times and gaps based on the children.
+            // The minimum start time is the minimum of the first child's min start time,
+            // and the maximum end time is the maximum of the last child's max end time.
+            // The maximum gap is computed by checking the gaps between consecutive children,
+            // as well as the maximum gaps within each child.
+            else
+            {
+                IndexType last_child_index = Size();
+                min_start_time_ = children_[0]->GetMinStartTime();
+                max_end_time_ = children_[last_child_index]->GetMaxEndTime();
+
+                TimeType best_gap = 0;
+                for (IndexType i = 0; i < Size(); ++i)
+                {
+                    DCHECK(children_[i] != nullptr);
+                    DCHECK(children_[i + 1] != nullptr);
+
+                    TimeType child_gap = children_[i]->GetMaxGap();
+                    if (child_gap > best_gap)
+                    {
+                        best_gap = child_gap;
+                    }
+
+                    TimeType left_max = children_[i]->GetMaxEndTime();
+                    TimeType right_min = children_[i + 1]->GetMinStartTime();
+                    TimeType gap = right_min - left_max;
+                    if (gap > best_gap)
+                    {
+                        best_gap = gap;
+                    }
+                }
+
+                TimeType last_child_gap = children_[last_child_index]->GetMaxGap();
+                if (last_child_gap > best_gap)
+                {
+                    best_gap = last_child_gap;
+                }
+
+
+                max_gap_ = best_gap;
+            }
         }
 
         TimeType min_start_time_{0};
