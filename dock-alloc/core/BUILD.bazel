@@ -3,7 +3,11 @@
 cc_library(
     name = "core",
     hdrs = [
+        "include/algorithm/pow.h",
         "include/time/time_interval.h",
+        "include/type_traits/align_up.h",
+        "include/type_traits/max_align.h",
+        "include/type_traits/size_sum.h",
         "include/type_traits/smallest_unsigned_for.h",
     ],
     include_prefix = "dockalloc/core",
@@ -17,6 +21,7 @@ cc_library(
 cc_test(
     name = "core-test",
     srcs = [
+        "test/algorithm/pow_test.cc",
         "test/time/time_interval_test.cc",
         "test/type_traits/smallest_unsigned_for_test.cc",
     ],
