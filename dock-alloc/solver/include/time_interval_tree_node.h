@@ -13,6 +13,8 @@ namespace dockalloc::solver
     /// @brief A single node in a time interval tree structure.
     ///
     /// This class represents one node of a static‐size, packed time interval tree.
+    /// Nodes are required to be completely disjoint, meaning that no two nodes can overlap in time.
+    /// Any attempt to insert an interval that overlaps with existing intervals will be rejected.
     ///
     /// @tparam TimeType An unsigned integral type representing time (e.g., \c uint8_t, \c uint16_t, \c uint32_t, ...).
     /// @tparam NodeBytes The total size of the node in bytes (default is 256).
@@ -88,8 +90,8 @@ namespace dockalloc::solver
         private:
             /// @brief Total metadata size with index fields included.
             ///
-            /// Adds two index fields (\c start_ and \c finish_) to the basic metadata.
-            static constexpr size_t kMetaBytes = kBasicMetaBytes + 2 * sizeof(IndexType);
+            /// Adds three index fields (\c start_ and \c finish_ and \c position_) to the basic metadata size.
+            static constexpr size_t kMetaBytes = kBasicMetaBytes + 3 * sizeof(IndexType);
 
             /// @brief Aligned metadata size (rounded up to pointer alignment).
             ///
@@ -105,7 +107,7 @@ namespace dockalloc::solver
             /// @brief Final maximum number of intervals that can fit in this node.
             ///
             /// This value governs the static array size for `intervals_`.
-            static constexpr size_t kMaxEntries = kSpaceForArrays / kEntryPlusChildBytes;
+            static constexpr size_t kMaxEntries = (kSpaceForArrays - kPtrBytes) / kEntryPlusChildBytes;
 
             /// @brief Final number of children pointers (always one more than entries).
             ///
@@ -177,6 +179,16 @@ namespace dockalloc::solver
         [[nodiscard]] bool IsLeaf() const noexcept
         {
             return children_[0] == nullptr;
+        }
+
+        /// @brief Checks if this node is an internal node.
+        ///
+        /// An internal node has at least one child, meaning it has subtrees.
+        ///
+        /// @return \c true if this node is an internal node (has children), \c false otherwise.
+        [[nodiscard]] bool IsInternal() const noexcept
+        {
+            return !IsLeaf();
         }
 
         /// @brief Returns the amount of entries in this node.
@@ -335,6 +347,7 @@ namespace dockalloc::solver
         IndexType start_{0};
         IndexType finish_{0};
         TimeIntervalTreeNode* parent_{nullptr};
+        IndexType position_{0};
         core::TimeInterval<TimeType> intervals_[kMaxEntries];
         TimeIntervalTreeNode* children_[kMaxChildren]{nullptr};
     };
