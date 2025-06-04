@@ -30,14 +30,15 @@ namespace dockalloc::core
             return 1;
         }
 
-        // Determine the numbers of bits in the type.
+        // Work in the unsigned domain.
         Output x = static_cast<Output>(value) - 1;
+
+        // Determine the number of bits in the type Output.
+        constexpr size_t bits = std::numeric_limits<Output>::digits;
 
         // “Smear” the topmost set bit down through all lower bits.
         // After this loop, x will look like 0b0…0111…111
         // (all 1’s from bit 0 up to the highest original bit).
-        constexpr size_t bits = std::numeric_limits<T>::digits;
-
         for (size_t shift = 1; shift < bits; shift <<= 1)
         {
             x |= (x >> shift);
