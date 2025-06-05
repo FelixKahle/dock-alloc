@@ -271,11 +271,8 @@ namespace dockalloc::core
             return H::combine(std::move(h), time_interval.start_time_inclusive_, time_interval.end_time_exclusive_);
         }
 
-        // TimeInterval is designed to be non-copyable and non-movable
-        // to meet an immutable design.
-
-        TimeInterval& operator=(const TimeInterval&) = delete;
-        TimeInterval& operator=(TimeInterval&&) = delete;
+        TimeInterval& operator=(const TimeInterval&) noexcept = default;
+        TimeInterval& operator=(TimeInterval&&) noexcept = default;
 
         /// @brief Absl::Format function for stringification.
         ///
