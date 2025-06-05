@@ -5,6 +5,9 @@
 
 namespace dockalloc::core::test
 {
+    static_assert(sizeof(TimeInterval<uint32_t>) == 2 * sizeof(uint32_t),
+                  "TimeInterval should have two uint32_t members");
+
     TEST(TimeIntervalTest, ConstructsCorrectly)
     {
         constexpr TimeInterval<uint32_t> interval(5, 10);
