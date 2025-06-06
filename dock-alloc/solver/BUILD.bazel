@@ -5,6 +5,7 @@ cc_library(
     hdrs = [
         "include/bit_span.h",
         "include/time_interval_tree_node.h",
+        "include/time_interval_tree_node_layout.h",
     ],
     include_prefix = "dockalloc/solver",
     strip_include_prefix = "include",
