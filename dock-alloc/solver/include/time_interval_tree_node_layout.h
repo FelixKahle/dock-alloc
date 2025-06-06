@@ -706,6 +706,11 @@ namespace dockalloc::solver
     struct TimeIntervalTreeNodeLayout
     {
     private:
+        /// @brief The minimum size of the node layout, which is the size of the base layout with 4 slots.
+        ///
+        /// This is the minimum size of the node layout, which is the size of the base layout with 4 slots.
+        static constexpr size_t kMinSize = sizeof(internal::LayoutImpl<TimeType, NodeType, 4>);
+
         /// @brief Computes the number of slots that fit into the target node size.
         ///
         /// This is done using a compile-time binary search to find the maximum number of slots
@@ -743,7 +748,7 @@ namespace dockalloc::solver
         ///
         /// This is the number of \c TimeInterval<TimeType> slots in the node, which is determined
         /// by the compile-time binary search to find the optimal slot count.
-        static constexpr size_t kNodeSlotSize = NodeTargetSlots<4, TargetNodeSize>();
+        static constexpr size_t kNodeSlotSize = (kMinSize > TargetNodeSize) ? 4 : NodeTargetSlots<4, TargetNodeSize>();
 
         /// @brief The number of child pointers in the node, which is one more than the number of slots.
         ///
