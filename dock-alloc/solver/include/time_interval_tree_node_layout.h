@@ -4,6 +4,7 @@
 #define DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_LAYOUT_H_
 
 #include <concepts>
+#include <cstddef>
 #include "absl/log/check.h"
 #include "dockalloc/core/time/time_interval.h"
 
@@ -17,7 +18,7 @@ namespace dockalloc::solver
         /// We can avoid padding by carefully choosing the order of fields based on their alignment.
         /// A good order is to place the widest fields first,
         /// followed by the narrower ones in descending order of alignment.
-        enum TimeIntervalTreeNodeFieldLayoutOrder
+        enum class TimeIntervalTreeNodeFieldLayoutOrder
         {
             TimeIndexPointer,
             TimePointerIndex,
@@ -124,6 +125,11 @@ namespace dockalloc::solver
     static constexpr size_t kSlotSize = SlotSize; \
     static constexpr size_t kChildrenSize = SlotSize + 1; \
     using IndexType = core::SmallestUnsignedFor_t<kChildrenSize>; \
+    TimeIntervalTreeNodeFieldLayout() noexcept = default; \
+    TimeIntervalTreeNodeFieldLayout(const TimeIntervalTreeNodeFieldLayout&) noexcept = default; \
+    TimeIntervalTreeNodeFieldLayout(TimeIntervalTreeNodeFieldLayout&&) noexcept = default; \
+    TimeIntervalTreeNodeFieldLayout& operator=(const TimeIntervalTreeNodeFieldLayout&) noexcept = delete; \
+    TimeIntervalTreeNodeFieldLayout& operator=(const TimeIntervalTreeNodeFieldLayout&&) noexcept = delete; \
     [[nodiscard]] TimeType GetMinStartTime() const noexcept { return min_start_time_; } \
     void SetMinStartTime(TimeType value) noexcept { min_start_time_ = value; } \
     [[nodiscard]] TimeType GetMaxEndTime() const noexcept { return max_end_time_; } \
