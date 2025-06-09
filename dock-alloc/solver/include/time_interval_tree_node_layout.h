@@ -6,6 +6,7 @@
 #include <concepts>
 #include <cstddef>
 #include "absl/log/check.h"
+#include "dockalloc/core/miscellaneous/inline.h"
 #include "dockalloc/core/time/time_interval.h"
 
 namespace dockalloc::solver
@@ -61,7 +62,7 @@ namespace dockalloc::solver
             /// This function provides a way to access the time interval stored in the raw byte array.
             ///
             /// @return A reference to the time interval stored in this storage.
-            core::TimeInterval<TimeType>& Get() noexcept
+            DOCK_ALLOC_FORCE_INLINE core::TimeInterval<TimeType>& Get() noexcept
             {
                 return *reinterpret_cast<core::TimeInterval<TimeType>*>(bytes);
             }
@@ -71,7 +72,7 @@ namespace dockalloc::solver
             /// This function provides a way to access the time interval stored in the raw byte array
             ///
             /// @return A const reference to the time interval stored in this storage.
-            const core::TimeInterval<TimeType>& Get() const noexcept
+            DOCK_ALLOC_FORCE_INLINE const core::TimeInterval<TimeType>& Get() const noexcept
             {
                 return *reinterpret_cast<const core::TimeInterval<TimeType>*>(bytes);
             }
@@ -81,7 +82,7 @@ namespace dockalloc::solver
             /// This function sets the time interval stored in the raw byte array to the given interval.
             ///
             /// @param interval The time interval to set in this storage.
-            void Set(const core::TimeInterval<TimeType>& interval) noexcept
+            DOCK_ALLOC_FORCE_INLINE void Set(const core::TimeInterval<TimeType>& interval) noexcept
             {
                 *reinterpret_cast<core::TimeInterval<TimeType>*>(bytes) = interval;
             }
@@ -92,7 +93,7 @@ namespace dockalloc::solver
             /// which is moved into the storage.
             ///
             /// @param interval The time interval to set in this storage, moved.
-            void Set(core::TimeInterval<TimeType>&& interval) noexcept
+            DOCK_ALLOC_FORCE_INLINE void Set(core::TimeInterval<TimeType>&& interval) noexcept
             {
                 *reinterpret_cast<core::TimeInterval<TimeType>*>(bytes) = std::move(interval);
             }
@@ -130,41 +131,41 @@ namespace dockalloc::solver
     TimeIntervalTreeNodeFieldLayout(TimeIntervalTreeNodeFieldLayout&&) noexcept = default; \
     TimeIntervalTreeNodeFieldLayout& operator=(const TimeIntervalTreeNodeFieldLayout&) noexcept = delete; \
     TimeIntervalTreeNodeFieldLayout& operator=(const TimeIntervalTreeNodeFieldLayout&&) noexcept = delete; \
-    [[nodiscard]] TimeType GetMinStartTime() const noexcept { return min_start_time_; } \
-    void SetMinStartTime(TimeType value) noexcept { min_start_time_ = value; } \
-    [[nodiscard]] TimeType GetMaxEndTime() const noexcept { return max_end_time_; } \
-    void SetMaxEndTime(TimeType value) noexcept { max_end_time_ = value; } \
-    [[nodiscard]] TimeType GetMaxGap() const noexcept { return max_gap_; } \
-    void SetMaxGap(TimeType value) noexcept { max_gap_ = value; } \
-    [[nodiscard]] IndexType GetStartIndex() const noexcept { return start_index_; } \
-    void SetStartIndex(IndexType value) noexcept { start_index_ = value; } \
-    [[nodiscard]] IndexType GetFinishIndex() const noexcept { return finish_index_; } \
-    void SetFinishIndex(IndexType value) noexcept { finish_index_ = value; } \
-    [[nodiscard]] IndexType GetParentIndex() const noexcept { return parent_index_; } \
-    void SetParentIndex(IndexType value) noexcept { parent_index_ = value; } \
-    [[nodiscard]] NodeType* GetParent() const noexcept { return parent_; } \
-    void SetParent(NodeType* value) noexcept { parent_ = value; } \
-    [[nodiscard]] NodeType* GetChild(const IndexType index) const noexcept \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE TimeType GetMinStartTime() const noexcept { return min_start_time_; } \
+    DOCK_ALLOC_FORCE_INLINE void SetMinStartTime(TimeType value) noexcept { min_start_time_ = value; } \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE TimeType GetMaxEndTime() const noexcept { return max_end_time_; } \
+    DOCK_ALLOC_FORCE_INLINE void SetMaxEndTime(TimeType value) noexcept { max_end_time_ = value; } \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE TimeType GetMaxGap() const noexcept { return max_gap_; } \
+    DOCK_ALLOC_FORCE_INLINE void SetMaxGap(TimeType value) noexcept { max_gap_ = value; } \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE IndexType GetStartIndex() const noexcept { return start_index_; } \
+    DOCK_ALLOC_FORCE_INLINE void SetStartIndex(IndexType value) noexcept { start_index_ = value; } \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE IndexType GetFinishIndex() const noexcept { return finish_index_; } \
+    DOCK_ALLOC_FORCE_INLINE void SetFinishIndex(IndexType value) noexcept { finish_index_ = value; } \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE IndexType GetParentIndex() const noexcept { return parent_index_; } \
+    DOCK_ALLOC_FORCE_INLINE void SetParentIndex(IndexType value) noexcept { parent_index_ = value; } \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE NodeType* GetParent() const noexcept { return parent_; } \
+    DOCK_ALLOC_FORCE_INLINE void SetParent(NodeType* value) noexcept { parent_ = value; } \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE NodeType* GetChild(const IndexType index) const noexcept \
     { \
         DCHECK_LT(index, kChildrenSize); \
         return children_[index]; \
     } \
-    void SetChild(const IndexType index, NodeType* value) noexcept \
+    DOCK_ALLOC_FORCE_INLINE void SetChild(const IndexType index, NodeType* value) noexcept \
     { \
         DCHECK_LT(index, kChildrenSize); \
         children_[index] = value; \
     } \
-    [[nodiscard]] const core::TimeInterval<TimeType>& GetInterval(const IndexType index) const noexcept \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE const core::TimeInterval<TimeType>& GetInterval(const IndexType index) const noexcept \
     { \
         DCHECK_LT(index, kSlotSize); \
         return intervals_[index].Get(); \
     } \
-    void SetInterval(const IndexType index, const core::TimeInterval<TimeType>& interval) noexcept \
+    DOCK_ALLOC_FORCE_INLINE void SetInterval(const IndexType index, const core::TimeInterval<TimeType>& interval) noexcept \
     { \
         DCHECK_LT(index, kSlotSize); \
         intervals_[index].Set(interval); \
     } \
-    void SetInterval(const IndexType index, core::TimeInterval<TimeType>&& interval) noexcept \
+    DOCK_ALLOC_FORCE_INLINE void SetInterval(const IndexType index, core::TimeInterval<TimeType>&& interval) noexcept \
     { \
         DCHECK_LT(index, kSlotSize); \
         intervals_[index].Set(std::move(interval)); \
@@ -423,8 +424,7 @@ namespace dockalloc::solver
             /// based on the alignment of the types involved.
             ///
             /// @return The order of fields in the time-interval tree node layout.
-            static constexpr TimeIntervalTreeNodeFieldLayoutOrder
-            NodeFieldLayoutOrder() noexcept
+            static constexpr TimeIntervalTreeNodeFieldLayoutOrder NodeFieldLayoutOrder() noexcept
             {
                 // ReSharper disable once CppTooWideScopeInitStatement
                 constexpr size_t alignof_time = alignof(TimeType);
@@ -467,14 +467,12 @@ namespace dockalloc::solver
             /// @brief The order of fields in the time-interval tree node layout.
             ///
             /// This is a compile-time constant that determines the order of fields in the node layout.
-            static constexpr TimeIntervalTreeNodeFieldLayoutOrder kFieldLayoutOrder =
-                NodeFieldLayoutOrder();
+            static constexpr TimeIntervalTreeNodeFieldLayoutOrder kFieldLayoutOrder = NodeFieldLayoutOrder();
 
             /// @brief The Base layout type for the time-interval tree node.
             ///
             /// This is the base layout type that provides the common fields for the implementation.
-            using Base = TimeIntervalTreeNodeFieldLayout<
-                TimeType, NodeType, SlotSize, kFieldLayoutOrder>;
+            using Base = TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize, kFieldLayoutOrder>;
 
             /// @brief The type of the index used to access children and intervals.
             ///
@@ -502,7 +500,7 @@ namespace dockalloc::solver
             /// This function returns a pointer to the parent node of this node.
             ///
             /// @return A pointer to the parent node, or \c nullptr if there is no parent.
-            [[nodiscard]] NodeType* GetParent() const noexcept
+            [[nodiscard]] DOCK_ALLOC_FORCE_INLINE NodeType* GetParent() const noexcept
             {
                 return fields_.GetParent();
             }
@@ -512,7 +510,7 @@ namespace dockalloc::solver
             /// This function returns the minimum start time of all intervals stored in this node.
             ///
             /// @return The minimum start time of the intervals in this node.
-            [[nodiscard]] TimeType GetMinStartTime() const noexcept
+            [[nodiscard]] DOCK_ALLOC_FORCE_INLINE TimeType GetMinStartTime() const noexcept
             {
                 return fields_.GetMinStartTime();
             }
@@ -522,7 +520,7 @@ namespace dockalloc::solver
             /// This function returns the maximum end time of all intervals stored in this node.
             ///
             /// @return The maximum end time of the intervals in this node.
-            [[nodiscard]] TimeType GetMaxEndTime() const noexcept
+            [[nodiscard]] DOCK_ALLOC_FORCE_INLINE TimeType GetMaxEndTime() const noexcept
             {
                 return fields_.GetMaxEndTime();
             }
@@ -532,7 +530,7 @@ namespace dockalloc::solver
             /// This function returns the maximum gap between any two intervals stored in this node.
             ///
             /// @return The maximum gap between intervals in this node.
-            [[nodiscard]] TimeType GetMaxGap() const noexcept
+            [[nodiscard]] DOCK_ALLOC_FORCE_INLINE TimeType GetMaxGap() const noexcept
             {
                 return fields_.GetMaxGap();
             }
@@ -542,7 +540,7 @@ namespace dockalloc::solver
             /// This function returns the index of the first interval in this node.
             ///
             /// @return The start index of the intervals in this node.
-            [[nodiscard]] IndexType GetStartIndex() const noexcept
+            [[nodiscard]] DOCK_ALLOC_FORCE_INLINE IndexType GetStartIndex() const noexcept
             {
                 return fields_.GetStartIndex();
             }
@@ -552,7 +550,7 @@ namespace dockalloc::solver
             /// This function returns the index of the last interval in this node.
             ///
             /// @return The finish index of the intervals in this node.
-            [[nodiscard]] IndexType GetFinishIndex() const noexcept
+            [[nodiscard]] DOCK_ALLOC_FORCE_INLINE IndexType GetFinishIndex() const noexcept
             {
                 return fields_.GetFinishIndex();
             }
@@ -562,7 +560,7 @@ namespace dockalloc::solver
             /// This function returns the index of the parent.
             ///
             /// @return The index of the parent.
-            [[nodiscard]] IndexType GetParentIndex() const noexcept
+            [[nodiscard]] DOCK_ALLOC_FORCE_INLINE IndexType GetParentIndex() const noexcept
             {
                 return fields_.GetParentIndex();
             }
@@ -576,7 +574,7 @@ namespace dockalloc::solver
             /// @pre 0 <= index < kChildrenSize
             ///
             /// @return A pointer to the child node at the specified index, or \c nullptr if there is no child.
-            [[nodiscard]] const NodeType* GetChild(
+            [[nodiscard]] DOCK_ALLOC_FORCE_INLINE const NodeType* GetChild(
                 const IndexType index) const noexcept
             {
                 return fields_.GetChild(index);
@@ -590,7 +588,7 @@ namespace dockalloc::solver
             /// @param child A pointer to the child node to set.
             ///
             /// @pre 0 <= index < kChildrenSize
-            void SetChild(const IndexType index, NodeType* child) noexcept
+            DOCK_ALLOC_FORCE_INLINE void SetChild(const IndexType index, NodeType* child) noexcept
             {
                 fields_.SetChild(index, child);
             }
@@ -604,7 +602,7 @@ namespace dockalloc::solver
             /// @pre 0 <= index < kSlotSize
             ///
             /// @return A reference to the interval at the specified index.
-            [[nodiscard]] const core::TimeInterval<TimeType>& GetInterval(
+            [[nodiscard]] DOCK_ALLOC_FORCE_INLINE const core::TimeInterval<TimeType>& GetInterval(
                 const IndexType index) const noexcept
             {
                 return fields_.GetInterval(index);
@@ -618,8 +616,8 @@ namespace dockalloc::solver
             /// @param interval The interval to set at the specified index.
             ///
             /// @pre 0 <= index < kSlotSize
-            void SetInterval(const IndexType index,
-                             const core::TimeInterval<TimeType>& interval) noexcept
+            DOCK_ALLOC_FORCE_INLINE void SetInterval(const IndexType index,
+                                                     const core::TimeInterval<TimeType>& interval) noexcept
             {
                 fields_.SetInterval(index, interval);
             }
@@ -633,8 +631,8 @@ namespace dockalloc::solver
             /// @param interval The interval to set at the specified index, which will be moved.
             ///
             /// @pre 0 <= index < kSlotSize
-            void SetInterval(const IndexType index,
-                             core::TimeInterval<TimeType>&& interval) noexcept
+            DOCK_ALLOC_FORCE_INLINE void SetInterval(const IndexType index,
+                                                     core::TimeInterval<TimeType>&& interval) noexcept
             {
                 fields_.SetInterval(index, std::move(interval));
             }
@@ -644,7 +642,7 @@ namespace dockalloc::solver
             /// This function sets the parent node of this node to the specified pointer.
             ///
             /// @param parent A pointer to the parent node to set.
-            void SetParent(const NodeType* parent) noexcept
+            DOCK_ALLOC_FORCE_INLINE void SetParent(const NodeType* parent) noexcept
             {
                 fields_.SetParent(parent);
             }
@@ -654,7 +652,7 @@ namespace dockalloc::solver
             /// This function sets the minimum start time of all intervals stored in this node
             ///
             /// @param min_start_time The minimum start time to set.
-            void SetMinStartTime(const TimeType min_start_time) noexcept
+            DOCK_ALLOC_FORCE_INLINE void SetMinStartTime(const TimeType min_start_time) noexcept
             {
                 fields_.SetMinStartTime(min_start_time);
             }
@@ -664,7 +662,7 @@ namespace dockalloc::solver
             /// This function sets the maximum end time of all intervals stored in this node.
             ///
             /// @param max_end_time The maximum end time to set.
-            void SetMaxEndTime(const TimeType max_end_time) noexcept
+            DOCK_ALLOC_FORCE_INLINE void SetMaxEndTime(const TimeType max_end_time) noexcept
             {
                 fields_.SetMaxEndTime(max_end_time);
             }
@@ -674,7 +672,7 @@ namespace dockalloc::solver
             /// This function sets the maximum gap between any two intervals stored in this node.
             ///
             /// @param max_gap The maximum gap to set.
-            void SetMaxGap(const TimeType max_gap) noexcept
+            DOCK_ALLOC_FORCE_INLINE void SetMaxGap(const TimeType max_gap) noexcept
             {
                 fields_.SetMaxGap(max_gap);
             }
@@ -684,7 +682,7 @@ namespace dockalloc::solver
             /// This function sets the index of the first interval in this node.
             ///
             /// @param start_index The start index to set.
-            void SetStartIndex(const IndexType start_index) noexcept
+            DOCK_ALLOC_FORCE_INLINE void SetStartIndex(const IndexType start_index) noexcept
             {
                 fields_.SetStartIndex(start_index);
             }
@@ -694,7 +692,7 @@ namespace dockalloc::solver
             /// This function sets the index of the last interval in this node.
             ///
             /// @param finish_index The finish index to set.
-            void SetFinishIndex(const IndexType finish_index) noexcept
+            DOCK_ALLOC_FORCE_INLINE void SetFinishIndex(const IndexType finish_index) noexcept
             {
                 fields_.SetFinishIndex(finish_index);
             }
@@ -704,7 +702,7 @@ namespace dockalloc::solver
             /// This function sets the index of the parent.
             ///
             /// @param parent_index The index of the parent to set.
-            void SetParentIndex(const IndexType& parent_index) noexcept
+            DOCK_ALLOC_FORCE_INLINE void SetParentIndex(const IndexType& parent_index) noexcept
             {
                 fields_.SetParentIndex(parent_index);
             }
