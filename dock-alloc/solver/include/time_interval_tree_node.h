@@ -42,6 +42,93 @@ namespace dockalloc::solver
             return layout_.GetParent();
         }
 
+        /// @brief Returns the minimum start time of the intervals in this node.
+        ///
+        /// This function returns the minimum start time of all intervals stored in this node.
+        ///
+        /// @return The minimum start time of the intervals in this node.
+        [[nodiscard]] TimeType GetMinStartTime() const noexcept
+        {
+            return layout_.GetMinStartTime();
+        }
+
+        /// @brief Returns the maximum end time of the intervals in this node.
+        ///
+        /// This function returns the maximum end time of all intervals stored in this node.
+        ///
+        /// @return The maximum end time of the intervals in this node.
+        [[nodiscard]] TimeType GetMaxEndTime() const noexcept
+        {
+            return layout_.GetMaxEndTime();
+        }
+
+        /// @brief Returns the maximum gap between intervals in this node.
+        ///
+        /// This function returns the maximum gap between any two intervals stored in this node.
+        ///
+        /// @return The maximum gap between intervals in this node.
+        [[nodiscard]] TimeType GetMaxGap() const noexcept
+        {
+            return layout_.GetMaxGap();
+        }
+
+        /// @brief Returns the start index of the intervals in this node.
+        ///
+        /// This function returns the index of the first interval in this node.
+        ///
+        /// @return The start index of the intervals in this node.
+        [[nodiscard]] IndexType GetStartIndex() const noexcept
+        {
+            return layout_.GetStartIndex();
+        }
+
+        /// @brief Returns the finish index of the intervals in this node.
+        ///
+        /// This function returns the index of the last interval in this node.
+        ///
+        /// @return The finish index of the intervals in this node.
+        [[nodiscard]] IndexType GetFinishIndex() const noexcept
+        {
+            return layout_.GetFinishIndex();
+        }
+
+        /// @brief Returns the index of the parent.
+        ///
+        /// This function returns the index of the parent.
+        ///
+        /// @return The index of the parent.
+        [[nodiscard]] IndexType GetParentIndex() const noexcept
+        {
+            return layout_.GetParentIndex();
+        }
+
+        /// @brief Returns a pointer to the child node at the specified index.
+        ///
+        /// This function returns a pointer to the child node at the specified index.
+        ///
+        /// @param index The index of the child node to retrieve.
+        ///
+        /// @pre 0 <= index < kChildrenSize
+        ///
+        /// @return A pointer to the child node at the specified index, or \c nullptr if there is no child.
+        [[nodiscard]] const TimeIntervalTreeNode* GetChild(const IndexType index) const noexcept
+        {
+            return layout_.GetChild(index);
+        }
+
+        /// @brief Sets the child node at the specified index.
+        ///
+        /// This function sets the child node at the specified index to the given pointer.
+        ///
+        /// @param index The index of the child node to set.
+        /// @param child A pointer to the child node to set.
+        ///
+        /// @pre 0 <= index < kChildrenSize
+        void SetChild(const IndexType index, const TimeIntervalTreeNode* child) noexcept
+        {
+            layout_.SetChild(index, child);
+        }
+
         /// @brief Gets a \c core::TimeInterval for the given index.
         ///
         /// This function returns a reference to the interval stored at the specified index.

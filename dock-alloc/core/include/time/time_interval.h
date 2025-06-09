@@ -31,14 +31,14 @@ namespace dockalloc::core
         /// Constructs the interval by copying another \c TimeInterval.
         ///
         /// @param other The \c TimeInterval to copy.
-        constexpr TimeInterval(const TimeInterval& other) = default;
+        constexpr TimeInterval(const TimeInterval& other) noexcept = default;
 
         /// @brief Move constructor.
         ///
         /// Constructs the interval by moving another \c TimeInterval.
         ///
         /// @param other The \c TimeInterval to move.
-        constexpr TimeInterval(TimeInterval&& other) = default;
+        constexpr TimeInterval(TimeInterval&& other) noexcept = default;
 
         /// @brief Constructor.
         ///
@@ -49,7 +49,7 @@ namespace dockalloc::core
         ///
         /// @param inclusive_start The start time of the interval (inclusive).
         /// @param exclusive_end The end time of the interval (exclusive).
-        constexpr explicit TimeInterval(const TimeType inclusive_start, const TimeType exclusive_end)
+        constexpr explicit TimeInterval(const TimeType inclusive_start, const TimeType exclusive_end) noexcept
             : start_time_inclusive_(std::min<TimeType>(inclusive_start, exclusive_end)),
               end_time_exclusive_(std::max<TimeType>(inclusive_start, exclusive_end))
         {

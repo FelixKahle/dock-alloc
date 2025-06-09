@@ -4,6 +4,7 @@
 #define DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_LAYOUT_H_
 
 #include <concepts>
+#include "absl/log/check.h"
 #include "dockalloc/core/time/time_interval.h"
 
 namespace dockalloc::solver
@@ -26,9 +27,86 @@ namespace dockalloc::solver
             PointerIndexTime
         };
 
+        /// @brief A storage for time intervals in a time-interval tree node.
+        ///
+        /// This class provides a storage for a time interval in a time-interval tree node,
+        /// by using a raw byte array that is aligned to the size of \c core::TimeInterval<TimeType>.
+        /// This allows to allocate uninitialized memory for the time intervals
+        /// without requiring a separate allocation for each interval.
+        ///
+        /// @tparam TimeType The unsigned integral type used for timestamp fields.
+        template <typename TimeType>
+            requires std::unsigned_integral<TimeType>
+        class alignas(alignof(core::TimeInterval<TimeType>)) IntervalStorage
+        {
+        public:
+            /// @brief Default constructor.
+            ///
+            /// Initializes the storage with default values.
+            IntervalStorage() noexcept = default;
+
+            /// @brief Copy constructor.
+            ///
+            /// Initializes the storage by copying the contents of another \c IntervalStorage.
+            IntervalStorage(const IntervalStorage&) noexcept = default;
+
+            /// @brief Move constructor.
+            ///
+            /// Initializes the storage by moving the contents of another \c IntervalStorage.
+            IntervalStorage(IntervalStorage&&) noexcept = default;
+
+            /// @brief Returns a reference to the time interval stored in this storage.
+            ///
+            /// This function provides a way to access the time interval stored in the raw byte array.
+            ///
+            /// @return A reference to the time interval stored in this storage.
+            core::TimeInterval<TimeType>& Get() noexcept
+            {
+                return *reinterpret_cast<core::TimeInterval<TimeType>*>(bytes);
+            }
+
+            /// @brief Returns a const reference to the time interval stored in this storage.
+            ///
+            /// This function provides a way to access the time interval stored in the raw byte array
+            ///
+            /// @return A const reference to the time interval stored in this storage.
+            const core::TimeInterval<TimeType>& Get() const noexcept
+            {
+                return *reinterpret_cast<const core::TimeInterval<TimeType>*>(bytes);
+            }
+
+            /// @brief Sets the time interval stored in this storage to the given interval.
+            ///
+            /// This function sets the time interval stored in the raw byte array to the given interval.
+            ///
+            /// @param interval The time interval to set in this storage.
+            void Set(const core::TimeInterval<TimeType>& interval) noexcept
+            {
+                *reinterpret_cast<core::TimeInterval<TimeType>*>(bytes) = interval;
+            }
+
+            /// @brief Sets the time interval stored in this storage to the given interval, moving it.
+            ///
+            /// This function sets the time interval stored in the raw byte array to the given interval,
+            /// which is moved into the storage.
+            ///
+            /// @param interval The time interval to set in this storage, moved.
+            void Set(core::TimeInterval<TimeType>&& interval) noexcept
+            {
+                *reinterpret_cast<core::TimeInterval<TimeType>*>(bytes) = std::move(interval);
+            }
+
+        private:
+            /// @brief The raw byte array that stores the time interval.
+            ///
+            /// This array is aligned to the size of \c core::TimeInterval<TimeType>
+            /// and provides a way to store the time interval.
+            alignas(alignof(core::TimeInterval<TimeType>)) std::byte bytes[sizeof(core::TimeInterval<TimeType>)]{};
+        };
+
         /// @brief The layout of fields in a time-interval tree node.
         ///
-        /// This struct defines the layout of fields in a time-interval tree node,
+        /// This class defines the layout of fields in a time-interval tree node,
         /// which includes the time intervals, pointers to parent and children,
         /// and aggregate fields for minimum start time, maximum end time, and maximum gap.
         /// The template specialization allows for different layouts based on the order of fields,
@@ -40,11 +118,55 @@ namespace dockalloc::solver
         /// @tparam Order The order in which fields are laid out in the node.
         template <typename TimeType, typename NodeType, size_t SlotSize, TimeIntervalTreeNodeFieldLayoutOrder Order>
             requires std::unsigned_integral<TimeType>
-        struct TimeIntervalTreeNodeFieldLayout;
+        class TimeIntervalTreeNodeFieldLayout;
+
+#define DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API \
+    static constexpr size_t kSlotSize = SlotSize; \
+    static constexpr size_t kChildrenSize = SlotSize + 1; \
+    using IndexType = core::SmallestUnsignedFor_t<kChildrenSize>; \
+    [[nodiscard]] TimeType GetMinStartTime() const noexcept { return min_start_time_; } \
+    void SetMinStartTime(TimeType value) noexcept { min_start_time_ = value; } \
+    [[nodiscard]] TimeType GetMaxEndTime() const noexcept { return max_end_time_; } \
+    void SetMaxEndTime(TimeType value) noexcept { max_end_time_ = value; } \
+    [[nodiscard]] TimeType GetMaxGap() const noexcept { return max_gap_; } \
+    void SetMaxGap(TimeType value) noexcept { max_gap_ = value; } \
+    [[nodiscard]] IndexType GetStartIndex() const noexcept { return start_index_; } \
+    void SetStartIndex(IndexType value) noexcept { start_index_ = value; } \
+    [[nodiscard]] IndexType GetFinishIndex() const noexcept { return finish_index_; } \
+    void SetFinishIndex(IndexType value) noexcept { finish_index_ = value; } \
+    [[nodiscard]] IndexType GetParentIndex() const noexcept { return parent_index_; } \
+    void SetParentIndex(IndexType value) noexcept { parent_index_ = value; } \
+    [[nodiscard]] NodeType* GetParent() const noexcept { return parent_; } \
+    void SetParent(NodeType* value) noexcept { parent_ = value; } \
+    [[nodiscard]] NodeType* GetChild(const IndexType index) const noexcept \
+    { \
+        DCHECK_LT(index, kChildrenSize); \
+        return children_[index]; \
+    } \
+    void SetChild(const IndexType index, NodeType* value) noexcept \
+    { \
+        DCHECK_LT(index, kChildrenSize); \
+        children_[index] = value; \
+    } \
+    [[nodiscard]] const core::TimeInterval<TimeType>& GetInterval(const IndexType index) const noexcept \
+    { \
+        DCHECK_LT(index, kSlotSize); \
+        return intervals_[index].Get(); \
+    } \
+    void SetInterval(const IndexType index, const core::TimeInterval<TimeType>& interval) noexcept \
+    { \
+        DCHECK_LT(index, kSlotSize); \
+        intervals_[index].Set(interval); \
+    } \
+    void SetInterval(const IndexType index, core::TimeInterval<TimeType>&& interval) noexcept \
+    { \
+        DCHECK_LT(index, kSlotSize); \
+        intervals_[index].Set(std::move(interval)); \
+    }
 
         /// @brief The layout of fields in a time-interval tree node.
         ///
-        /// This struct defines the layout of fields in a time-interval tree node,
+        /// This class defines the layout of fields in a time-interval tree node,
         /// which includes the time intervals, pointers to parent and children,
         /// and aggregate fields for minimum start time, maximum end time, and maximum gap.
         /// The template specialization allows for different layouts based on the order of fields,
@@ -55,38 +177,19 @@ namespace dockalloc::solver
         /// @tparam SlotSize The number of \c TimeInterval<TimeType> slots in the node.
         template <typename TimeType, typename NodeType, size_t SlotSize>
             requires std::unsigned_integral<TimeType>
-        struct TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize,
-                                               TimeIntervalTreeNodeFieldLayoutOrder::TimeIndexPointer>
+        class TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize,
+                                              TimeIntervalTreeNodeFieldLayoutOrder::TimeIndexPointer>
         {
-            /// @brief The slot size in the node.
-            ///
-            /// This is the number of \c TimeInterval<TimeType> slots in the node.
-            static constexpr size_t kSlotSize = SlotSize;
+        public:
+            DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
 
-            /// @brief The size of children each node can have.
-            ///
-            /// This is the number of child pointers in the node, which is one more than the number of slots.
-            static constexpr size_t kChildrenSize = SlotSize + 1;
-
-            /// @brief The storage type for the time intervals in the node.
-            ///
-            /// This is an aligned storage type that can hold a \c core::TimeInterval<TimeType>.
-            struct IntervalStorage
-            {
-                alignas(alignof(core::TimeInterval<TimeType>)) std::byte bytes[sizeof(core::TimeInterval<TimeType>)];
-            };
-
-            /// @brief The type of the index used to access children and intervals.
-            ///
-            /// This is the smallest unsigned type that can hold the number of children in the node.
-            using IndexType = core::SmallestUnsignedFor_t<kChildrenSize>;
-
+        private:
             // Time
 
             TimeType min_start_time_;
             TimeType max_end_time_;
             TimeType max_gap_;
-            IntervalStorage intervals_[kSlotSize];
+            IntervalStorage<TimeType> intervals_[kSlotSize];
 
             // Index
 
@@ -96,13 +199,13 @@ namespace dockalloc::solver
 
             // Pointer
 
-            NodeType* parent_;
-            NodeType* children_[kChildrenSize];
+            NodeType* parent_{nullptr};
+            NodeType* children_[kChildrenSize]{nullptr};
         };
 
         /// @brief The layout of fields in a time-interval tree node.
         ///
-        /// This struct defines the layout of fields in a time-interval tree node,
+        /// This class defines the layout of fields in a time-interval tree node,
         /// which includes the time intervals, pointers to parent and children,
         /// and aggregate fields for minimum start time, maximum end time, and maximum gap.
         /// The template specialization allows for different layouts based on the order of fields,
@@ -113,42 +216,24 @@ namespace dockalloc::solver
         /// @tparam SlotSize The number of \c TimeInterval<TimeType> slots in the node.
         template <typename TimeType, typename NodeType, size_t SlotSize>
             requires std::unsigned_integral<TimeType>
-        struct TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize,
-                                               TimeIntervalTreeNodeFieldLayoutOrder::TimePointerIndex>
+        class TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize,
+                                              TimeIntervalTreeNodeFieldLayoutOrder::TimePointerIndex>
         {
-            /// @brief The slot size in the node.
-            ///
-            /// This is the number of \c TimeInterval<TimeType> slots in the node.
-            static constexpr size_t kSlotSize = SlotSize;
+        public:
+            DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
 
-            /// @brief The size of children each node can have.
-            ///
-            /// This is the number of child pointers in the node, which is one more than the number of slots.
-            static constexpr size_t kChildrenSize = SlotSize + 1;
-
-            /// @brief The storage type for the time intervals in the node.
-            ///
-            /// This is an aligned storage type that can hold a \c core::TimeInterval<TimeType>.
-            struct IntervalStorage
-            {
-                alignas(alignof(core::TimeInterval<TimeType>)) std::byte bytes[sizeof(core::TimeInterval<TimeType>)];
-            };
-
-            /// @brief The type of the index used to access children and intervals.
-            ///
-            /// This is the smallest unsigned type that can hold the number of children in the node.
-            using IndexType = core::SmallestUnsignedFor_t<kChildrenSize>;
+        private:
             // Time
 
             TimeType min_start_time_;
             TimeType max_end_time_;
             TimeType max_gap_;
-            IntervalStorage intervals_[kSlotSize];
+            IntervalStorage<TimeType> intervals_[kSlotSize];
 
             // Pointer
 
-            NodeType* parent_;
-            NodeType* children_[kChildrenSize];
+            NodeType* parent_{nullptr};
+            NodeType* children_[kChildrenSize]{nullptr};
 
             // Index
 
@@ -159,7 +244,7 @@ namespace dockalloc::solver
 
         /// @brief The layout of fields in a time-interval tree node.
         ///
-        /// This struct defines the layout of fields in a time-interval tree node,
+        /// This class defines the layout of fields in a time-interval tree node,
         /// which includes the time intervals, pointers to parent and children,
         /// and aggregate fields for minimum start time, maximum end time, and maximum gap.
         /// The template specialization allows for different layouts based on the order of fields,
@@ -170,31 +255,13 @@ namespace dockalloc::solver
         /// @tparam SlotSize The number of \c TimeInterval<TimeType> slots in the node.
         template <typename TimeType, typename NodeType, size_t SlotSize>
             requires std::unsigned_integral<TimeType>
-        struct TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize,
-                                               TimeIntervalTreeNodeFieldLayoutOrder::IndexTimePointer>
+        class TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize,
+                                              TimeIntervalTreeNodeFieldLayoutOrder::IndexTimePointer>
         {
-            /// @brief The slot size in the node.
-            ///
-            /// This is the number of \c TimeInterval<TimeType> slots in the node.
-            static constexpr size_t kSlotSize = SlotSize;
+        public:
+            DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
 
-            /// @brief The size of children each node can have.
-            ///
-            /// This is the number of child pointers in the node, which is one more than the number of slots.
-            static constexpr size_t kChildrenSize = SlotSize + 1;
-
-            /// @brief The storage type for the time intervals in the node.
-            ///
-            /// This is an aligned storage type that can hold a \c core::TimeInterval<TimeType>.
-            struct IntervalStorage
-            {
-                alignas(alignof(core::TimeInterval<TimeType>)) std::byte bytes[sizeof(core::TimeInterval<TimeType>)];
-            };
-
-            /// @brief The type of the index used to access children and intervals.
-            ///
-            /// This is the smallest unsigned type that can hold the number of children in the node.
-            using IndexType = core::SmallestUnsignedFor_t<kChildrenSize>;
+        private:
             // Index
 
             IndexType start_index_;
@@ -206,17 +273,17 @@ namespace dockalloc::solver
             TimeType min_start_time_;
             TimeType max_end_time_;
             TimeType max_gap_;
-            IntervalStorage intervals_[kSlotSize];
+            IntervalStorage<TimeType> intervals_[kSlotSize];
 
             // Pointer
 
-            NodeType* parent_;
-            NodeType* children_[kChildrenSize];
+            NodeType* parent_{nullptr};
+            NodeType* children_[kChildrenSize]{nullptr};
         };
 
         /// @brief The layout of fields in a time-interval tree node.
         ///
-        /// This struct defines the layout of fields in a time-interval tree node,
+        /// This class defines the layout of fields in a time-interval tree node,
         /// which includes the time intervals, pointers to parent and children,
         /// and aggregate fields for minimum start time, maximum end time, and maximum gap.
         /// The template specialization allows for different layouts based on the order of fields,
@@ -227,32 +294,13 @@ namespace dockalloc::solver
         /// @tparam SlotSize The number of \c TimeInterval<TimeType> slots in the node.
         template <typename TimeType, typename NodeType, size_t SlotSize>
             requires std::unsigned_integral<TimeType>
-        struct TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize,
-                                               TimeIntervalTreeNodeFieldLayoutOrder::IndexPointerTime>
+        class TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize,
+                                              TimeIntervalTreeNodeFieldLayoutOrder::IndexPointerTime>
         {
-            /// @brief The slot size in the node.
-            ///
-            /// This is the number of \c TimeInterval<TimeType> slots in the node.
-            static constexpr size_t kSlotSize = SlotSize;
+        public:
+            DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
 
-            /// @brief The size of children each node can have.
-            ///
-            /// This is the number of child pointers in the node, which is one more than the number of slots.
-            static constexpr size_t kChildrenSize = SlotSize + 1;
-
-            /// @brief The storage type for the time intervals in the node.
-            ///
-            /// This is an aligned storage type that can hold a \c core::TimeInterval<TimeType>.
-            struct IntervalStorage
-            {
-                alignas(alignof(core::TimeInterval<TimeType>)) std::byte bytes[sizeof(core::TimeInterval<TimeType>)];
-            };
-
-            /// @brief The type of the index used to access children and intervals.
-            ///
-            /// This is the smallest unsigned type that can hold the number of children in the node.
-            using IndexType = core::SmallestUnsignedFor_t<kChildrenSize>;
-
+        private:
             // Index
 
             IndexType start_index_;
@@ -261,20 +309,20 @@ namespace dockalloc::solver
 
             // Pointer
 
-            NodeType* parent_;
-            NodeType* children_[kChildrenSize];
+            NodeType* parent_{nullptr};
+            NodeType* children_[kChildrenSize]{nullptr};
 
             // Time
 
             TimeType min_start_time_;
             TimeType max_end_time_;
             TimeType max_gap_;
-            IntervalStorage intervals_[kSlotSize];
+            IntervalStorage<TimeType> intervals_[kSlotSize];
         };
 
         /// @brief The layout of fields in a time-interval tree node.
         ///
-        /// This struct defines the layout of fields in a time-interval tree node,
+        /// This class defines the layout of fields in a time-interval tree node,
         /// which includes the time intervals, pointers to parent and children,
         /// and aggregate fields for minimum start time, maximum end time, and maximum gap.
         /// The template specialization allows for different layouts based on the order of fields,
@@ -285,43 +333,24 @@ namespace dockalloc::solver
         /// @tparam SlotSize The number of \c TimeInterval<TimeType> slots in the node.
         template <typename TimeType, typename NodeType, size_t SlotSize>
             requires std::unsigned_integral<TimeType>
-        struct TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize,
-                                               TimeIntervalTreeNodeFieldLayoutOrder::PointerTimeIndex>
+        class TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize,
+                                              TimeIntervalTreeNodeFieldLayoutOrder::PointerTimeIndex>
         {
-            /// @brief The slot size in the node.
-            ///
-            /// This is the number of \c TimeInterval<TimeType> slots in the node.
-            static constexpr size_t kSlotSize = SlotSize;
+        public:
+            DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
 
-            /// @brief The size of children each node can have.
-            ///
-            /// This is the number of child pointers in the node, which is one more than the number of slots.
-            static constexpr size_t kChildrenSize = SlotSize + 1;
-
-            /// @brief The storage type for the time intervals in the node.
-            ///
-            /// This is an aligned storage type that can hold a \c core::TimeInterval<TimeType>.
-            struct IntervalStorage
-            {
-                alignas(alignof(core::TimeInterval<TimeType>)) std::byte bytes[sizeof(core::TimeInterval<TimeType>)];
-            };
-
-            /// @brief The type of the index used to access children and intervals.
-            ///
-            /// This is the smallest unsigned type that can hold the number of children in the node.
-            using IndexType = core::SmallestUnsignedFor_t<kChildrenSize>;
-
+        private:
             // Pointer
 
-            NodeType* parent_;
-            NodeType* children_[kChildrenSize];
+            NodeType* parent_{nullptr};
+            NodeType* children_[kChildrenSize]{nullptr};
 
             // Time
 
             TimeType min_start_time_;
             TimeType max_end_time_;
             TimeType max_gap_;
-            IntervalStorage intervals_[kSlotSize];
+            IntervalStorage<TimeType> intervals_[kSlotSize];
 
             // Index
 
@@ -332,7 +361,7 @@ namespace dockalloc::solver
 
         /// @brief The layout of fields in a time-interval tree node.
         ///
-        /// This struct defines the layout of fields in a time-interval tree node,
+        /// This class defines the layout of fields in a time-interval tree node,
         /// which includes the time intervals, pointers to parent and children,
         /// and aggregate fields for minimum start time, maximum end time, and maximum gap.
         /// The template specialization allows for different layouts based on the order of fields,
@@ -343,36 +372,17 @@ namespace dockalloc::solver
         /// @tparam SlotSize The number of \c TimeInterval<TimeType> slots in the node.
         template <typename TimeType, typename NodeType, size_t SlotSize>
             requires std::unsigned_integral<TimeType>
-        struct TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize,
-                                               TimeIntervalTreeNodeFieldLayoutOrder::PointerIndexTime>
+        class TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize,
+                                              TimeIntervalTreeNodeFieldLayoutOrder::PointerIndexTime>
         {
-            /// @brief The slot size in the node.
-            ///
-            /// This is the number of \c TimeInterval<TimeType> slots in the node.
-            static constexpr size_t kSlotSize = SlotSize;
+        public:
+            DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
 
-            /// @brief The size of children each node can have.
-            ///
-            /// This is the number of child pointers in the node, which is one more than the number of slots.
-            static constexpr size_t kChildrenSize = SlotSize + 1;
-
-            /// @brief The storage type for the time intervals in the node.
-            ///
-            /// This is an aligned storage type that can hold a \c core::TimeInterval<TimeType>.
-            struct IntervalStorage
-            {
-                alignas(alignof(core::TimeInterval<TimeType>)) std::byte bytes[sizeof(core::TimeInterval<TimeType>)];
-            };
-
-            /// @brief The type of the index used to access children and intervals.
-            ///
-            /// This is the smallest unsigned type that can hold the number of children in the node.
-            using IndexType = core::SmallestUnsignedFor_t<kChildrenSize>;
-
+        private:
             // Pointer
 
-            NodeType* parent_;
-            NodeType* children_[kChildrenSize];
+            NodeType* parent_{nullptr};
+            NodeType* children_[kChildrenSize]{nullptr};
 
             // Index
 
@@ -385,8 +395,10 @@ namespace dockalloc::solver
             TimeType min_start_time_;
             TimeType max_end_time_;
             TimeType max_gap_;
-            IntervalStorage intervals_[kSlotSize];
+            IntervalStorage<TimeType> intervals_[kSlotSize];
         };
+
+#undef DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
 
         /// @brief The implementation of the time-interval tree node layout based on the desired size of slots.
         ///
@@ -405,12 +417,14 @@ namespace dockalloc::solver
             /// based on the alignment of the types involved.
             ///
             /// @return The order of fields in the time-interval tree node layout.
-            static constexpr TimeIntervalTreeNodeFieldLayoutOrder NodeFieldLayoutOrder() noexcept
+            static constexpr TimeIntervalTreeNodeFieldLayoutOrder
+            NodeFieldLayoutOrder() noexcept
             {
                 // ReSharper disable once CppTooWideScopeInitStatement
                 constexpr size_t alignof_time = alignof(TimeType);
                 // ReSharper disable once CppTooWideScopeInitStatement
-                constexpr size_t alignof_index = alignof(core::SmallestUnsignedFor_t<SlotSize + 1>);
+                constexpr size_t alignof_index = alignof(core::SmallestUnsignedFor_t<SlotSize +
+                    1>);
                 // ReSharper disable once CppTooWideScopeInitStatement
                 constexpr size_t alignof_pointer = alignof(NodeType*);
 
@@ -418,19 +432,23 @@ namespace dockalloc::solver
                 {
                     return TimeIntervalTreeNodeFieldLayoutOrder::TimeIndexPointer;
                 }
-                else if constexpr (alignof_time >= alignof_pointer && alignof_pointer >= alignof_index)
+                else if constexpr (alignof_time >= alignof_pointer && alignof_pointer >=
+                    alignof_index)
                 {
                     return TimeIntervalTreeNodeFieldLayoutOrder::TimePointerIndex;
                 }
-                else if constexpr (alignof_index >= alignof_time && alignof_time >= alignof_pointer)
+                else if constexpr (alignof_index >= alignof_time && alignof_time >=
+                    alignof_pointer)
                 {
                     return TimeIntervalTreeNodeFieldLayoutOrder::IndexTimePointer;
                 }
-                else if constexpr (alignof_index >= alignof_pointer && alignof_pointer >= alignof_time)
+                else if constexpr (alignof_index >= alignof_pointer && alignof_pointer >=
+                    alignof_time)
                 {
                     return TimeIntervalTreeNodeFieldLayoutOrder::IndexPointerTime;
                 }
-                else if constexpr (alignof_pointer >= alignof_time && alignof_time >= alignof_index)
+                else if constexpr (alignof_pointer >= alignof_time && alignof_time >=
+                    alignof_index)
                 {
                     return TimeIntervalTreeNodeFieldLayoutOrder::PointerTimeIndex;
                 }
@@ -444,12 +462,14 @@ namespace dockalloc::solver
             /// @brief The order of fields in the time-interval tree node layout.
             ///
             /// This is a compile-time constant that determines the order of fields in the node layout.
-            static constexpr TimeIntervalTreeNodeFieldLayoutOrder kFieldLayoutOrder = NodeFieldLayoutOrder();
+            static constexpr TimeIntervalTreeNodeFieldLayoutOrder kFieldLayoutOrder =
+                NodeFieldLayoutOrder();
 
             /// @brief The Base layout type for the time-interval tree node.
             ///
             /// This is the base layout type that provides the common fields for the implementation.
-            using Base = TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize, kFieldLayoutOrder>;
+            using Base = TimeIntervalTreeNodeFieldLayout<
+                TimeType, NodeType, SlotSize, kFieldLayoutOrder>;
 
             /// @brief The type of the index used to access children and intervals.
             ///
@@ -479,7 +499,7 @@ namespace dockalloc::solver
             /// @return A pointer to the parent node, or \c nullptr if there is no parent.
             [[nodiscard]] NodeType* GetParent() const noexcept
             {
-                return fields_.parent_;
+                return fields_.GetParent();
             }
 
             /// @brief Returns the minimum start time of the intervals in this node.
@@ -489,7 +509,7 @@ namespace dockalloc::solver
             /// @return The minimum start time of the intervals in this node.
             [[nodiscard]] TimeType GetMinStartTime() const noexcept
             {
-                return fields_.min_start_time_;
+                return fields_.GetMinStartTime();
             }
 
             /// @brief Returns the maximum end time of the intervals in this node.
@@ -499,7 +519,7 @@ namespace dockalloc::solver
             /// @return The maximum end time of the intervals in this node.
             [[nodiscard]] TimeType GetMaxEndTime() const noexcept
             {
-                return fields_.max_end_time_;
+                return fields_.GetMaxEndTime();
             }
 
             /// @brief Returns the maximum gap between intervals in this node.
@@ -509,7 +529,7 @@ namespace dockalloc::solver
             /// @return The maximum gap between intervals in this node.
             [[nodiscard]] TimeType GetMaxGap() const noexcept
             {
-                return fields_.max_gap_;
+                return fields_.GetMaxGap();
             }
 
             /// @brief Returns the start index of the intervals in this node.
@@ -519,7 +539,7 @@ namespace dockalloc::solver
             /// @return The start index of the intervals in this node.
             [[nodiscard]] IndexType GetStartIndex() const noexcept
             {
-                return fields_.start_index_;
+                return fields_.GetStartIndex();
             }
 
             /// @brief Returns the finish index of the intervals in this node.
@@ -529,7 +549,7 @@ namespace dockalloc::solver
             /// @return The finish index of the intervals in this node.
             [[nodiscard]] IndexType GetFinishIndex() const noexcept
             {
-                return fields_.finish_index_;
+                return fields_.GetFinishIndex();
             }
 
             /// @brief Returns the index of the parent.
@@ -539,7 +559,7 @@ namespace dockalloc::solver
             /// @return The index of the parent.
             [[nodiscard]] IndexType GetParentIndex() const noexcept
             {
-                return fields_.parent_index_;
+                return fields_.GetParentIndex();
             }
 
             /// @brief Returns a pointer to the child node at the specified index.
@@ -554,7 +574,7 @@ namespace dockalloc::solver
             [[nodiscard]] const NodeType* GetChild(
                 const IndexType index) const noexcept
             {
-                return fields_.children_[index];
+                return fields_.GetChild(index);
             }
 
             /// @brief Sets the child node at the specified index.
@@ -567,7 +587,7 @@ namespace dockalloc::solver
             /// @pre 0 <= index < kChildrenSize
             void SetChild(const IndexType index, NodeType* child) noexcept
             {
-                fields_.children_[index] = child;
+                fields_.SetChild(index, child);
             }
 
             /// @brief Returns a reference to the interval at the specified index.
@@ -579,9 +599,10 @@ namespace dockalloc::solver
             /// @pre 0 <= index < kSlotSize
             ///
             /// @return A reference to the interval at the specified index.
-            [[nodiscard]] const core::TimeInterval<TimeType>& GetInterval(const IndexType index) const noexcept
+            [[nodiscard]] const core::TimeInterval<TimeType>& GetInterval(
+                const IndexType index) const noexcept
             {
-                return *reinterpret_cast<const core::TimeInterval<TimeType>*>(&fields_.intervals_[index]);
+                return fields_.GetInterval(index);
             }
 
             /// @brief Sets the interval at the specified index.
@@ -592,9 +613,10 @@ namespace dockalloc::solver
             /// @param interval The interval to set at the specified index.
             ///
             /// @pre 0 <= index < kSlotSize
-            void SetInterval(const IndexType index, const core::TimeInterval<TimeType>& interval) noexcept
+            void SetInterval(const IndexType index,
+                             const core::TimeInterval<TimeType>& interval) noexcept
             {
-                *reinterpret_cast<core::TimeInterval<TimeType>*>(&fields_.intervals_[index]) = interval;
+                fields_.SetInterval(index, interval);
             }
 
             /// @brief Sets the interval at the specified index to a moved interval.
@@ -606,9 +628,10 @@ namespace dockalloc::solver
             /// @param interval The interval to set at the specified index, which will be moved.
             ///
             /// @pre 0 <= index < kSlotSize
-            void SetInterval(const IndexType index, core::TimeInterval<TimeType>&& interval) noexcept
+            void SetInterval(const IndexType index,
+                             core::TimeInterval<TimeType>&& interval) noexcept
             {
-                *reinterpret_cast<core::TimeInterval<TimeType>*>(&fields_.intervals_[index]) = std::move(interval);
+                fields_.SetInterval(index, std::move(interval));
             }
 
             /// @brief Sets the parent node of this node.
@@ -618,7 +641,7 @@ namespace dockalloc::solver
             /// @param parent A pointer to the parent node to set.
             void SetParent(const NodeType* parent) noexcept
             {
-                fields_.parent_ = parent;
+                fields_.SetParent(parent);
             }
 
             /// @brief Sets the minimum start time of the intervals in this node.
@@ -628,7 +651,7 @@ namespace dockalloc::solver
             /// @param min_start_time The minimum start time to set.
             void SetMinStartTime(const TimeType min_start_time) noexcept
             {
-                fields_.min_start_time_ = min_start_time;
+                fields_.SetMinStartTime(min_start_time);
             }
 
             /// @brief Sets the maximum end time of the intervals in this node.
@@ -638,7 +661,7 @@ namespace dockalloc::solver
             /// @param max_end_time The maximum end time to set.
             void SetMaxEndTime(const TimeType max_end_time) noexcept
             {
-                fields_.max_end_time_ = max_end_time;
+                fields_.SetMaxEndTime(max_end_time);
             }
 
             /// @brief Sets the maximum gap between intervals in this node.
@@ -648,7 +671,7 @@ namespace dockalloc::solver
             /// @param max_gap The maximum gap to set.
             void SetMaxGap(const TimeType max_gap) noexcept
             {
-                fields_.max_gap_ = max_gap;
+                fields_.SetMaxGap(max_gap);
             }
 
             /// @brief Sets the start index of the intervals in this node.
@@ -658,7 +681,7 @@ namespace dockalloc::solver
             /// @param start_index The start index to set.
             void SetStartIndex(const IndexType start_index) noexcept
             {
-                fields_.start_index_ = start_index;
+                fields_.SetStartIndex(start_index);
             }
 
             /// @brief Sets the finish index of the intervals in this node.
@@ -668,7 +691,7 @@ namespace dockalloc::solver
             /// @param finish_index The finish index to set.
             void SetFinishIndex(const IndexType finish_index) noexcept
             {
-                fields_.finish_index_ = finish_index;
+                fields_.SetFinishIndex(finish_index);
             }
 
             /// @brief Sets the index of the parent.
@@ -678,7 +701,7 @@ namespace dockalloc::solver
             /// @param parent_index The index of the parent to set.
             void SetParentIndex(const IndexType& parent_index) noexcept
             {
-                fields_.parent_index_ = parent_index;
+                fields_.SetParentIndex(parent_index);
             }
 
         private:
@@ -731,8 +754,9 @@ namespace dockalloc::solver
             }
             else
             {
-                if constexpr (constexpr size_t mid_index = (Begin + End) / 2; sizeof(internal::LayoutImpl<
-                    TimeType, NodeType, mid_index + 1>) > TargetNodeSize)
+                if constexpr (constexpr size_t mid_index = (Begin + End) / 2; sizeof(
+                    internal::LayoutImpl<
+                        TimeType, NodeType, mid_index + 1>) > TargetNodeSize)
                 {
                     return NodeTargetSlots<Begin, mid_index>();
                 }
@@ -748,7 +772,9 @@ namespace dockalloc::solver
         ///
         /// This is the number of \c TimeInterval<TimeType> slots in the node, which is determined
         /// by the compile-time binary search to find the optimal slot count.
-        static constexpr size_t kNodeSlotSize = (kMinSize > TargetNodeSize) ? 4 : NodeTargetSlots<4, TargetNodeSize>();
+        static constexpr size_t kNodeSlotSize = (kMinSize > TargetNodeSize)
+                                                    ? 4
+                                                    : NodeTargetSlots<4, TargetNodeSize>();
 
         /// @brief The number of child pointers in the node, which is one more than the number of slots.
         ///
