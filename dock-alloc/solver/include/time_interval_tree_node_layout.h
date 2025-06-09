@@ -429,8 +429,7 @@ namespace dockalloc::solver
                 // ReSharper disable once CppTooWideScopeInitStatement
                 constexpr size_t alignof_time = alignof(TimeType);
                 // ReSharper disable once CppTooWideScopeInitStatement
-                constexpr size_t alignof_index = alignof(core::SmallestUnsignedFor_t<SlotSize +
-                    1>);
+                constexpr size_t alignof_index = alignof(core::SmallestUnsignedFor_t<SlotSize + 1>);
                 // ReSharper disable once CppTooWideScopeInitStatement
                 constexpr size_t alignof_pointer = alignof(NodeType*);
 
