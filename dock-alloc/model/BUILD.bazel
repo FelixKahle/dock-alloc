@@ -1,0 +1,27 @@
+# Copyright 2025 Felix Kahle. All rights reserved.
+
+cc_library(
+    name = "model",
+    hdrs = [
+        "include/ship.h",
+        "include/types.h",
+    ],
+    include_prefix = "dockalloc/model",
+    strip_include_prefix = "include",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//dock-alloc/core",
+        "@abseil-cpp//absl/strings:str_format",
+    ],
+)
+
+cc_test(
+    name = "model-test",
+    srcs = [
+        "test/ship_test.cc",
+    ],
+    deps = [
+        "//dock-alloc/model",
+        "@googletest//:gtest_main",
+    ],
+)
