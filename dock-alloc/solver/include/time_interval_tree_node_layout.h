@@ -6,6 +6,7 @@
 #include <concepts>
 #include <cstddef>
 #include "absl/log/check.h"
+#include "dockalloc/core/type_traits/smallest_unsigned_for.h"
 #include "dockalloc/core/miscellaneous/inline.h"
 #include "dockalloc/core/time/time_interval.h"
 
@@ -36,6 +37,9 @@ namespace dockalloc::solver
         /// This allows to allocate uninitialized memory for the time intervals
         /// without requiring a separate allocation for each interval.
         ///
+        /// @note Trying to access a time interval before it has been set will
+        /// most likely result in undefined behavior.
+        ///
         /// @tparam TimeType The unsigned integral type used for timestamp fields.
         template <typename TimeType>
             requires std::unsigned_integral<TimeType>
@@ -50,12 +54,26 @@ namespace dockalloc::solver
             /// @brief Copy constructor.
             ///
             /// Initializes the storage by copying the contents of another \c IntervalStorage.
-            IntervalStorage(const IntervalStorage&) noexcept = default;
+            ///
+            /// @param interval_storage The \c IntervalStorage to copy from.
+            IntervalStorage(const IntervalStorage& interval_storage) noexcept = default;
 
             /// @brief Move constructor.
             ///
             /// Initializes the storage by moving the contents of another \c IntervalStorage.
-            IntervalStorage(IntervalStorage&&) noexcept = default;
+            ///
+            /// @param interval_storage The \c IntervalStorage to move from.
+            IntervalStorage(IntervalStorage&& interval_storage) noexcept = default;
+
+            /// @brief Constructs an \c IntervalStorage from a \c core::TimeInterval<TimeType>.
+            ///
+            /// This constructor initializes the storage with the given time interval.
+            ///
+            /// @param interval The time interval to initialize the storage with.
+            explicit DOCK_ALLOC_FORCE_INLINE IntervalStorage(const core::TimeInterval<TimeType>& interval) noexcept
+            {
+                Set(interval);
+            }
 
             /// @brief Returns a reference to the time interval stored in this storage.
             ///

@@ -24,6 +24,7 @@ cc_test(
     name = "solver-test",
     srcs = [
         "test/bit_span_test.cc",
+        "test/time_interval_tree_node_layout_test.cc",
         "test/time_interval_tree_node_test.cc",
     ],
     deps = [
