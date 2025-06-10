@@ -3,8 +3,8 @@
 cc_library(
     name = "model",
     hdrs = [
-        "include/ship.h",
         "include/types.h",
+        "include/vessel.h",
     ],
     include_prefix = "dockalloc/model",
     strip_include_prefix = "include",
@@ -18,7 +18,7 @@ cc_library(
 cc_test(
     name = "model-test",
     srcs = [
-        "test/ship_test.cc",
+        "test/vessel_test.cc",
     ],
     deps = [
         "//dock-alloc/model",

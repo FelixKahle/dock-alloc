@@ -1,3 +1,3 @@
 // Copyright 2025 Felix Kahle. All rights reserved.
 
-#include "dockalloc/model/ship.h"
+#include "dockalloc/model/vessel.h"
