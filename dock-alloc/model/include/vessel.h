@@ -5,6 +5,8 @@
 
 #include <concepts>
 #include <utility>
+#include "dockalloc/core/type_traits/concepts.h"
+#include "dockalloc/core/miscellaneous/core_defines.h"
 #include "dockalloc/model/types.h"
 
 namespace dockalloc::model
@@ -28,7 +30,7 @@ namespace dockalloc::model
 
         /// @brief Move constructor.
         ///
-        /// This constructor transfers ownership of resources from another Vessel object to this one.
+        /// This constructor creates a new Vessel object by moving another.
         ///
         /// @param other The Vessel object to move.
         constexpr Vessel(Vessel&& other) noexcept = default;
@@ -126,230 +128,184 @@ namespace dockalloc::model
             return H::combine(std::move(h), vessel.length_, vessel.width_, vessel.draft_);
         }
 
-        // Delete copy and move assignment operators to prevent copying or moving and make the class immutable.
-
-        constexpr Vessel& operator=(const Vessel&) = delete;
-        constexpr Vessel& operator=(Vessel&&) = delete;
-
     private:
         DistanceType length_;
         DistanceType width_;
         DistanceType draft_;
     };
 
-    /// @brief Represents a vessel plan with time, distance, and cost parameters.
-    ///
-    /// This class encapsulates the planning parameters for a vessel, including its nominal arrival time,
-    /// nominal handling time, desired departure time, desired berth position,
-    /// cost per unit delay, cost for late departure, and cost for berth offset.
-    ///
-    /// @tparam TimeType The type used for the time measurements of the vessel plan.
-    /// @tparam DistanceType The type used for the distance measurements of the vessel plan.
-    /// @tparam CostType The type used for the cost measurements of the vessel plan.
-    template <typename TimeType, typename DistanceType, typename CostType>
-        requires std::unsigned_integral<TimeType> && std::unsigned_integral<DistanceType> && std::is_arithmetic_v<
-            CostType>
-    class VesselPlan
+    template <typename TimeType, typename CostType>
+        requires std::unsigned_integral<TimeType> && core::IsArithmetic<CostType>
+    class VesselScenario
     {
     public:
         /// @brief Copy constructor.
         ///
-        /// This constructor creates a copy of another \c VesselPlan object.
+        /// This constructor creates a copy of another \c VesselScenario object.
         ///
-        /// @param other The \c VesselPlan object to copy.
-        constexpr VesselPlan(const VesselPlan& other) noexcept = default;
+        /// @param other The \c VesselScenario object to copy.
+        constexpr VesselScenario(const VesselScenario& other) noexcept = default;
 
         /// @brief Move constructor.
         ///
-        /// This constructor transfers ownership of resources from another \c VesselPlan object to this one.
+        /// This constructor creates a new \c VesselScenario object by moving another.
         ///
-        /// @param other The \c VesselPlan object to move.
-        constexpr VesselPlan(VesselPlan&& other) noexcept = default;
+        /// @param other The \c VesselScenario object to move.
+        constexpr VesselScenario(const VesselScenario&& other) noexcept = default;
 
-        /// @brief Constructs a \c VesselPlan with the given values.
+        /// @brief Constructs a \c VesselScenario with the given values.
         ///
-        /// This constructor initializes a \c VesselPlan object with the specified nominal arrival time,
-        /// nominal handling time, desired departure time, desired berth position,
-        /// cost per unit delay, cost for late departure, and cost for berth offset.
+        /// This constructor initializes a \c VesselScenario object with the specified arrival time,
+        /// planned departure time, processing time, and cost parameters.
         ///
-        /// @param nominal_arrival The nominal arrival time of the vessel.
-        /// @param nominal_handling The nominal handling time of the vessel.
-        /// @param desired_departure The desired departure time of the vessel.
-        /// @param desired_berth_position The desired berth position of the vessel.
-        /// @param cost_delay_per_unit The cost per unit delay for the vessel.
-        /// @param cost_late_departure The cost for late departure of the vessel.
-        /// @param cost_berth_offset The cost for berth offset of the vessel.
-        [[nodiscard]] constexpr explicit VesselPlan(const TimeType nominal_arrival, const TimeType nominal_handling,
-                                                    const TimeType desired_departure,
-                                                    const DistanceType desired_berth_position,
-                                                    const CostType cost_delay_per_unit,
-                                                    const CostType cost_late_departure,
-                                                    const CostType cost_berth_offset) noexcept
-            : nominal_arrival_(nominal_arrival),
-              nominal_handling_(nominal_handling),
-              desired_departure_(desired_departure),
-              desired_berth_position_(desired_berth_position),
+        /// @param arrival_time The time when the vessel arrives.
+        /// @param planned_departure_time The planned time for the vessel to depart.
+        /// @param processing_time The time required to process the vessel.
+        /// @param cost_delay_per_unit The cost incurred for each unit of delay.
+        /// @param cost_late_departure The cost incurred for a late departure.
+        /// @param cost_berth_offset The cost incurred for berth offset.
+        [[nodiscard]] constexpr explicit VesselScenario(const TimeType arrival_time,
+                                                        const TimeType planned_departure_time,
+                                                        const TimeType processing_time,
+                                                        const CostType cost_delay_per_unit,
+                                                        const CostType cost_late_departure,
+                                                        const CostType cost_berth_offset) noexcept
+            : arrival_time_(arrival_time),
+              planned_departure_time_(planned_departure_time),
+              processing_time_(processing_time),
               cost_delay_per_unit_(cost_delay_per_unit),
               cost_late_departure_(cost_late_departure),
               cost_berth_offset_(cost_berth_offset)
         {
         }
 
-        /// @brief Gets the nominal arrival time of the vessel.
+        /// @brief Gets the arrival time of the vessel.
         ///
-        /// This function returns the nominal arrival time of the vessel.
+        /// This function returns the time when the vessel arrives.
         ///
-        /// @return The nominal arrival time of the vessel.
-        [[nodiscard]] constexpr TimeType GetNominalArrival() const noexcept
+        /// @return The arrival time of the vessel.
+        [[nodiscard]] TimeType GetArrivalTime() const
         {
-            return nominal_arrival_;
+            return arrival_time_;
         }
 
-        /// @brief Gets the nominal handling time of the vessel.
+        /// @brief Gets the planned departure time of the vessel.
         ///
-        /// This function returns the nominal handling time of the vessel.
+        /// This function returns the planned time for the vessel to depart.
         ///
-        /// @return The nominal handling time of the vessel.
-        [[nodiscard]] constexpr TimeType GetNominalHandling() const noexcept
+        /// @return The planned departure time of the vessel.
+        [[nodiscard]] TimeType GetPlannedDepartureTime() const
         {
-            return nominal_handling_;
+            return planned_departure_time_;
         }
 
-        /// @brief Gets the desired departure time of the vessel.
+        /// @brief Gets the processing time of the vessel.
         ///
-        /// This function returns the desired departure time of the vessel.
+        /// This function returns the time required to process the vessel.
         ///
-        /// @return The desired departure time of the vessel.
-        [[nodiscard]] constexpr TimeType GetDesiredDeparture() const noexcept
+        /// @return The processing time of the vessel.
+        [[nodiscard]] TimeType GetProcessingTime() const
         {
-            return desired_departure_;
+            return processing_time_;
         }
 
-        /// @brief Gets the desired berth position of the vessel.
+        /// @brief Gets the cost incurred for each unit of delay.
         ///
-        /// This function returns the desired berth position of the vessel.
+        /// This function returns the cost associated with each unit of delay for the vessel.
         ///
-        /// @return The desired berth position of the vessel.
-        [[nodiscard]] constexpr DistanceType GetDesiredBerthPosition() const noexcept
-        {
-            return desired_berth_position_;
-        }
-
-        /// @brief Gets the cost per unit delay for the vessel.
-        ///
-        /// This function returns the cost per unit delay for the vessel.
-        ///
-        /// @return The cost per unit delay for the vessel.
-        [[nodiscard]] constexpr CostType GetCostDelayPerUnit() const noexcept
+        /// @return The cost incurred for each unit of delay.
+        [[nodiscard]] CostType GetCostDelayPerUnit() const
         {
             return cost_delay_per_unit_;
         }
 
-        /// @brief Gets the cost for late departure of the vessel.
+        /// @brief Gets the cost incurred for a late departure.
         ///
-        /// This function returns the cost for late departure of the vessel.
+        /// This function returns the cost associated with a late departure of the vessel.
         ///
-        /// @return The cost for late departure of the vessel.
-        [[nodiscard]] constexpr CostType GetCostLateDeparture() const noexcept
+        /// @return The cost incurred for a late departure.
+        [[nodiscard]] CostType GetCostLateDeparture() const
         {
             return cost_late_departure_;
         }
 
-        /// @brief Gets the cost for berth offset of the vessel.
+        /// @brief Gets the cost incurred for berth offset.
         ///
-        /// This function returns the cost for berth offset of the vessel.
+        /// This function returns the cost associated with berth offset for the vessel.
         ///
-        /// @return The cost for berth offset of the vessel.
-        [[nodiscard]] constexpr CostType GetCostBerthOffset() const noexcept
+        /// @return The cost incurred for berth offset.
+        [[nodiscard]] CostType GetCostBerthOffset() const
         {
             return cost_berth_offset_;
         }
 
-        /// @brief Compares two VesselPlan objects for equality.
+        /// @brief Compares two \c VesselScenario objects for equality.
         ///
-        /// This function checks if two VesselPlan objects have the same nominal arrival time,
-        /// nominal handling time, desired departure time, desired berth position,
-        /// cost per unit delay, cost for late departure, and cost for berth offset.
+        /// This function checks if two \c VesselScenario objects have the same arrival time,
+        /// planned departure time, processing time, and cost parameters.
         ///
-        /// @tparam OtherTimeType The type of the other VesselPlan's time measurements.
-        /// @tparam OtherDistanceType The type of the other VesselPlan's distance measurements.
-        /// @tparam OtherCostType The type of the other VesselPlan's cost measurements.
-        /// @param left The left-hand side VesselPlan object.
-        /// @param right The right-hand side VesselPlan object.
+        /// @tparam OtherTimeType The type of the other \c VesselScenario's time measurements.
+        /// @tparam OtherCostType The type of the other \c VesselScenario's cost measurements.
+        /// @param left The left-hand side \c VesselScenario object.
+        /// @param right The right-hand side \c VesselScenario object.
         ///
-        /// @return \c true if the VesselPlan objects are equal, \c false otherwise.
-        template <typename OtherTimeType, typename OtherDistanceType, typename OtherCostType>
-            requires std::unsigned_integral<OtherTimeType> && std::unsigned_integral<OtherDistanceType> &&
-            std::is_arithmetic_v<OtherCostType>
-        [[nodiscard]] friend constexpr bool operator==(const VesselPlan& left,
-                                                       const VesselPlan<OtherTimeType, OtherDistanceType, OtherCostType>
-                                                       &
-                                                       right) noexcept
+        /// @return \c true if the scenarios are equal, \c false otherwise.
+        template <typename OtherTimeType, typename OtherCostType>
+            requires std::unsigned_integral<OtherTimeType> && core::IsArithmetic<OtherCostType>
+        [[nodiscard]] friend constexpr bool operator==(const VesselScenario& left,
+                                                       const VesselScenario<OtherTimeType, OtherCostType>& right)
+            noexcept
         {
-            return left.GetNominalArrival() == right.GetNominalArrival()
-                && left.GetNominalHandling() == right.GetNominalHandling()
-                && left.GetDesiredDeparture() == right.GetDesiredDeparture()
-                && left.GetDesiredBerthPosition() == right.GetDesiredBerthPosition()
-                && left.GetCostDelayPerUnit() == right.GetCostDelayPerUnit()
-                && left.GetCostLateDeparture() == right.GetCostLateDeparture()
-                && left.GetCostBerthOffset() == right.GetCostBerthOffset();
+            return left.GetArrivalTime() == right.GetArrivalTime() &&
+                left.GetPlannedDepartureTime() == right.GetPlannedDepartureTime() &&
+                left.GetProcessingTime() == right.GetProcessingTime() &&
+                left.GetCostDelayPerUnit() == right.GetCostDelayPerUnit() &&
+                left.GetCostLateDeparture() == right.GetCostLateDeparture() &&
+                left.GetCostBerthOffset() == right.GetCostBerthOffset();
         }
 
-        /// @brief Compares two VesselPlan objects for inequality.
+        /// @brief Compares two \c VesselScenario objects for inequality.
         ///
-        /// This function checks if two VesselPlan objects do not have the same nominal arrival time,
-        /// nominal handling time, desired departure time, desired berth position,
-        /// cost per unit delay, cost for late departure, and cost for berth offset.
+        /// This function checks if two \c VesselScenario objects do not have the same arrival time,
+        /// planned departure time, processing time, and cost parameters.
         ///
-        /// @tparam OtherTimeType The type of the other VesselPlan's time measurements.
-        /// @tparam OtherDistanceType The type of the other VesselPlan's distance measurements.
-        /// @tparam OtherCostType The type of the other VesselPlan's cost measurements.
-        /// @param left The left-hand side VesselPlan object.
-        /// @param right The right-hand side VesselPlan object.
+        /// @tparam OtherTimeType The type of the other \c VesselScenario's time measurements.
+        /// @tparam OtherCostType The type of the other \c VesselScenario's cost measurements.
+        /// @param left The left-hand side \c VesselScenario object.
+        /// @param right The right-hand side \c VesselScenario object.
         ///
-        /// @return \c true if the VesselPlan objects are not equal, \c false otherwise.
-        template <typename OtherTimeType, typename OtherDistanceType, typename OtherCostType>
-            requires std::unsigned_integral<OtherTimeType> && std::unsigned_integral<OtherDistanceType> &&
-            std::is_arithmetic_v<OtherCostType>
-        [[nodiscard]] friend constexpr bool operator!=(const VesselPlan& left,
-                                                       const VesselPlan<OtherTimeType, OtherDistanceType, OtherCostType>
-                                                       &
-                                                       right) noexcept
+        /// @return \c true if the scenarios are not equal, \c false otherwise.
+        template <typename OtherTimeType, typename OtherCostType>
+            requires std::unsigned_integral<OtherTimeType> && core::IsArithmetic<OtherCostType>
+        [[nodiscard]] friend constexpr bool operator!=(const VesselScenario& left,
+                                                       const VesselScenario<OtherTimeType, OtherCostType>& right)
+            noexcept
         {
             return !(left == right);
         }
 
         /// @brief Hash function for \c absl::flat_hash_* containers.
         ///
-        /// This function computes a hash value for the VesselPlan object, combining its nominal arrival time,
-        /// nominal handling time, desired departure time, desired berth position,
-        /// cost per unit delay, cost for late departure, and cost for berth offset.
+        /// This function computes a hash value for the \c VesselScenario object, combining its arrival time,
+        /// planned departure time, processing time, and cost parameters.
         ///
         /// @tparam H The hash type, typically \c absl::Hash or similar.
         /// @param h The initial hash state.
-        /// @param vessel_plan The VesselPlan object to hash.
+        /// @param scenario The \c VesselScenario object to hash.
         ///
-        /// @return The updated hash state after combining the VesselPlan's properties.
+        /// @return The updated hash state after combining the scenario's properties.
         template <typename H>
-        friend constexpr H AbslHashValue(H h, const VesselPlan& vessel_plan) noexcept
+        friend constexpr H AbslHashValue(H h, const VesselScenario& scenario) noexcept
         {
-            return H::combine(std::move(h), vessel_plan.nominal_arrival_, vessel_plan.nominal_handling_,
-                              vessel_plan.desired_departure_, vessel_plan.desired_berth_position_,
-                              vessel_plan.cost_delay_per_unit_, vessel_plan.cost_late_departure_,
-                              vessel_plan.cost_berth_offset_);
+            return H::combine(std::move(h), scenario.arrival_time_, scenario.planned_departure_time_,
+                              scenario.processing_time_, scenario.cost_delay_per_unit_,
+                              scenario.cost_late_departure_, scenario.cost_berth_offset_);
         }
 
-        // Delete copy and move assignment operators to prevent copying or moving and make the class immutable.
-
-        constexpr VesselPlan& operator=(const VesselPlan&) noexcept = delete;
-        constexpr VesselPlan& operator=(VesselPlan&&) noexcept = delete;
-
     private:
-        TimeType nominal_arrival_;
-        TimeType nominal_handling_;
-        TimeType desired_departure_;
-
-        DistanceType desired_berth_position_;
+        TimeType arrival_time_;
+        TimeType planned_departure_time_;
+        TimeType processing_time_;
 
         CostType cost_delay_per_unit_;
         CostType cost_late_departure_;

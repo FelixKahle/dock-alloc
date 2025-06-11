@@ -4,11 +4,13 @@ cc_library(
     name = "core",
     hdrs = [
         "include/algorithm/pow.h",
+        "include/miscellaneous/core_defines.h",
         "include/miscellaneous/inline.h",
         "include/time/time_interval.h",
         "include/type_traits/align_up.h",
         "include/type_traits/bigger_alignment.h",
         "include/type_traits/bigger_size.h",
+        "include/type_traits/concepts.h",
         "include/type_traits/max_align.h",
         "include/type_traits/size_sum.h",
         "include/type_traits/smallest_unsigned_for.h",

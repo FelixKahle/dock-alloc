@@ -272,8 +272,23 @@ namespace dockalloc::core
             return H::combine(std::move(h), time_interval.start_time_inclusive_, time_interval.end_time_exclusive_);
         }
 
-        TimeInterval& operator=(const TimeInterval&) noexcept = default;
-        TimeInterval& operator=(TimeInterval&&) noexcept = default;
+        /// @brief Copy assignment operator.
+        ///
+        /// Assigns the values of another \c TimeInterval to this one by copying.
+        ///
+        /// @param other The \c TimeInterval to copy from.
+        ///
+        /// @return A reference to this \c TimeInterval.
+        TimeInterval& operator=(const TimeInterval& other) noexcept = default;
+
+        /// @brief Move assignment operator.
+        ///
+        /// Assigns the values of another \c TimeInterval to this one by moving.
+        ///
+        /// @param other The \c TimeInterval to move from.
+        ///
+        /// @return A reference to this \c TimeInterval.
+        TimeInterval& operator=(TimeInterval&& other) noexcept = default;
 
         /// @brief Absl::Format function for stringification.
         ///
