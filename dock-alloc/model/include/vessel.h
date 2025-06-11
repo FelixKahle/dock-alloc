@@ -4,6 +4,7 @@
 #define DOCK_ALLOC_MODEL_VESSEL_H_
 
 #include <concepts>
+#include <utility>
 #include "dockalloc/model/types.h"
 
 namespace dockalloc::model
@@ -281,8 +282,9 @@ namespace dockalloc::model
             requires std::unsigned_integral<OtherTimeType> && std::unsigned_integral<OtherDistanceType> &&
             std::is_arithmetic_v<OtherCostType>
         [[nodiscard]] friend constexpr bool operator==(const VesselPlan& left,
-                                                const VesselPlan<OtherTimeType, OtherDistanceType, OtherCostType>&
-                                                right) noexcept
+                                                       const VesselPlan<OtherTimeType, OtherDistanceType, OtherCostType>
+                                                       &
+                                                       right) noexcept
         {
             return left.GetNominalArrival() == right.GetNominalArrival()
                 && left.GetNominalHandling() == right.GetNominalHandling()
@@ -310,8 +312,9 @@ namespace dockalloc::model
             requires std::unsigned_integral<OtherTimeType> && std::unsigned_integral<OtherDistanceType> &&
             std::is_arithmetic_v<OtherCostType>
         [[nodiscard]] friend constexpr bool operator!=(const VesselPlan& left,
-                                                const VesselPlan<OtherTimeType, OtherDistanceType, OtherCostType>&
-                                                right) noexcept
+                                                       const VesselPlan<OtherTimeType, OtherDistanceType, OtherCostType>
+                                                       &
+                                                       right) noexcept
         {
             return !(left == right);
         }
