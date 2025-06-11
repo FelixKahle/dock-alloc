@@ -32,6 +32,9 @@ namespace dockalloc::solver
         {
         }
 
+        TimeIntervalTreeNode(const TimeIntervalTreeNode& other) noexcept = delete;
+        TimeIntervalTreeNode& operator=(const TimeIntervalTreeNode&) noexcept = delete;
+
         /// @brief Returns a pointer to the parent node.
         ///
         /// This function returns a pointer to the parent node of this node.

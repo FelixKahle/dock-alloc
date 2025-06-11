@@ -48,20 +48,6 @@ namespace dockalloc::solver
         class BitReference
         {
         public:
-            /// @brief Copy constructor.
-            ///
-            /// This constructor creates a new \c BitReference object as a copy of another.
-            ///
-            /// @param other The \c BitReference object to copy.
-            BitReference(const BitReference& other) = default;
-
-            /// @brief Move constructor.
-            ///
-            /// This constructor creates a new \c BitReference object by moving another.
-            ///
-            /// @param other The \c BitReference object to move.
-            BitReference(BitReference&& other) = default;
-
             /// @brief Constructor.
             ///
             /// This constructor initializes a \c BitReference object with the specified word and bit index.
@@ -494,20 +480,6 @@ namespace dockalloc::solver
 
         /// @brief The count of bits in a single Storage word.
         static constexpr int kBitsPerWord = std::numeric_limits<StorageType>::digits;
-
-        /// @brief Copy constructor.
-        ///
-        /// This constructor creates a new \c BitSpan object as a copy of another.
-        ///
-        /// @param other The \c BitSpan object to copy.
-        BitSpan(const BitSpan& other) noexcept = default;
-
-        /// @brief Move constructor.
-        ///
-        /// This constructor creates a new \c BitSpan object by moving another.
-        ///
-        /// @param other The \c BitSpan object to move.
-        BitSpan(BitSpan&& other) noexcept = default;
 
         /// @brief Constructor.
         ///

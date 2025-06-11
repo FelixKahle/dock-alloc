@@ -27,20 +27,6 @@ namespace dockalloc::core
     class TimeInterval
     {
     public:
-        /// @brief Copy constructor.
-        ///
-        /// Constructs the interval by copying another \c TimeInterval.
-        ///
-        /// @param other The \c TimeInterval to copy.
-        constexpr TimeInterval(const TimeInterval& other) noexcept = default;
-
-        /// @brief Move constructor.
-        ///
-        /// Constructs the interval by moving another \c TimeInterval.
-        ///
-        /// @param other The \c TimeInterval to move.
-        constexpr TimeInterval(TimeInterval&& other) noexcept = default;
-
         /// @brief Constructor.
         ///
         /// Constructs the interval with the given start and end times.
@@ -271,24 +257,6 @@ namespace dockalloc::core
         {
             return H::combine(std::move(h), time_interval.start_time_inclusive_, time_interval.end_time_exclusive_);
         }
-
-        /// @brief Copy assignment operator.
-        ///
-        /// Assigns the values of another \c TimeInterval to this one by copying.
-        ///
-        /// @param other The \c TimeInterval to copy from.
-        ///
-        /// @return A reference to this \c TimeInterval.
-        TimeInterval& operator=(const TimeInterval& other) noexcept = default;
-
-        /// @brief Move assignment operator.
-        ///
-        /// Assigns the values of another \c TimeInterval to this one by moving.
-        ///
-        /// @param other The \c TimeInterval to move from.
-        ///
-        /// @return A reference to this \c TimeInterval.
-        TimeInterval& operator=(TimeInterval&& other) noexcept = default;
 
         /// @brief Absl::Format function for stringification.
         ///

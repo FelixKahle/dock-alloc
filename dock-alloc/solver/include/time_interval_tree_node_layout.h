@@ -48,22 +48,11 @@ namespace dockalloc::solver
         public:
             /// @brief Default constructor.
             ///
-            /// Initializes the storage with default values.
-            IntervalStorage() noexcept = default;
-
-            /// @brief Copy constructor.
+            /// This constructor initializes the storage to an empty state.
             ///
-            /// Initializes the storage by copying the contents of another \c IntervalStorage.
-            ///
-            /// @param interval_storage The \c IntervalStorage to copy from.
-            IntervalStorage(const IntervalStorage& interval_storage) noexcept = default;
-
-            /// @brief Move constructor.
-            ///
-            /// Initializes the storage by moving the contents of another \c IntervalStorage.
-            ///
-            /// @param interval_storage The \c IntervalStorage to move from.
-            IntervalStorage(IntervalStorage&& interval_storage) noexcept = default;
+            /// @note The storage is not initialized, and accessing it before setting a time interval
+            /// may lead to undefined behavior.
+            DOCK_ALLOC_FORCE_INLINE IntervalStorage() noexcept = default;
 
             /// @brief Constructs an \c IntervalStorage from a \c core::TimeInterval<TimeType>.
             ///
@@ -144,11 +133,6 @@ namespace dockalloc::solver
     static constexpr size_t kSlotSize = SlotSize; \
     static constexpr size_t kChildrenSize = SlotSize + 1; \
     using IndexType = core::SmallestUnsignedFor_t<kChildrenSize>; \
-    TimeIntervalTreeNodeFieldLayout() noexcept = default; \
-    TimeIntervalTreeNodeFieldLayout(const TimeIntervalTreeNodeFieldLayout&) noexcept = default; \
-    TimeIntervalTreeNodeFieldLayout(TimeIntervalTreeNodeFieldLayout&&) noexcept = default; \
-    TimeIntervalTreeNodeFieldLayout& operator=(const TimeIntervalTreeNodeFieldLayout&) noexcept = delete; \
-    TimeIntervalTreeNodeFieldLayout& operator=(const TimeIntervalTreeNodeFieldLayout&&) noexcept = delete; \
     [[nodiscard]] DOCK_ALLOC_FORCE_INLINE TimeType GetMinStartTime() const noexcept { return min_start_time_; } \
     DOCK_ALLOC_FORCE_INLINE void SetMinStartTime(TimeType value) noexcept { min_start_time_ = value; } \
     [[nodiscard]] DOCK_ALLOC_FORCE_INLINE TimeType GetMaxEndTime() const noexcept { return max_end_time_; } \
@@ -496,22 +480,6 @@ namespace dockalloc::solver
             ///
             /// This is the smallest unsigned type that can hold the number of children in the node.
             using IndexType = typename Base::IndexType;
-
-            /// @brief Default constructor.
-            ///
-            /// Initializes the layout with default values.
-            LayoutImpl() noexcept = default;
-
-            /// @brief Destructor.
-            ///
-            /// Cleans up the layout, but does not delete any pointers.
-            ~LayoutImpl() noexcept = default;
-
-
-            // Delete copy and assignment operators to prevent copying.
-
-            LayoutImpl(const LayoutImpl&) noexcept = delete;
-            LayoutImpl& operator=(const LayoutImpl&) noexcept = delete;
 
             /// @brief Returns a pointer to the parent node.
             ///
