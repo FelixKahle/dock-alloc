@@ -9,6 +9,7 @@ namespace dockalloc::core
     {
         EXPECT_TRUE(AlmostEqual(1.0, 1.0));
         EXPECT_TRUE(AlmostEqual(1, 1));
+        EXPECT_TRUE(AlmostEqual(1, 2, 3));
         EXPECT_TRUE(AlmostEqual(1.0, 1));
         EXPECT_TRUE(AlmostEqual(1, 1.0f));
     }

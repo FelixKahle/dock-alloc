@@ -36,11 +36,8 @@ namespace dockalloc::core
         }
         else
         {
-            using SignedCommonType = std::make_signed_t<CommonType>;
-            auto sl = static_cast<SignedCommonType>(left);
-            auto sr = static_cast<SignedCommonType>(right);
-            auto diff = core::Abs<SignedCommonType>(sl - sr);
-            return diff <= static_cast<SignedCommonType>(epsilon);
+            CommonType diff = (left > right) ? (left - right) : (right - left);
+            return diff <= epsilon;
         }
     }
 }
