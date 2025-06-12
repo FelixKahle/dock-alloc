@@ -27,6 +27,7 @@ cc_library(
 cc_test(
     name = "core-test",
     srcs = [
+        "test/algorithm/abs_test.cc",
         "test/algorithm/almost_equal_test.cc",
         "test/algorithm/pow_test.cc",
         "test/time/time_interval_test.cc",
