@@ -1,0 +1,33 @@
+// Copyright 2025 Felix Kahle. All rights reserved.
+
+#ifndef DOCK_ALLOC_CORE_ALGORITHM_ALMOST_EQUAL_H_
+#define DOCK_ALLOC_CORE_ALGORITHM_ALMOST_EQUAL_H_
+
+#include <limits>
+#include <cstdlib>
+#include "dockalloc/core/type_traits/concepts.h"
+
+namespace dockalloc::core
+{
+    /// @brief Checks if two arithmetic values are approximately equal within a given epsilon.
+    ///
+    /// This function compares two arithmetic values and determines if they are
+    /// approximately equal within a specified epsilon value.
+    ///
+    /// @tparam LeftType The type of the left-hand side value.
+    /// @tparam RightType The type of the right-hand side value (default is the same as LeftType).
+    /// @param left The left-hand side value to compare.
+    /// @param right The right-hand side value to compare.
+    /// @param epsilon The epsilon value to use for the comparison (default is the machine epsilon for LeftType).
+    ///
+    /// @return \c true if the values are approximately equal, \c false otherwise.
+    template <typename LeftType, typename RightType = LeftType>
+        requires core::IsArithmetic<LeftType> && core::IsArithmetic<RightType>
+    [[nodiscard]] constexpr bool AlmostEqual(const LeftType left, const RightType right,
+                                             const LeftType epsilon = std::numeric_limits<LeftType>::epsilon()) noexcept
+    {
+        return std::abs(left - right) <= epsilon;
+    }
+}
+
+#endif

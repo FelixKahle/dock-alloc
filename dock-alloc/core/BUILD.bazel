@@ -3,6 +3,7 @@
 cc_library(
     name = "core",
     hdrs = [
+        "include/algorithm/almost_equal.h",
         "include/algorithm/pow.h",
         "include/miscellaneous/core_defines.h",
         "include/miscellaneous/inline.h",
@@ -26,6 +27,7 @@ cc_library(
 cc_test(
     name = "core-test",
     srcs = [
+        "test/algorithm/almost_equal_test.cc",
         "test/algorithm/pow_test.cc",
         "test/time/time_interval_test.cc",
         "test/type_traits/smallest_unsigned_for_test.cc",

@@ -5,9 +5,9 @@
 
 #include <concepts>
 #include <utility>
+#include <vector>
 #include "dockalloc/core/type_traits/concepts.h"
-#include "dockalloc/core/miscellaneous/core_defines.h"
-#include "dockalloc/model/types.h"
+#include "dockalloc/core/algorithm/almost_equal.h"
 
 namespace dockalloc::model
 {
@@ -17,24 +17,10 @@ namespace dockalloc::model
     ///
     /// @tparam DistanceType The type used for the distance measurements of the vessel.
     template <typename DistanceType>
-        requires std::unsigned_integral<DistanceType>
+        requires core::IsArithmetic<DistanceType>
     class Vessel
     {
     public:
-        /// @brief Copy constructor.
-        ///
-        /// This constructor creates a copy of another Vessel object.
-        ///
-        /// @param other The Vessel object to copy.
-        constexpr Vessel(const Vessel& other) noexcept = default;
-
-        /// @brief Move constructor.
-        ///
-        /// This constructor creates a new Vessel object by moving another.
-        ///
-        /// @param other The Vessel object to move.
-        constexpr Vessel(Vessel&& other) noexcept = default;
-
         /// @brief Constructs a Vessel with the given values.
         ///
         /// This constructor initializes a Vessel object with the specified length, width, and draft.
@@ -90,11 +76,12 @@ namespace dockalloc::model
         ///
         /// @return \c true if the vessels are equal, \c false otherwise.
         template <typename OtherDistanceType>
-            requires std::unsigned_integral<OtherDistanceType>
+            requires core::IsArithmetic<OtherDistanceType>
         [[nodiscard]] friend constexpr bool operator==(const Vessel& left, const Vessel& right) noexcept
         {
-            return left.GetLength() == right.GetLength() && left.GetWidth() == right.GetWidth() && left.GetDraft() ==
-                right.GetDraft();
+            return core::AlmostEqual<DistanceType, OtherDistanceType>(left.GetLength(), right.GetLength()) &&
+                core::AlmostEqual<DistanceType, OtherDistanceType>(left.GetWidth(), right.GetWidth()) &&
+                core::AlmostEqual<DistanceType, OtherDistanceType>(left.GetDraft(), right.GetDraft());
         }
 
         /// @brief Compares two Vessel objects for inequality.
@@ -107,7 +94,7 @@ namespace dockalloc::model
         ///
         /// @return \c true if the vessels are not equal, \c false otherwise.
         template <typename OtherDistanceType>
-            requires std::unsigned_integral<OtherDistanceType>
+            requires core::IsArithmetic<OtherDistanceType>
         [[nodiscard]] friend constexpr bool operator!=(const Vessel& left, const Vessel& right) noexcept
         {
             return !(left == right);
@@ -125,7 +112,7 @@ namespace dockalloc::model
         template <typename H>
         friend constexpr H AbslHashValue(H h, const Vessel& vessel) noexcept
         {
-            return H::combine(std::move(h), vessel.length_, vessel.width_, vessel.draft_);
+            return H::combine(std::move(h), vessel.GetLength(), vessel.GetWidth(), vessel.GetDraft());
         }
 
     private:
@@ -134,43 +121,40 @@ namespace dockalloc::model
         DistanceType draft_;
     };
 
-    template <typename TimeType, typename CostType>
-        requires std::unsigned_integral<TimeType> && core::IsArithmetic<CostType>
+    /// @brief Represents a scenario for a vessel.
+    ///
+    /// This class encapsulates the scenario of a vessel, including its arrival time, planned departure time,
+    /// processing time, and cost parameters.
+    ///
+    /// @tparam TimeType The type used for the time measurements of the vessel scenario.
+    /// @tparam CostType The type used for the cost measurements of the vessel scenario.
+    /// @tparam ProbabilityType The type used for the probability measurements of the vessel scenario.
+    template <typename TimeType, typename CostType, typename ProbabilityType = double>
+        requires std::unsigned_integral<TimeType> && core::IsArithmetic<CostType> && std::floating_point<
+            ProbabilityType>
     class VesselScenario
     {
     public:
-        /// @brief Copy constructor.
-        ///
-        /// This constructor creates a copy of another \c VesselScenario object.
-        ///
-        /// @param other The \c VesselScenario object to copy.
-        constexpr VesselScenario(const VesselScenario& other) noexcept = default;
-
-        /// @brief Move constructor.
-        ///
-        /// This constructor creates a new \c VesselScenario object by moving another.
-        ///
-        /// @param other The \c VesselScenario object to move.
-        constexpr VesselScenario(const VesselScenario&& other) noexcept = default;
-
         /// @brief Constructs a \c VesselScenario with the given values.
         ///
         /// This constructor initializes a \c VesselScenario object with the specified arrival time,
         /// planned departure time, processing time, and cost parameters.
         ///
+        /// @param probability The probability of the vessel scenario.
         /// @param arrival_time The time when the vessel arrives.
         /// @param planned_departure_time The planned time for the vessel to depart.
         /// @param processing_time The time required to process the vessel.
         /// @param cost_delay_per_unit The cost incurred for each unit of delay.
         /// @param cost_late_departure The cost incurred for a late departure.
         /// @param cost_berth_offset The cost incurred for berth offset.
-        [[nodiscard]] constexpr explicit VesselScenario(const TimeType arrival_time,
+        [[nodiscard]] constexpr explicit VesselScenario(const ProbabilityType probability, const TimeType arrival_time,
                                                         const TimeType planned_departure_time,
                                                         const TimeType processing_time,
                                                         const CostType cost_delay_per_unit,
                                                         const CostType cost_late_departure,
                                                         const CostType cost_berth_offset) noexcept
-            : arrival_time_(arrival_time),
+            : probability_(probability),
+              arrival_time_(arrival_time),
               planned_departure_time_(planned_departure_time),
               processing_time_(processing_time),
               cost_delay_per_unit_(cost_delay_per_unit),
@@ -179,12 +163,22 @@ namespace dockalloc::model
         {
         }
 
+        /// @brief Gets the probability of the vessel scenario.
+        ///
+        /// This function returns the probability associated with the vessel scenario.
+        ///
+        /// @return The probability of the vessel scenario.
+        [[nodiscard]] constexpr ProbabilityType GetProbability() const noexcept
+        {
+            return probability_;
+        }
+
         /// @brief Gets the arrival time of the vessel.
         ///
         /// This function returns the time when the vessel arrives.
         ///
         /// @return The arrival time of the vessel.
-        [[nodiscard]] TimeType GetArrivalTime() const
+        [[nodiscard]] constexpr TimeType GetArrivalTime() const
         {
             return arrival_time_;
         }
@@ -194,7 +188,7 @@ namespace dockalloc::model
         /// This function returns the planned time for the vessel to depart.
         ///
         /// @return The planned departure time of the vessel.
-        [[nodiscard]] TimeType GetPlannedDepartureTime() const
+        [[nodiscard]] constexpr TimeType GetPlannedDepartureTime() const
         {
             return planned_departure_time_;
         }
@@ -204,7 +198,7 @@ namespace dockalloc::model
         /// This function returns the time required to process the vessel.
         ///
         /// @return The processing time of the vessel.
-        [[nodiscard]] TimeType GetProcessingTime() const
+        [[nodiscard]] constexpr TimeType GetProcessingTime() const
         {
             return processing_time_;
         }
@@ -214,7 +208,7 @@ namespace dockalloc::model
         /// This function returns the cost associated with each unit of delay for the vessel.
         ///
         /// @return The cost incurred for each unit of delay.
-        [[nodiscard]] CostType GetCostDelayPerUnit() const
+        [[nodiscard]] constexpr CostType GetCostDelayPerUnit() const
         {
             return cost_delay_per_unit_;
         }
@@ -224,7 +218,7 @@ namespace dockalloc::model
         /// This function returns the cost associated with a late departure of the vessel.
         ///
         /// @return The cost incurred for a late departure.
-        [[nodiscard]] CostType GetCostLateDeparture() const
+        [[nodiscard]] constexpr CostType GetCostLateDeparture() const
         {
             return cost_late_departure_;
         }
@@ -234,7 +228,7 @@ namespace dockalloc::model
         /// This function returns the cost associated with berth offset for the vessel.
         ///
         /// @return The cost incurred for berth offset.
-        [[nodiscard]] CostType GetCostBerthOffset() const
+        [[nodiscard]] constexpr CostType GetCostBerthOffset() const
         {
             return cost_berth_offset_;
         }
@@ -251,17 +245,20 @@ namespace dockalloc::model
         ///
         /// @return \c true if the scenarios are equal, \c false otherwise.
         template <typename OtherTimeType, typename OtherCostType>
-            requires std::unsigned_integral<OtherTimeType> && core::IsArithmetic<OtherCostType>
+            requires std::unsigned_integral<TimeType> && core::IsArithmetic<CostType> && std::floating_point<
+                ProbabilityType>
         [[nodiscard]] friend constexpr bool operator==(const VesselScenario& left,
                                                        const VesselScenario<OtherTimeType, OtherCostType>& right)
             noexcept
         {
-            return left.GetArrivalTime() == right.GetArrivalTime() &&
-                left.GetPlannedDepartureTime() == right.GetPlannedDepartureTime() &&
-                left.GetProcessingTime() == right.GetProcessingTime() &&
-                left.GetCostDelayPerUnit() == right.GetCostDelayPerUnit() &&
-                left.GetCostLateDeparture() == right.GetCostLateDeparture() &&
-                left.GetCostBerthOffset() == right.GetCostBerthOffset();
+            return core::AlmostEqual<ProbabilityType, OtherTimeType>(left.GetProbability(), right.GetProbability()) &&
+                core::AlmostEqual<TimeType, OtherTimeType>(left.GetArrivalTime(), right.GetArrivalTime()) &&
+                core::AlmostEqual<TimeType, OtherTimeType>(left.GetPlannedDepartureTime(),
+                                                           right.GetPlannedDepartureTime()) &&
+                core::AlmostEqual<TimeType, OtherTimeType>(left.GetProcessingTime(), right.GetProcessingTime()) &&
+                core::AlmostEqual<CostType, OtherCostType>(left.GetCostDelayPerUnit(), right.GetCostDelayPerUnit()) &&
+                core::AlmostEqual<CostType, OtherCostType>(left.GetCostLateDeparture(), right.GetCostLateDeparture()) &&
+                core::AlmostEqual<CostType, OtherCostType>(left.GetCostBerthOffset(), right.GetCostBerthOffset());
         }
 
         /// @brief Compares two \c VesselScenario objects for inequality.
@@ -303,6 +300,8 @@ namespace dockalloc::model
         }
 
     private:
+        ProbabilityType probability_;
+
         TimeType arrival_time_;
         TimeType planned_departure_time_;
         TimeType processing_time_;
@@ -310,6 +309,112 @@ namespace dockalloc::model
         CostType cost_delay_per_unit_;
         CostType cost_late_departure_;
         CostType cost_berth_offset_;
+    };
+
+    template <typename TimeType, typename DistanceType, typename CostType, typename ProbabilityType = double>
+        requires std::unsigned_integral<TimeType> && std::unsigned_integral<DistanceType> && core::IsArithmetic<
+            CostType> && std::floating_point<ProbabilityType>
+    class VesselScenarioBundle
+    {
+    public:
+        /// @brief Constructs a \c VesselScenarioBundle with the given vessel, desired berth position, and scenarios.
+        ///
+        /// This constructor initializes a \c VesselScenarioBundle object with the specified vessel,
+        /// desired berth position, and a collection of vessel scenarios.
+        ///
+        /// @tparam ScenariosContainer The type of the container holding the vessel scenarios.
+        /// @param vessel The vessel associated with the scenarios.
+        /// @param desired_berth_position The desired position for the vessel at the berth.
+        /// @param scenarios The collection of vessel scenarios.
+        template <typename ScenariosContainer>
+            requires std::constructible_from<std::vector<VesselScenario<TimeType, CostType, ProbabilityType>>,
+                                             ScenariosContainer&&>
+        [[nodiscard]] constexpr VesselScenarioBundle(const Vessel<DistanceType>& vessel,
+                                                     const DistanceType desired_berth_position,
+                                                     ScenariosContainer&& scenarios) noexcept
+            : vessel_(vessel),
+              desired_berth_position_(desired_berth_position),
+              scenarios_(std::forward<ScenariosContainer>(scenarios))
+        {
+        }
+
+        /// @brief Gets the vessel associated with this scenario bundle.
+        ///
+        /// This function returns a reference to the vessel that is part of this scenario bundle.
+        ///
+        /// @return A reference to the vessel associated with this scenario bundle.
+        [[nodiscard]] constexpr const Vessel<DistanceType>& GetVessel() noexcept
+        {
+            return vessel_;
+        }
+
+        /// @brief Gets the desired berth position for the vessel.
+        ///
+        /// This function returns the desired position for the vessel at the berth.
+        ///
+        /// @return The desired berth position for the vessel.
+        [[nodiscard]] constexpr DistanceType GetDesiredBerthPosition() const noexcept
+        {
+            return desired_berth_position_;
+        }
+
+        /// @brief Gets the collection of vessel scenarios.
+        ///
+        /// This function returns a reference to the vector containing all vessel scenarios in this bundle.
+        ///
+        /// @return A reference to the vector of vessel scenarios.
+        [[nodiscard]] constexpr const std::vector<VesselScenario<TimeType, CostType, ProbabilityType>>&
+        GetScenarios() const
+        {
+            return scenarios_;
+        }
+
+        /// @brief Gets a specific vessel scenario by index.
+        ///
+        /// This function retrieves a vessel scenario at the specified index from the collection of scenarios.
+        ///
+        /// @param index The index of the scenario to retrieve.
+        ///
+        /// @pre 0 <= index < GetScenarioCount()
+        ///
+        /// @return A reference to the vessel scenario at the specified index.
+        [[nodiscard]] constexpr const VesselScenario<TimeType, CostType, ProbabilityType>& GetScenario(
+            const size_t index) const noexcept
+        {
+            DCHECK_LT(index, scenarios_.size());
+
+            return scenarios_[index];
+        }
+
+        /// @brief Gets the number of scenarios in this bundle.
+        ///
+        /// This function returns the total count of vessel scenarios available in this bundle.
+        ///
+        /// @return The number of scenarios in this bundle.
+        [[nodiscard]] constexpr size_t GetScenarioCount() const noexcept
+        {
+            return scenarios_.size();
+        }
+
+        /// @brief Access operator for vessel scenarios.
+        ///
+        /// This operator allows access to a vessel scenario at the specified index using the subscript operator.
+        ///
+        /// @param index The index of the scenario to access.
+        ///
+        /// @pre 0 <= index < GetScenarioCount()
+        ///
+        /// @return A reference to the vessel scenario at the specified index.
+        [[nodiscard]] constexpr const VesselScenario<TimeType, CostType, ProbabilityType>& operator[](
+            const size_t index) const noexcept
+        {
+            return GetScenario(index);
+        }
+
+    private:
+        Vessel<DistanceType> vessel_;
+        DistanceType desired_berth_position_;
+        std::vector<VesselScenario<TimeType, CostType, ProbabilityType>> scenarios_;
     };
 }
 
