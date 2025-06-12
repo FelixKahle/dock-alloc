@@ -3,7 +3,7 @@
 #ifndef DOCK_ALLOC_CORE_ALGORITHM_ABS_H_
 #define DOCK_ALLOC_CORE_ALGORITHM_ABS_H_
 
-#include "dockalloc/core/type_traits/concepts.h"
+#include <type_traits>
 
 namespace dockalloc::core
 {
@@ -16,7 +16,7 @@ namespace dockalloc::core
     ///
     /// @return The absolute value of the input.
     template <typename T>
-        requires core::IsArithmetic<T>
+        requires std::is_arithmetic_v<T>
     [[nodiscard]] constexpr T Abs(const T x) noexcept
     {
         if constexpr (std::is_unsigned_v<T>)

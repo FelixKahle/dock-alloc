@@ -5,8 +5,8 @@
 
 #include <concepts>
 #include <utility>
+#include <type_traits>
 #include <vector>
-#include "dockalloc/core/type_traits/concepts.h"
 #include "dockalloc/core/algorithm/almost_equal.h"
 
 namespace dockalloc::model
@@ -17,7 +17,7 @@ namespace dockalloc::model
     ///
     /// @tparam DistanceType The type used for the distance measurements of the vessel.
     template <typename DistanceType>
-        requires core::IsArithmetic<DistanceType>
+        requires std::is_arithmetic_v<DistanceType>
     class Vessel
     {
     public:
@@ -76,7 +76,7 @@ namespace dockalloc::model
         ///
         /// @return \c true if the vessels are equal, \c false otherwise.
         template <typename OtherDistanceType>
-            requires core::IsArithmetic<OtherDistanceType>
+            requires std::is_arithmetic_v<OtherDistanceType>
         [[nodiscard]] friend constexpr bool operator==(const Vessel& left,
                                                        const Vessel<OtherDistanceType>& right) noexcept
         {
@@ -95,7 +95,7 @@ namespace dockalloc::model
         ///
         /// @return \c true if the vessels are not equal, \c false otherwise.
         template <typename OtherDistanceType>
-            requires core::IsArithmetic<OtherDistanceType>
+            requires std::is_arithmetic_v<OtherDistanceType>
         [[nodiscard]] friend constexpr bool operator!=(const Vessel& left, const Vessel& right) noexcept
         {
             return !(left == right);
@@ -131,7 +131,7 @@ namespace dockalloc::model
     /// @tparam CostType The type used for the cost measurements of the vessel scenario.
     /// @tparam ProbabilityType The type used for the probability measurements of the vessel scenario.
     template <typename TimeType, typename CostType, typename ProbabilityType = double>
-        requires std::unsigned_integral<TimeType> && core::IsArithmetic<CostType> && std::floating_point<
+        requires std::unsigned_integral<TimeType> && std::is_arithmetic_v<CostType> && std::floating_point<
             ProbabilityType>
     class VesselScenario
     {
@@ -247,7 +247,8 @@ namespace dockalloc::model
         ///
         /// @return \c true if the scenarios are equal, \c false otherwise.
         template <typename OtherTimeType, typename OtherCostType, typename OtherProbabilityType>
-            requires std::unsigned_integral<OtherTimeType> && core::IsArithmetic<OtherCostType> && std::floating_point<
+            requires std::unsigned_integral<OtherTimeType> && std::is_arithmetic_v<OtherCostType> && std::floating_point
+            <
                 OtherProbabilityType>
         [[nodiscard]] friend constexpr bool operator==(const VesselScenario& left,
                                                        const VesselScenario<
@@ -278,7 +279,7 @@ namespace dockalloc::model
         ///
         /// @return \c true if the scenarios are not equal, \c false otherwise.
         template <typename OtherTimeType, typename OtherCostType, typename OtherProbabilityType>
-            requires std::unsigned_integral<TimeType> && core::IsArithmetic<CostType> && std::floating_point<
+            requires std::unsigned_integral<TimeType> && std::is_arithmetic_v<CostType> && std::floating_point<
                 OtherProbabilityType>
         [[nodiscard]] friend constexpr bool operator!=(const VesselScenario& left,
                                                        const VesselScenario<
@@ -319,7 +320,7 @@ namespace dockalloc::model
     };
 
     template <typename TimeType, typename DistanceType, typename CostType, typename ProbabilityType = double>
-        requires std::unsigned_integral<TimeType> && std::unsigned_integral<DistanceType> && core::IsArithmetic<
+        requires std::unsigned_integral<TimeType> && std::unsigned_integral<DistanceType> && std::is_arithmetic_v<
             CostType> && std::floating_point<ProbabilityType>
     class VesselScenarioBundle
     {

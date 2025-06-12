@@ -6,7 +6,6 @@
 #include <limits>
 #include <cstdlib>
 #include <type_traits>
-#include "dockalloc/core/type_traits/concepts.h"
 #include "dockalloc/core/algorithm/abs.h"
 
 namespace dockalloc::core
@@ -24,7 +23,7 @@ namespace dockalloc::core
     ///
     /// @return \c true if the values are approximately equal, \c false otherwise.
     template <typename LeftType, typename RightType = LeftType>
-        requires core::IsArithmetic<LeftType> && core::IsArithmetic<RightType>
+        requires std::is_arithmetic_v<LeftType> && std::is_arithmetic_v<RightType>
     [[nodiscard]] constexpr bool AlmostEqual(const LeftType left, const RightType right,
                                              const LeftType epsilon = std::numeric_limits<LeftType>::epsilon()) noexcept
     {
