@@ -4,6 +4,7 @@
 #define DOCK_ALLOC_CORE_ALGORITHM_ABS_H_
 
 #include <type_traits>
+#include <cmath>
 
 namespace dockalloc::core
 {
