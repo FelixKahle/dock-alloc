@@ -3,6 +3,7 @@
 cc_library(
     name = "core",
     hdrs = [
+        "include/algorithm/abs.h",
         "include/algorithm/almost_equal.h",
         "include/algorithm/pow.h",
         "include/miscellaneous/core_defines.h",

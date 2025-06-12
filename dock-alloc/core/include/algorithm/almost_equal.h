@@ -5,7 +5,9 @@
 
 #include <limits>
 #include <cstdlib>
+#include <type_traits>
 #include "dockalloc/core/type_traits/concepts.h"
+#include "dockalloc/core/algorithm/abs.h"
 
 namespace dockalloc::core
 {
@@ -26,7 +28,21 @@ namespace dockalloc::core
     [[nodiscard]] constexpr bool AlmostEqual(const LeftType left, const RightType right,
                                              const LeftType epsilon = std::numeric_limits<LeftType>::epsilon()) noexcept
     {
-        return std::abs(left - right) <= epsilon;
+        using CommonType = std::common_type_t<LeftType, RightType>;
+
+        if constexpr (std::is_floating_point_v<CommonType>)
+        {
+            CommonType diff = core::Abs<CommonType>(static_cast<CommonType>(left) - static_cast<CommonType>(right));
+            return diff <= static_cast<CommonType>(epsilon);
+        }
+        else
+        {
+            using SignedCommonType = std::make_signed_t<CommonType>;
+            auto sl = static_cast<SignedCommonType>(left);
+            auto sr = static_cast<SignedCommonType>(right);
+            auto diff = core::Abs<SignedCommonType>(sl - sr);
+            return diff <= static_cast<SignedCommonType>(epsilon);
+        }
     }
 }
 

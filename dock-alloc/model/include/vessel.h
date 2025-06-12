@@ -77,7 +77,8 @@ namespace dockalloc::model
         /// @return \c true if the vessels are equal, \c false otherwise.
         template <typename OtherDistanceType>
             requires core::IsArithmetic<OtherDistanceType>
-        [[nodiscard]] friend constexpr bool operator==(const Vessel& left, const Vessel& right) noexcept
+        [[nodiscard]] friend constexpr bool operator==(const Vessel& left,
+                                                       const Vessel<OtherDistanceType>& right) noexcept
         {
             return core::AlmostEqual<DistanceType, OtherDistanceType>(left.GetLength(), right.GetLength()) &&
                 core::AlmostEqual<DistanceType, OtherDistanceType>(left.GetWidth(), right.GetWidth()) &&
@@ -240,18 +241,21 @@ namespace dockalloc::model
         ///
         /// @tparam OtherTimeType The type of the other \c VesselScenario's time measurements.
         /// @tparam OtherCostType The type of the other \c VesselScenario's cost measurements.
+        /// @tparam OtherProbabilityType The type of the other \c VesselScenario's probability measurements.
         /// @param left The left-hand side \c VesselScenario object.
         /// @param right The right-hand side \c VesselScenario object.
         ///
         /// @return \c true if the scenarios are equal, \c false otherwise.
-        template <typename OtherTimeType, typename OtherCostType>
-            requires std::unsigned_integral<TimeType> && core::IsArithmetic<CostType> && std::floating_point<
-                ProbabilityType>
+        template <typename OtherTimeType, typename OtherCostType, typename OtherProbabilityType>
+            requires std::unsigned_integral<OtherTimeType> && core::IsArithmetic<OtherCostType> && std::floating_point<
+                OtherProbabilityType>
         [[nodiscard]] friend constexpr bool operator==(const VesselScenario& left,
-                                                       const VesselScenario<OtherTimeType, OtherCostType>& right)
+                                                       const VesselScenario<
+                                                           OtherTimeType, OtherCostType, OtherProbabilityType>& right)
             noexcept
         {
-            return core::AlmostEqual<ProbabilityType, OtherTimeType>(left.GetProbability(), right.GetProbability()) &&
+            return core::AlmostEqual<ProbabilityType, OtherProbabilityType>(
+                    left.GetProbability(), right.GetProbability()) &&
                 core::AlmostEqual<TimeType, OtherTimeType>(left.GetArrivalTime(), right.GetArrivalTime()) &&
                 core::AlmostEqual<TimeType, OtherTimeType>(left.GetPlannedDepartureTime(),
                                                            right.GetPlannedDepartureTime()) &&
@@ -268,14 +272,17 @@ namespace dockalloc::model
         ///
         /// @tparam OtherTimeType The type of the other \c VesselScenario's time measurements.
         /// @tparam OtherCostType The type of the other \c VesselScenario's cost measurements.
+        /// @tparam OtherProbabilityType The type of the other \c VesselScenario's probability measurements.
         /// @param left The left-hand side \c VesselScenario object.
         /// @param right The right-hand side \c VesselScenario object.
         ///
         /// @return \c true if the scenarios are not equal, \c false otherwise.
-        template <typename OtherTimeType, typename OtherCostType>
-            requires std::unsigned_integral<OtherTimeType> && core::IsArithmetic<OtherCostType>
+        template <typename OtherTimeType, typename OtherCostType, typename OtherProbabilityType>
+            requires std::unsigned_integral<TimeType> && core::IsArithmetic<CostType> && std::floating_point<
+                OtherProbabilityType>
         [[nodiscard]] friend constexpr bool operator!=(const VesselScenario& left,
-                                                       const VesselScenario<OtherTimeType, OtherCostType>& right)
+                                                       const VesselScenario<
+                                                           OtherTimeType, OtherCostType, OtherProbabilityType>& right)
             noexcept
         {
             return !(left == right);
