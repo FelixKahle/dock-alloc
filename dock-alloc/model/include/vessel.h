@@ -317,6 +317,33 @@ namespace dockalloc::model
     class VesselScenarioBundle
     {
     public:
+        /// @brief Constructs a \c VesselScenarioBundle with the given vessel and desired berth
+        /// position and one single scenario.
+        ///
+        /// This constructor initializes a \c VesselScenarioBundle object with the specified vessel,
+        /// desired berth position, and a single vessel scenario.
+        ///
+        /// @tparam VesselType The type of the vessel.
+        /// @tparam VesselScenarioType The type of the vessel scenario.
+        /// @param vessel The vessel associated with the scenario bundle.
+        /// @param desired_berth_position The desired position for the vessel at the berth.
+        /// @param scenario The vessel scenario to be included in the bundle.
+        ///
+        /// @return A \c VesselScenarioBundle containing the vessel and the single scenario.
+        template <typename VesselType, typename VesselScenarioType>
+            requires std::constructible_from<Vessel<DistanceType>, VesselType&&> &&
+            std::constructible_from<VesselScenario<TimeType, CostType, ProbabilityType>, VesselScenarioType&&>
+        [[nodiscard]] static constexpr VesselScenarioBundle SingleScenarioBundle(VesselType&& vessel,
+            const DistanceType desired_berth_position,
+            VesselScenarioType&& scenario) noexcept
+        {
+            return VesselScenarioBundle(
+                std::forward<VesselType>(vessel), desired_berth_position,
+                std::vector<VesselScenario<TimeType, CostType, ProbabilityType>>{
+                    std::forward<VesselScenarioType>(scenario)
+                });
+        }
+
         /// @brief Constructs a \c VesselScenarioBundle with the given vessel, desired berth position, and scenarios.
         ///
         /// This constructor initializes a \c VesselScenarioBundle object with the specified vessel,
