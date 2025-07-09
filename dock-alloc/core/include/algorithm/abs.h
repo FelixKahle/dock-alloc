@@ -22,14 +22,18 @@ namespace dockalloc::core
     {
         if constexpr (std::is_unsigned_v<T>)
         {
+            // Unsigned types are always non-negative, so we can return them directly.
             return x;
         }
         else if constexpr (std::is_floating_point_v<T>)
         {
+            // Use std::fabs for floating-point types.
             return std::fabs(x);
         }
         else
         {
+            // For signed integral types, we check if the value is negative,
+            // and if so, return its negation.
             return x < T{0} ? -x : x;
         }
     }

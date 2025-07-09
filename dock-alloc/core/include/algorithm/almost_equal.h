@@ -36,6 +36,7 @@ namespace dockalloc::core
         }
         else
         {
+            // To prevent overflow, we use the following formula:
             CommonType diff = (left > right) ? (left - right) : (right - left);
             return diff <= epsilon;
         }

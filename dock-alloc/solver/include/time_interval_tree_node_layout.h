@@ -10,6 +10,52 @@
 #include "dockalloc/core/miscellaneous/inline.h"
 #include "dockalloc/core/time/time_interval.h"
 
+#define DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API \
+    public: \
+    static constexpr size_t kSlotSize = SlotSize; \
+    static constexpr size_t kChildrenSize = SlotSize + 1; \
+    using IndexType = core::SmallestUnsignedFor_t<kChildrenSize>; \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE TimeType GetMinStartTime() const noexcept { return min_start_time_; } \
+    DOCK_ALLOC_FORCE_INLINE void SetMinStartTime(TimeType value) noexcept { min_start_time_ = value; } \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE TimeType GetMaxEndTime() const noexcept { return max_end_time_; } \
+    DOCK_ALLOC_FORCE_INLINE void SetMaxEndTime(TimeType value) noexcept { max_end_time_ = value; } \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE TimeType GetMaxGap() const noexcept { return max_gap_; } \
+    DOCK_ALLOC_FORCE_INLINE void SetMaxGap(TimeType value) noexcept { max_gap_ = value; } \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE IndexType GetStartIndex() const noexcept { return start_index_; } \
+    DOCK_ALLOC_FORCE_INLINE void SetStartIndex(IndexType value) noexcept { start_index_ = value; } \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE IndexType GetFinishIndex() const noexcept { return finish_index_; } \
+    DOCK_ALLOC_FORCE_INLINE void SetFinishIndex(IndexType value) noexcept { finish_index_ = value; } \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE IndexType GetParentIndex() const noexcept { return parent_index_; } \
+    DOCK_ALLOC_FORCE_INLINE void SetParentIndex(IndexType value) noexcept { parent_index_ = value; } \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE NodeType* GetParent() const noexcept { return parent_; } \
+    DOCK_ALLOC_FORCE_INLINE void SetParent(NodeType* value) noexcept { parent_ = value; } \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE NodeType* GetChild(const IndexType index) const noexcept \
+    { \
+        DCHECK_LT(index, kChildrenSize); \
+        return children_[index]; \
+    } \
+    DOCK_ALLOC_FORCE_INLINE void SetChild(const IndexType index, NodeType* value) noexcept \
+    { \
+        DCHECK_LT(index, kChildrenSize); \
+        children_[index] = value; \
+    } \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE const core::TimeInterval<TimeType>& GetInterval(const IndexType index) const noexcept \
+    { \
+        DCHECK_LT(index, kSlotSize); \
+        return intervals_[index].Get(); \
+    } \
+    DOCK_ALLOC_FORCE_INLINE void SetInterval(const IndexType index, const core::TimeInterval<TimeType>& interval) noexcept \
+    { \
+        DCHECK_LT(index, kSlotSize); \
+        intervals_[index].Set(interval); \
+    } \
+    DOCK_ALLOC_FORCE_INLINE void SetInterval(const IndexType index, core::TimeInterval<TimeType>&& interval) noexcept \
+    { \
+        DCHECK_LT(index, kSlotSize); \
+        intervals_[index].Set(std::move(interval)); \
+    } \
+    private:
+
 namespace dockalloc::solver
 {
     namespace internal
@@ -129,50 +175,6 @@ namespace dockalloc::solver
             requires std::unsigned_integral<TimeType>
         class TimeIntervalTreeNodeFieldLayout;
 
-#define DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API \
-    static constexpr size_t kSlotSize = SlotSize; \
-    static constexpr size_t kChildrenSize = SlotSize + 1; \
-    using IndexType = core::SmallestUnsignedFor_t<kChildrenSize>; \
-    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE TimeType GetMinStartTime() const noexcept { return min_start_time_; } \
-    DOCK_ALLOC_FORCE_INLINE void SetMinStartTime(TimeType value) noexcept { min_start_time_ = value; } \
-    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE TimeType GetMaxEndTime() const noexcept { return max_end_time_; } \
-    DOCK_ALLOC_FORCE_INLINE void SetMaxEndTime(TimeType value) noexcept { max_end_time_ = value; } \
-    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE TimeType GetMaxGap() const noexcept { return max_gap_; } \
-    DOCK_ALLOC_FORCE_INLINE void SetMaxGap(TimeType value) noexcept { max_gap_ = value; } \
-    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE IndexType GetStartIndex() const noexcept { return start_index_; } \
-    DOCK_ALLOC_FORCE_INLINE void SetStartIndex(IndexType value) noexcept { start_index_ = value; } \
-    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE IndexType GetFinishIndex() const noexcept { return finish_index_; } \
-    DOCK_ALLOC_FORCE_INLINE void SetFinishIndex(IndexType value) noexcept { finish_index_ = value; } \
-    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE IndexType GetParentIndex() const noexcept { return parent_index_; } \
-    DOCK_ALLOC_FORCE_INLINE void SetParentIndex(IndexType value) noexcept { parent_index_ = value; } \
-    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE NodeType* GetParent() const noexcept { return parent_; } \
-    DOCK_ALLOC_FORCE_INLINE void SetParent(NodeType* value) noexcept { parent_ = value; } \
-    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE NodeType* GetChild(const IndexType index) const noexcept \
-    { \
-        DCHECK_LT(index, kChildrenSize); \
-        return children_[index]; \
-    } \
-    DOCK_ALLOC_FORCE_INLINE void SetChild(const IndexType index, NodeType* value) noexcept \
-    { \
-        DCHECK_LT(index, kChildrenSize); \
-        children_[index] = value; \
-    } \
-    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE const core::TimeInterval<TimeType>& GetInterval(const IndexType index) const noexcept \
-    { \
-        DCHECK_LT(index, kSlotSize); \
-        return intervals_[index].Get(); \
-    } \
-    DOCK_ALLOC_FORCE_INLINE void SetInterval(const IndexType index, const core::TimeInterval<TimeType>& interval) noexcept \
-    { \
-        DCHECK_LT(index, kSlotSize); \
-        intervals_[index].Set(interval); \
-    } \
-    DOCK_ALLOC_FORCE_INLINE void SetInterval(const IndexType index, core::TimeInterval<TimeType>&& interval) noexcept \
-    { \
-        DCHECK_LT(index, kSlotSize); \
-        intervals_[index].Set(std::move(interval)); \
-    }
-
         /// @brief The layout of fields in a time-interval tree node.
         ///
         /// This class defines the layout of fields in a time-interval tree node,
@@ -189,10 +191,7 @@ namespace dockalloc::solver
         class TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize,
                                               TimeIntervalTreeNodeFieldLayoutOrder::TimeIndexPointer>
         {
-        public:
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
-
-        private:
             // Time
 
             TimeType min_start_time_;
@@ -228,10 +227,7 @@ namespace dockalloc::solver
         class TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize,
                                               TimeIntervalTreeNodeFieldLayoutOrder::TimePointerIndex>
         {
-        public:
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
-
-        private:
             // Time
 
             TimeType min_start_time_;
@@ -267,10 +263,7 @@ namespace dockalloc::solver
         class TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize,
                                               TimeIntervalTreeNodeFieldLayoutOrder::IndexTimePointer>
         {
-        public:
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
-
-        private:
             // Index
 
             IndexType start_index_;
@@ -306,10 +299,7 @@ namespace dockalloc::solver
         class TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize,
                                               TimeIntervalTreeNodeFieldLayoutOrder::IndexPointerTime>
         {
-        public:
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
-
-        private:
             // Index
 
             IndexType start_index_;
@@ -345,10 +335,7 @@ namespace dockalloc::solver
         class TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize,
                                               TimeIntervalTreeNodeFieldLayoutOrder::PointerTimeIndex>
         {
-        public:
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
-
-        private:
             // Pointer
 
             NodeType* parent_{nullptr};
@@ -384,10 +371,7 @@ namespace dockalloc::solver
         class TimeIntervalTreeNodeFieldLayout<TimeType, NodeType, SlotSize,
                                               TimeIntervalTreeNodeFieldLayoutOrder::PointerIndexTime>
         {
-        public:
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
-
-        private:
             // Pointer
 
             NodeType* parent_{nullptr};
@@ -406,8 +390,6 @@ namespace dockalloc::solver
             TimeType max_gap_;
             IntervalStorage<TimeType> intervals_[kSlotSize];
         };
-
-#undef DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
 
         /// @brief The implementation of the time-interval tree node layout based on the desired size of slots.
         ///
@@ -777,5 +759,8 @@ namespace dockalloc::solver
         using Type = internal::LayoutImpl<TimeType, NodeType, kNodeSlotSize>;
     };
 }
+
+// Undef macro to prevent redefinition and confusion in other headers.
+#undef DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
 
 #endif

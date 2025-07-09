@@ -4,6 +4,7 @@ cc_library(
     name = "solver",
     hdrs = [
         "include/bit_span.h",
+        "include/time_interval_tree.h",
         "include/time_interval_tree_node.h",
         "include/time_interval_tree_node_layout.h",
     ],
