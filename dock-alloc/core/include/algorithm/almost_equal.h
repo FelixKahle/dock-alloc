@@ -19,13 +19,15 @@ namespace dockalloc::core
     /// @tparam RightType The type of the right-hand side value (default is the same as LeftType).
     /// @param left The left-hand side value to compare.
     /// @param right The right-hand side value to compare.
-    /// @param epsilon The epsilon value to use for the comparison (default is the machine epsilon for LeftType).
+    /// @param epsilon The epsilon value to use for the comparison
+    /// (default is the machine epsilon for the common type of LeftType and RightType).
     ///
     /// @return \c true if the values are approximately equal, \c false otherwise.
     template <typename LeftType, typename RightType = LeftType>
         requires std::is_arithmetic_v<LeftType> && std::is_arithmetic_v<RightType>
     [[nodiscard]] constexpr bool AlmostEqual(const LeftType left, const RightType right,
-                                             const LeftType epsilon = std::numeric_limits<LeftType>::epsilon()) noexcept
+                                             const LeftType epsilon = std::numeric_limits<std::common_type_t<
+                                                 LeftType, RightType>>::epsilon()) noexcept
     {
         using CommonType = std::common_type_t<LeftType, RightType>;
 

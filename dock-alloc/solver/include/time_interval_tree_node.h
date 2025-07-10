@@ -10,6 +10,160 @@
 
 namespace dockalloc::solver
 {
+    /// @brief An enumeration representing the kind of match for time intervals.
+    enum class MatchKind : uint8_t
+    {
+        /// @brief The intervals are not equal.
+        ///
+        /// Indicates that at least one of the start or end times differs
+        /// between the two intervals.
+        NotEqual,
+
+        /// @brief The intervals are equal.
+        ///
+        /// Indicates that both the start time and end time match exactly.
+        Equal,
+    };
+
+    /// @brief A class representing the result of a search operation in a time interval tree.
+    ///
+    /// This class encapsulates the result of a search operation in a time interval tree,
+    /// allowing for both the value found and the kind of match that occurred.
+    template <typename Value, bool IsCompareTo>
+    class SearchResult;
+
+    /// @brief A specialization of SearchResult for when comparison is needed.
+    ///
+    /// This specialization is used when the search result includes match information,
+    /// allowing for the determination of whether the found value is equal to the searched value.
+    template <typename Value>
+    class SearchResult<Value, true>
+    {
+    public:
+        /// @brief The type alias for the return type of the value stored in this search result.
+        ///
+        /// This type alias is used to determine the return type of the value stored in this search result.
+        /// It uses \c std::conditional_t to choose between \c Value and \c const Value& based
+        /// on whether \c Value is a fundamental type.
+        using ValueReturnType = std::conditional_t<std::is_fundamental_v<Value>, Value, const Value&>;
+
+        /// @brief Constructs a search result with the given value and match kind.
+        ///
+        /// This constructor initializes the search result with the specified value
+        /// and match kind.
+        ///
+        /// @param value The value to store in this search result.
+        /// @param match The match kind of this search result.
+        explicit constexpr SearchResult(const Value value, const MatchKind match)
+            : value_(value),
+              match_(match)
+        {
+        }
+
+        /// @brief Returns the match kind of this search result.
+        ///
+        /// This function provides access to the match kind of this search result,
+        ///
+        /// @return The match kind of this search result.
+        [[nodiscard]] constexpr MatchKind GetMatchKind() const
+        {
+            return match_;
+        }
+
+        /// @brief Returns the value stored in this search result.
+        ///
+        /// This function provides access to the value stored in this search result.
+        ///
+        /// @return A reference to the value stored in this search result.
+        [[nodiscard]] constexpr ValueReturnType GetValue() const
+        {
+            return value_;
+        }
+
+        /// @brief Checks if there is a match.
+        ///
+        /// This function always returns \c true, since match info exists.
+        ///
+        /// @return \c true always, since match info exists.
+        [[nodiscard]] static constexpr bool HasMatch()
+        {
+            return true;
+        }
+
+        /// @brief Checks if the match is an exact match.
+        ///
+        /// This function checks if the match kind is \c MatchKind::Equal,
+        ///
+        /// @return \c true if the match is an exact match, \c false otherwise.
+        [[nodiscard]] bool IsEqual() const
+        {
+            return match_ == MatchKind::Equal;
+        }
+
+    private:
+        Value value_;
+        MatchKind match_;
+    };
+
+    /// @brief A specialization of SearchResult for when no comparison is needed.
+    ///
+    /// This specialization is used when the search result does not include match information,
+    /// allowing for a simpler representation of the found value without match details.
+    template <typename Value>
+    class SearchResult<Value, false>
+    {
+    public:
+        /// @brief The type alias for the return type of the value stored in this search result.
+        ///
+        /// This type alias is used to determine the return type of the value stored in this search result.
+        /// It uses \c std::conditional_t to choose between \c Value and \c const Value& based
+        /// on whether \c Value is a fundamental type.
+        using ValueReturnType = std::conditional_t<std::is_fundamental_v<Value>, Value, const Value&>;
+
+        /// @brief Constructs a search result with the given value.
+        ///
+        /// This constructor initializes the search result with the specified value.
+        ///
+        /// @param value The value to store in this search result.
+        explicit constexpr SearchResult(const Value value)
+            : value_(value)
+        {
+        }
+
+        /// Returns the value stored in this search result.
+        ///
+        /// This function provides access to the value stored in this search result.
+        ///
+        /// @return A reference to the value stored in this search result.
+        [[nodiscard]] constexpr ValueReturnType GetValue() const noexcept
+        {
+            return value_;
+        }
+
+        /// @brief Checks if there is a match (not supported here).
+        ///
+        /// This function always returns \c false, since no match info exists.
+        ///
+        /// @return \c false always, since no match info exists.
+        [[nodiscard]] static constexpr bool HasMatch() noexcept
+        {
+            return false;
+        }
+
+        /// @brief Checks for exact match (not supported here).
+        ///
+        /// This function always returns \c false, since no match info exists.
+        ///
+        /// @return \c false always, since no match info exists.
+        [[nodiscard]] static constexpr bool IsEqual() noexcept
+        {
+            return false;
+        }
+
+    private:
+        Value value_;
+    };
+
     /// @brief A node in a time-interval tree, which stores time intervals efficiently.
     ///
     /// This class represents a node in a time-interval tree, which is used to store
@@ -65,16 +219,6 @@ namespace dockalloc::solver
             return layout_.GetMinStartTime();
         }
 
-        /// @brief Sets the minimum start time of the intervals in this node.
-        ///
-        /// This function sets the minimum start time of all intervals stored in this node.
-        ///
-        /// @param min_start_time The minimum start time to set.
-        void SetMinStartTime(TimeType min_start_time) noexcept
-        {
-            layout_.SetMinStartTime(min_start_time);
-        }
-
         /// @brief Returns the maximum end time of the intervals in this node.
         ///
         /// This function returns the maximum end time of all intervals stored in this node.
@@ -85,16 +229,6 @@ namespace dockalloc::solver
             return layout_.GetMaxEndTime();
         }
 
-        /// @brief Sets the maximum end time of the intervals in this node.
-        ///
-        /// This function sets the maximum end time of all intervals stored in this node.
-        ///
-        /// @param max_end_time The maximum end time to set.
-        void SetMaxEndTime(TimeType max_end_time) noexcept
-        {
-            layout_.SetMaxEndTime(max_end_time);
-        }
-
         /// @brief Returns the maximum gap between intervals in this node.
         ///
         /// This function returns the maximum gap between any two intervals stored in this node.
@@ -103,16 +237,6 @@ namespace dockalloc::solver
         [[nodiscard]] TimeType GetMaxGap() const noexcept
         {
             return layout_.GetMaxGap();
-        }
-
-        /// @brief Sets the maximum gap between intervals in this node.
-        ///
-        /// This function sets the maximum gap between any two intervals stored in this node.
-        ///
-        /// @param max_gap The maximum gap to set.
-        void SetMaxGap(TimeType max_gap) noexcept
-        {
-            layout_.SetMaxGap(max_gap);
         }
 
         /// @brief Returns the start index of the intervals in this node.
@@ -277,6 +401,36 @@ namespace dockalloc::solver
         }
 
     private:
+        /// @brief Sets the minimum start time of the intervals in this node.
+        ///
+        /// This function sets the minimum start time of all intervals stored in this node.
+        ///
+        /// @param min_start_time The minimum start time to set.
+        void SetMinStartTime(TimeType min_start_time) noexcept
+        {
+            layout_.SetMinStartTime(min_start_time);
+        }
+
+        /// @brief Sets the maximum end time of the intervals in this node.
+        ///
+        /// This function sets the maximum end time of all intervals stored in this node.
+        ///
+        /// @param max_end_time The maximum end time to set.
+        void SetMaxEndTime(TimeType max_end_time) noexcept
+        {
+            layout_.SetMaxEndTime(max_end_time);
+        }
+
+        /// @brief Sets the maximum gap between intervals in this node.
+        ///
+        /// This function sets the maximum gap between any two intervals stored in this node.
+        ///
+        /// @param max_gap The maximum gap to set.
+        void SetMaxGap(TimeType max_gap) noexcept
+        {
+            layout_.SetMaxGap(max_gap);
+        }
+
         LayoutType layout_{};
     };
 }

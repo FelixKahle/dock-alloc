@@ -5,6 +5,13 @@
 
 namespace dockalloc::solver
 {
+    static_assert(std::is_same_v<SearchResult<core::TimeInterval<uint32_t>, false>::ValueReturnType,
+                                 const core::TimeInterval<uint32_t>&>,
+                  "Complex types must be returned as const references");
+
+    static_assert(std::is_same_v<SearchResult<int, false>::ValueReturnType, int>,
+                  "Fundamental types must be returned by value");
+
     static_assert(sizeof(TimeIntervalTreeNode<uint8_t, 256>) <= 256,
                   "TimeIntervalTreeNode<uint8_t, 256> must fit into 256 bytes");
     static_assert(sizeof(TimeIntervalTreeNode<uint16_t, 256>) <= 256,
