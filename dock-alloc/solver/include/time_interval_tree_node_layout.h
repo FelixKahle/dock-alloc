@@ -214,6 +214,7 @@ namespace dockalloc::solver
             NodeType* children_[kChildrenSize]{nullptr};
 
             // Leaf flag
+
             bool is_leaf_{false};
         };
 
@@ -253,6 +254,7 @@ namespace dockalloc::solver
             IndexType parent_index_;
 
             // Leaf flag
+
             bool is_leaf_{false};
         };
 
@@ -372,6 +374,7 @@ namespace dockalloc::solver
             IndexType parent_index_;
 
             // Leaf flag
+
             bool is_leaf_{false};
         };
 
@@ -411,6 +414,7 @@ namespace dockalloc::solver
             IntervalStorage<TimeType> intervals_[kSlotSize];
 
             // Leaf flag
+
             bool is_leaf_{false};
         };
 

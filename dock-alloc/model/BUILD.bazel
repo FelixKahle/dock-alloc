@@ -30,7 +30,7 @@ cc_library(
 cc_test(
     name = "model_tests",
     srcs = [
-        "test/vessel_test.cc",
+        "tests/vessel_tests.cc",
     ],
     copts = select({
         "//:compiler_msvc": [
