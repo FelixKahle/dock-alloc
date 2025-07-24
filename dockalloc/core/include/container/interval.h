@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <type_traits>
 #include "absl/strings/str_format.h"
+#include "dockalloc/core/miscellaneous/core_defines.h"
 
 namespace dockalloc::core
 {
@@ -32,7 +33,7 @@ namespace dockalloc::core
         ///
         /// @param start_inclusive The inclusive start of the interval.
         /// @param end_inclusive The inclusive end of the interval.
-        constexpr Interval(const T start_inclusive, const T end_inclusive) noexcept
+        constexpr DOCK_ALLOC_FORCE_INLINE Interval(const T start_inclusive, const T end_inclusive) noexcept
             : start_inclusive_(std::min<T>(start_inclusive, end_inclusive)),
               end_exclusive_(std::max<T>(start_inclusive, end_inclusive))
         {
@@ -43,7 +44,7 @@ namespace dockalloc::core
         /// This method returns the inclusive start of the interval.
         ///
         /// @return The inclusive start of the interval.
-        [[nodiscard]] constexpr T GetStart() const noexcept
+        [[nodiscard]] constexpr DOCK_ALLOC_FORCE_INLINE T GetStart() const noexcept
         {
             return start_inclusive_;
         }
@@ -53,7 +54,7 @@ namespace dockalloc::core
         /// This method returns the exclusive end of the interval.
         ///
         /// @return The exclusive end of the interval.
-        [[nodiscard]] constexpr T GetEnd() const noexcept
+        [[nodiscard]] constexpr DOCK_ALLOC_FORCE_INLINE T GetEnd() const noexcept
         {
             return end_exclusive_;
         }
@@ -67,7 +68,7 @@ namespace dockalloc::core
         /// @return The midpoint of the interval as an arithmetic type.
         template <typename ReturnTimeType = T>
             requires std::is_arithmetic_v<ReturnTimeType>
-        [[nodiscard]] constexpr ReturnTimeType Midpoint() const noexcept
+        [[nodiscard]] constexpr DOCK_ALLOC_FORCE_INLINE ReturnTimeType Midpoint() const noexcept
         {
             // Floating point types cannot overflow, so we can safely use the average.
             // It will yield more accurate results than the alternative formula
@@ -89,7 +90,7 @@ namespace dockalloc::core
         /// This method checks if the interval has no length, which occurs when the start and end values are equal.
         ///
         /// @return \c true if the interval is empty, \c false otherwise.
-        [[nodiscard]] constexpr bool IsEmpty() const noexcept
+        [[nodiscard]] constexpr DOCK_ALLOC_FORCE_INLINE bool IsEmpty() const noexcept
         {
             return start_inclusive_ == end_exclusive_;
         }
@@ -114,7 +115,7 @@ namespace dockalloc::core
         /// @return \c true if the value is within the interval, \c false otherwise.
         template <typename OtherType>
             requires std::convertible_to<OtherType, T>
-        [[nodiscard]] constexpr bool Contains(OtherType value) const noexcept
+        [[nodiscard]] constexpr DOCK_ALLOC_FORCE_INLINE bool Contains(OtherType value) const noexcept
         {
             return value >= start_inclusive_ && value < end_exclusive_;
         }
@@ -131,7 +132,8 @@ namespace dockalloc::core
         /// @return \c true if the current interval contains the other interval, \c false otherwise.
         template <typename OtherType>
             requires std::is_arithmetic_v<T>
-        [[nodiscard]] constexpr bool ContainsInterval(const Interval<OtherType>& other) const noexcept
+        [[nodiscard]] constexpr DOCK_ALLOC_FORCE_INLINE bool ContainsInterval(
+            const Interval<OtherType>& other) const noexcept
         {
             return other.start_inclusive_ >= start_inclusive_
                 && other.end_exclusive_ <= end_exclusive_;
@@ -148,7 +150,7 @@ namespace dockalloc::core
         /// @return \c true if the intervals intersect, \c false otherwise.
         template <typename OtherType>
             requires std::is_arithmetic_v<T>
-        [[nodiscard]] constexpr bool Intersects(const Interval<OtherType>& other) const noexcept
+        [[nodiscard]] constexpr DOCK_ALLOC_FORCE_INLINE bool Intersects(const Interval<OtherType>& other) const noexcept
         {
             return std::max(start_inclusive_, static_cast<T>(other.GetStart())) <
                 std::min(end_exclusive_, static_cast<T>(other.GetEnd()));
@@ -167,7 +169,7 @@ namespace dockalloc::core
         /// or an empty optional if there is no intersection.
         template <typename OtherType, typename ReturnTimeType = T>
             requires std::is_arithmetic_v<T>
-        [[nodiscard]] constexpr std::optional<Interval<ReturnTimeType>> Intersection(
+        [[nodiscard]] constexpr DOCK_ALLOC_FORCE_INLINE std::optional<Interval<ReturnTimeType>> Intersection(
             const Interval<OtherType>& other) const noexcept
         {
             const ReturnTimeType start = std::max(static_cast<ReturnTimeType>(start_inclusive_),
@@ -193,7 +195,7 @@ namespace dockalloc::core
         /// @return An optional \c std::optional containing the clamped interval if it exists,
         template <typename OtherType>
             requires std::is_arithmetic_v<T>
-        [[nodiscard]] constexpr std::optional<Interval<T>> Clamp(
+        [[nodiscard]] constexpr DOCK_ALLOC_FORCE_INLINE std::optional<Interval<T>> Clamp(
             const Interval<OtherType>& boundary) const noexcept
         {
             const T clamped_start = std::max(start_inclusive_, static_cast<T>(boundary.GetStart()));
@@ -218,7 +220,8 @@ namespace dockalloc::core
         /// @return \c true if the intervals are equal, \c false otherwise.
         template <typename OtherType>
             requires std::is_arithmetic_v<OtherType>
-        friend constexpr bool operator==(const Interval& lhs, const Interval<OtherType>& rhs) noexcept
+        friend constexpr DOCK_ALLOC_FORCE_INLINE bool operator==(const Interval& lhs,
+                                                                 const Interval<OtherType>& rhs) noexcept
         {
             return lhs.GetStart() == rhs.GetStart() && lhs.GetEnd() == rhs.GetEnd();
         }
@@ -234,7 +237,8 @@ namespace dockalloc::core
         /// @return \c true if the intervals are not equal, \c false otherwise.
         template <typename OtherType>
             requires std::is_arithmetic_v<OtherType>
-        friend constexpr bool operator!=(const Interval& lhs, const Interval<OtherType>& rhs) noexcept
+        friend constexpr DOCK_ALLOC_FORCE_INLINE bool operator!=(const Interval& lhs,
+                                                                 const Interval<OtherType>& rhs) noexcept
         {
             return !(lhs == rhs);
         }
@@ -249,7 +253,7 @@ namespace dockalloc::core
         ///
         /// @return The combined hash value.
         template <typename H>
-        friend constexpr H AbslHashValue(H h, const Interval& interval) noexcept
+        friend constexpr DOCK_ALLOC_FORCE_INLINE H AbslHashValue(H h, const Interval& interval) noexcept
         {
             return H::combine(std::move(h), interval.GetStart(), interval.GetEnd());
         }
@@ -263,7 +267,7 @@ namespace dockalloc::core
         /// @param sink The sink to which the formatted string will be written.
         /// @param interval The interval to format.
         template <typename Sink>
-        friend void AbslStringify(Sink& sink, const Interval& interval) noexcept
+        friend DOCK_ALLOC_FORCE_INLINE void AbslStringify(Sink& sink, const Interval& interval) noexcept
         {
             absl::Format(&sink, "[%v, %v)", interval.GetStart(), interval.GetEnd());
         }

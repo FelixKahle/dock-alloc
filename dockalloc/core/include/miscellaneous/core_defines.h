@@ -3,7 +3,10 @@
 #ifndef DOCK_ALLOC_CORE_MISCELLANEOUS_CORE_DEFINES_H_
 #define DOCK_ALLOC_CORE_MISCELLANEOUS_CORE_DEFINES_H_
 
+#include "dockalloc/core/miscellaneous/config.h"
 #include "dockalloc/core/miscellaneous/inline.h"
+#include "dockalloc/core/miscellaneous/compiler.h"
+#include "dockalloc/core/miscellaneous/compiler_check.h"
 
 #define DOCK_ALLOC_DEFAULT_CONSTRUCT(Type) Type() = default;
 #define DOCK_ALLOC_DEFAULT_COPY(Type) Type(const Type&) = default;

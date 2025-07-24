@@ -6,6 +6,7 @@
 #include <type_traits>
 #include <concepts>
 #include <limits>
+#include "dockalloc/core/include/miscellaneous/core_defines.h"
 
 namespace dockalloc::core
 {
@@ -22,7 +23,7 @@ namespace dockalloc::core
         requires std::integral<T> &&
         std::unsigned_integral<Output> &&
         (std::numeric_limits<Output>::digits >= std::numeric_limits<T>::digits)
-    constexpr Output NextPowerOfTwo(const T value) noexcept
+    constexpr DOCK_ALLOC_FORCE_INLINE Output NextPowerOfTwo(const T value) noexcept
     {
         // Special case for zero and one, that both evaluate to 1.
         if (value <= 1)

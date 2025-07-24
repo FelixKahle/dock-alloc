@@ -4,8 +4,8 @@
 #define DOCK_ALLOC_CORE_ALGORITHM_ALMOST_EQUAL_H_
 
 #include <limits>
-#include <cstdlib>
 #include <type_traits>
+#include "dockalloc/core/miscellaneous/core_defines.h"
 #include "dockalloc/core/algorithm/abs.h"
 
 namespace dockalloc::core
@@ -17,17 +17,25 @@ namespace dockalloc::core
     ///
     /// @tparam LeftType The type of the left-hand side value.
     /// @tparam RightType The type of the right-hand side value (default is the same as LeftType).
+    /// @tparam EpsilonType The type of the epsilon value (default is the common type of LeftType and RightType).
     /// @param left The left-hand side value to compare.
     /// @param right The right-hand side value to compare.
     /// @param epsilon The epsilon value to use for the comparison
     /// (default is the machine epsilon for the common type of LeftType and RightType).
     ///
+    /// @note For integer types, the default epsilon is zero, meaning the values must be exactly equal.
+    /// This behavior can be overridden by providing a non-zero epsilon value, but comparing integers for equality
+    /// should rely on a zero epsilon tolerance.
+    ///
     /// @return \c true if the values are approximately equal, \c false otherwise.
-    template <typename LeftType, typename RightType = LeftType>
-        requires std::is_arithmetic_v<LeftType> && std::is_arithmetic_v<RightType>
-    [[nodiscard]] constexpr bool AlmostEqual(const LeftType left, const RightType right,
-                                             const LeftType epsilon = std::numeric_limits<std::common_type_t<
-                                                 LeftType, RightType>>::epsilon()) noexcept
+    template <typename LeftType, typename RightType = LeftType, typename EpsilonType = std::common_type_t<
+                  LeftType, RightType>>
+        requires std::is_arithmetic_v<LeftType> && std::is_arithmetic_v<RightType> && std::is_arithmetic_v<EpsilonType>
+        && std::convertible_to<EpsilonType, std::common_type_t<LeftType, RightType>>
+    [[nodiscard]] constexpr DOCK_ALLOC_FORCE_INLINE bool AlmostEqual(const LeftType left, const RightType right,
+                                                                     const EpsilonType epsilon = std::numeric_limits<
+                                                                         std::common_type_t<
+                                                                             LeftType, RightType>>::epsilon()) noexcept
     {
         using CommonType = std::common_type_t<LeftType, RightType>;
 

@@ -5,6 +5,7 @@
 
 #include <type_traits>
 #include <cmath>
+#include "dockalloc/core/miscellaneous/core_defines.h"
 
 namespace dockalloc::core
 {
@@ -18,7 +19,7 @@ namespace dockalloc::core
     /// @return The absolute value of the input.
     template <typename T>
         requires std::is_arithmetic_v<T>
-    [[nodiscard]] constexpr T Abs(const T x) noexcept
+    [[nodiscard]] constexpr DOCK_ALLOC_FORCE_INLINE T Abs(const T x) noexcept
     {
         if constexpr (std::is_unsigned_v<T>)
         {
