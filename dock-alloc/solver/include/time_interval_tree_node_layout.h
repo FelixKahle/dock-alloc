@@ -8,7 +8,7 @@
 #include "absl/log/check.h"
 #include "dockalloc/core/type_traits/smallest_unsigned_for.h"
 #include "dockalloc/core/miscellaneous/inline.h"
-#include "dockalloc/core/time/time_interval.h"
+#include "dockalloc/core/miscellaneous/core_types.h"
 
 #define DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API \
     public: \
@@ -192,6 +192,9 @@ namespace dockalloc::solver
                                               TimeIntervalTreeNodeFieldLayoutOrder::TimeIndexPointer>
         {
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
+            // Boolean
+            bool is_leaf_{false};
+
             // Time
 
             TimeType min_start_time_;
@@ -228,6 +231,8 @@ namespace dockalloc::solver
                                               TimeIntervalTreeNodeFieldLayoutOrder::TimePointerIndex>
         {
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
+            // Boolean
+            bool is_leaf_{false};
             // Time
 
             TimeType min_start_time_;
@@ -264,6 +269,8 @@ namespace dockalloc::solver
                                               TimeIntervalTreeNodeFieldLayoutOrder::IndexTimePointer>
         {
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
+            // Boolean
+            bool is_leaf_{false};
             // Index
 
             IndexType start_index_;
@@ -300,6 +307,8 @@ namespace dockalloc::solver
                                               TimeIntervalTreeNodeFieldLayoutOrder::IndexPointerTime>
         {
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
+            // Boolean
+            bool is_leaf_{false};
             // Index
 
             IndexType start_index_;
@@ -336,6 +345,9 @@ namespace dockalloc::solver
                                               TimeIntervalTreeNodeFieldLayoutOrder::PointerTimeIndex>
         {
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
+            // Boolean
+            bool is_leaf_{false};
+
             // Pointer
 
             NodeType* parent_{nullptr};
@@ -372,6 +384,9 @@ namespace dockalloc::solver
                                               TimeIntervalTreeNodeFieldLayoutOrder::PointerIndexTime>
         {
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
+            // Boolean
+            bool is_leaf_{false};
+
             // Pointer
 
             NodeType* parent_{nullptr};

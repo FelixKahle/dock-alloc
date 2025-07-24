@@ -6,6 +6,17 @@ cc_library(
         "include/types.h",
         "include/vessel.h",
     ],
+    copts = select({
+        "//:compiler_msvc": [
+            "/EHs-",
+            "/EHc-",
+            "/std:c++23",
+        ],
+        "//conditions:default": [
+            "-fno-exceptions",
+            "-std=c++23",
+        ],
+    }),
     include_prefix = "dockalloc/model",
     strip_include_prefix = "include",
     visibility = ["//visibility:public"],
@@ -17,10 +28,21 @@ cc_library(
 )
 
 cc_test(
-    name = "model-test",
+    name = "model_tests",
     srcs = [
         "test/vessel_test.cc",
     ],
+    copts = select({
+        "//:compiler_msvc": [
+            "/EHs-",
+            "/EHc-",
+            "/std:c++23",
+        ],
+        "//conditions:default": [
+            "-fno-exceptions",
+            "-std=c++23",
+        ],
+    }),
     deps = [
         "//dock-alloc/model",
         "@googletest//:gtest_main",

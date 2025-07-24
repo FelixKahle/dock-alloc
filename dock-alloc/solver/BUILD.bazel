@@ -8,6 +8,17 @@ cc_library(
         "include/time_interval_tree_node.h",
         "include/time_interval_tree_node_layout.h",
     ],
+    copts = select({
+        "//:compiler_msvc": [
+            "/EHs-",
+            "/EHc-",
+            "/std:c++23",
+        ],
+        "//conditions:default": [
+            "-fno-exceptions",
+            "-std=c++23",
+        ],
+    }),
     include_prefix = "dockalloc/solver",
     strip_include_prefix = "include",
     visibility = ["//visibility:public"],
@@ -28,6 +39,17 @@ cc_test(
         "test/time_interval_tree_node_layout_test.cc",
         "test/time_interval_tree_node_test.cc",
     ],
+    copts = select({
+        "//:compiler_msvc": [
+            "/EHs-",
+            "/EHc-",
+            "/std:c++23",
+        ],
+        "//conditions:default": [
+            "-fno-exceptions",
+            "-std=c++23",
+        ],
+    }),
     deps = [
         "//dock-alloc/solver",
         "@googletest//:gtest_main",

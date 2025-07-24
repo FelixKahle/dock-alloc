@@ -6,9 +6,10 @@ cc_library(
         "include/algorithm/abs.h",
         "include/algorithm/almost_equal.h",
         "include/algorithm/pow.h",
+        "include/container/interval.h",
         "include/miscellaneous/core_defines.h",
+        "include/miscellaneous/core_types.h",
         "include/miscellaneous/inline.h",
-        "include/time/time_interval.h",
         "include/type_traits/align_up.h",
         "include/type_traits/bigger_alignment.h",
         "include/type_traits/bigger_size.h",
@@ -16,6 +17,17 @@ cc_library(
         "include/type_traits/size_sum.h",
         "include/type_traits/smallest_unsigned_for.h",
     ],
+    copts = select({
+        "//:compiler_msvc": [
+            "/EHs-",
+            "/EHc-",
+            "/std:c++23",
+        ],
+        "//conditions:default": [
+            "-fno-exceptions",
+            "-std=c++23",
+        ],
+    }),
     include_prefix = "dockalloc/core",
     strip_include_prefix = "include",
     visibility = ["//visibility:public"],
@@ -25,16 +37,28 @@ cc_library(
 )
 
 cc_test(
-    name = "core-test",
+    name = "core_tests",
     srcs = [
-        "test/algorithm/abs_test.cc",
-        "test/algorithm/almost_equal_test.cc",
-        "test/algorithm/pow_test.cc",
-        "test/time/time_interval_test.cc",
-        "test/type_traits/smallest_unsigned_for_test.cc",
+        "tests/algorithm/abs_tests.cc",
+        "tests/algorithm/almost_equal_tests.cc",
+        "tests/algorithm/pow_tests.cc",
+        "tests/container/interval_tests.cc",
+        "tests/type_traits/smallest_unsigned_for_tests.cc",
     ],
+    copts = select({
+        "//:compiler_msvc": [
+            "/EHs-",
+            "/EHc-",
+            "/std:c++23",
+        ],
+        "//conditions:default": [
+            "-fno-exceptions",
+            "-std=c++23",
+        ],
+    }),
     deps = [
         "//dock-alloc/core",
+        "@abseil-cpp//absl/hash:hash_test",
         "@googletest//:gtest_main",
     ],
 )

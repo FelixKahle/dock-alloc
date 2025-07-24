@@ -5,7 +5,7 @@
 
 #include <type_traits>
 #include "dockalloc/core/type_traits/smallest_unsigned_for.h"
-#include "dockalloc/core/time/time_interval.h"
+#include "dockalloc/core/miscellaneous/core_defines.h"
 #include "dockalloc/solver/time_interval_tree_node_layout.h"
 
 namespace dockalloc::solver
