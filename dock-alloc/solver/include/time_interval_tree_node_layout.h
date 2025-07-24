@@ -273,8 +273,6 @@ namespace dockalloc::solver
                                               TimeIntervalTreeNodeFieldLayoutOrder::IndexTimePointer>
         {
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
-            // Leaf flag
-            bool is_leaf_{false};
             // Index
 
             IndexType start_index_;
