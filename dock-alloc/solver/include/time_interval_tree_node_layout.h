@@ -195,9 +195,6 @@ namespace dockalloc::solver
                                               TimeIntervalTreeNodeFieldLayoutOrder::TimeIndexPointer>
         {
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
-            // Leaf flag
-            bool is_leaf_{false};
-
             // Time
 
             TimeType min_start_time_;
@@ -215,6 +212,9 @@ namespace dockalloc::solver
 
             NodeType* parent_{nullptr};
             NodeType* children_[kChildrenSize]{nullptr};
+
+            // Leaf flag
+            bool is_leaf_{false};
         };
 
         /// @brief The layout of fields in a time-interval tree node.
@@ -234,8 +234,6 @@ namespace dockalloc::solver
                                               TimeIntervalTreeNodeFieldLayoutOrder::TimePointerIndex>
         {
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
-            // Leaf flag
-            bool is_leaf_{false};
             // Time
 
             TimeType min_start_time_;
@@ -253,6 +251,9 @@ namespace dockalloc::solver
             IndexType start_index_;
             IndexType finish_index_;
             IndexType parent_index_;
+
+            // Leaf flag
+            bool is_leaf_{false};
         };
 
         /// @brief The layout of fields in a time-interval tree node.
@@ -291,6 +292,10 @@ namespace dockalloc::solver
 
             NodeType* parent_{nullptr};
             NodeType* children_[kChildrenSize]{nullptr};
+
+            // Leaf flag
+
+            bool is_leaf_{false};
         };
 
         /// @brief The layout of fields in a time-interval tree node.
@@ -310,8 +315,6 @@ namespace dockalloc::solver
                                               TimeIntervalTreeNodeFieldLayoutOrder::IndexPointerTime>
         {
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
-            // Leaf flag
-            bool is_leaf_{false};
             // Index
 
             IndexType start_index_;
@@ -329,6 +332,10 @@ namespace dockalloc::solver
             TimeType max_end_time_;
             TimeType max_gap_;
             IntervalStorage<TimeType> intervals_[kSlotSize];
+
+            // Leaf flag
+
+            bool is_leaf_{false};
         };
 
         /// @brief The layout of fields in a time-interval tree node.
@@ -348,9 +355,6 @@ namespace dockalloc::solver
                                               TimeIntervalTreeNodeFieldLayoutOrder::PointerTimeIndex>
         {
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
-            // Leaf flag
-            bool is_leaf_{false};
-
             // Pointer
 
             NodeType* parent_{nullptr};
@@ -368,6 +372,9 @@ namespace dockalloc::solver
             IndexType start_index_;
             IndexType finish_index_;
             IndexType parent_index_;
+
+            // Leaf flag
+            bool is_leaf_{false};
         };
 
         /// @brief The layout of fields in a time-interval tree node.
@@ -387,9 +394,6 @@ namespace dockalloc::solver
                                               TimeIntervalTreeNodeFieldLayoutOrder::PointerIndexTime>
         {
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
-            // Leaf flag
-            bool is_leaf_{false};
-
             // Pointer
 
             NodeType* parent_{nullptr};
@@ -407,6 +411,9 @@ namespace dockalloc::solver
             TimeType max_end_time_;
             TimeType max_gap_;
             IntervalStorage<TimeType> intervals_[kSlotSize];
+
+            // Leaf flag
+            bool is_leaf_{false};
         };
 
         /// @brief The implementation of the time-interval tree node layout based on the desired size of slots.
@@ -480,6 +487,18 @@ namespace dockalloc::solver
             ///
             /// This is the smallest unsigned type that can hold the number of children in the node.
             using IndexType = typename Base::IndexType;
+
+            /// @brief The size of the slot in the time-interval tree node.
+            ///
+            /// This is a compile-time constant that defines the size of each slot in the node,
+            /// which is the size of \c core::TimeInterval<TimeType>.
+            static constexpr size_t kSlotSize = Base::kSlotSize;
+
+            /// @brief The number of children in the time-interval tree node.
+            ///
+            /// This is a compile-time constant that defines the number of children pointers in the node,
+            /// which is one more than the number of slots.
+            static constexpr size_t kChildrenSize = Base::kChildrenSize;
 
             /// @brief Checks if the node is a leaf node.
             ///

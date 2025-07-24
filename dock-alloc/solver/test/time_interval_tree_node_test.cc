@@ -21,6 +21,17 @@ namespace dockalloc::solver
     static_assert(sizeof(TimeIntervalTreeNode<uint64_t, 256>) <= 256,
                   "TimeIntervalTreeNode<uint64_t, 256> must fit into 256 bytes");
 
+    // Check the amount of slots in the node
+    static_assert(TimeIntervalTreeNode<uint64_t, 256>::kSlotSize == 8,
+                  "TimeIntervalTreeNode<uint64_t, 256> must have 8 slots");
+    static_assert(TimeIntervalTreeNode<uint32_t, 256>::kSlotSize == 14,
+                  "TimeIntervalTreeNode<uint64_t, 256> must have 8 slots");
+    // Check the number of children pointers in the node
+    static_assert(TimeIntervalTreeNode<uint64_t, 256>::kChildrenSize == 9,
+                  "TimeIntervalTreeNode<uint64_t, 256> must have 9 children");
+    static_assert(TimeIntervalTreeNode<uint32_t, 256>::kChildrenSize == 15,
+                  "TimeIntervalTreeNode<uint64_t, 256> must have 9 children");
+
     TEST(TimeIntervalTreeNodeTest, GetParentReturnsNullptrWhenUninitialized)
     {
         const TimeIntervalTreeNode<uint32_t, 256> node;

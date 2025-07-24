@@ -181,6 +181,17 @@ namespace dockalloc::solver
         using LayoutType = typename TimeIntervalTreeNodeLayout<TimeType, TimeIntervalTreeNode, TargetNodeSize>::Type;
         using IndexType = typename LayoutType::IndexType;
 
+        /// @brief The number of child pointers in the node, which is one more than the number of slots.
+        ///
+        /// This is the number of child pointers in the node, which is one more than the number of slots.
+        static constexpr size_t kChildrenSize = LayoutType::kChildrenSize;
+
+        /// @brief The number of slots in the node, determined by the compile-time binary search.
+        ///
+        /// This is the number of \c TimeInterval<TimeType> slots in the node, which is determined
+        /// by the compile-time binary search to find the optimal slot count.
+        static constexpr size_t kSlotSize = LayoutType::kSlotSize;
+
         TimeIntervalTreeNode()
             : layout_()
         {
