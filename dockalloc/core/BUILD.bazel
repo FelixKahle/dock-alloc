@@ -57,7 +57,7 @@ cc_test(
         ],
     }),
     deps = [
-        "//dock-alloc/core",
+        "//dockalloc/core",
         "@abseil-cpp//absl/hash:hash_test",
         "@googletest//:gtest_main",
     ],

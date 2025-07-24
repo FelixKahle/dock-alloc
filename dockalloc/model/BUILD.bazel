@@ -21,7 +21,7 @@ cc_library(
     strip_include_prefix = "include",
     visibility = ["//visibility:public"],
     deps = [
-        "//dock-alloc/core",
+        "//dockalloc/core",
         "@abseil-cpp//absl/container:btree",
         "@abseil-cpp//absl/strings:str_format",
     ],
@@ -44,7 +44,7 @@ cc_test(
         ],
     }),
     deps = [
-        "//dock-alloc/model",
+        "//dockalloc/model",
         "@googletest//:gtest_main",
     ],
 )
