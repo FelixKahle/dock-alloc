@@ -189,6 +189,38 @@ namespace dockalloc::solver
         TimeIntervalTreeNode(const TimeIntervalTreeNode& other) noexcept = delete;
         TimeIntervalTreeNode& operator=(const TimeIntervalTreeNode&) noexcept = delete;
 
+        /// @brief Returns whether this node is a leaf node.
+        ///
+        /// This function checks if this node is a leaf node,
+        /// which means it has no children.
+        ///
+        /// @return \c true if this node is a leaf, \c false otherwise.
+        [[nodiscard]] bool IsLeaf() const noexcept
+        {
+            return layout_.IsLeaf();
+        }
+
+        /// @brief Returns whether this node is an internal node.
+        ///
+        /// This function checks if this node is an internal node,
+        /// which means it has at least one child.
+        ///
+        /// @return \c true if this node is internal, \c false if it is a leaf.
+        [[nodiscard]] bool IsInternal() const noexcept
+        {
+            return layout_.IsInternal();
+        }
+
+        /// @brief Sets whether this node is a leaf node.
+        ///
+        /// This function sets the leaf status of this node to the given value.
+        ///
+        /// @param value The value to set for the leaf status of this node.
+        void SetIsLeaf(bool value) noexcept
+        {
+            layout_.SetIsLeaf(value);
+        }
+
         /// @brief Returns a pointer to the parent node.
         ///
         /// This function returns a pointer to the parent node of this node.
@@ -365,28 +397,6 @@ namespace dockalloc::solver
         void SetInterval(const IndexType index, core::TimeInterval<TimeType>&& interval) noexcept
         {
             layout_.SetInterval(index, std::move(interval));
-        }
-
-        /// @brief Checks if this node is a leaf node.
-        ///
-        /// This function checks if this node is a leaf node,
-        /// which means it has no children.
-        ///
-        /// @return \c true if this node is a leaf, \c false otherwise.
-        [[nodiscard]] bool IsLeaf() const noexcept
-        {
-            return layout_.GetChild(0) == nullptr;
-        }
-
-        /// @brief Checks if this node is an internal node.
-        ///
-        /// This function checks if this node is an internal node,
-        /// which means it has at least one child.
-        ///
-        /// @return \c true if this node is internal, \c false if it is a leaf.
-        [[nodiscard]] bool IsInternal() const noexcept
-        {
-            return !IsLeaf();
         }
 
         /// @brief Returns the number of intervals stored in this node.

@@ -33,4 +33,19 @@ namespace dockalloc::solver
         node.SetInterval(0, core::TimeInterval<uint32_t>(10, 20));
         EXPECT_EQ(node.GetInterval(0), core::TimeInterval<uint32_t>(10, 20));
     }
+
+    TEST(TimeIntervalTreeNodeTest, IsLeafIsFalseByDefault)
+    {
+        const TimeIntervalTreeNode<uint32_t, 256> node;
+        EXPECT_FALSE(node.IsLeaf());
+    }
+
+    TEST(TimeIntervalTreeNodeTest, SetIsLeaf)
+    {
+        TimeIntervalTreeNode<uint32_t, 256> node;
+        node.SetIsLeaf(true);
+        EXPECT_TRUE(node.IsLeaf());
+        node.SetIsLeaf(false);
+        EXPECT_FALSE(node.IsLeaf());
+    }
 }

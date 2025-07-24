@@ -15,6 +15,9 @@
     static constexpr size_t kSlotSize = SlotSize; \
     static constexpr size_t kChildrenSize = SlotSize + 1; \
     using IndexType = core::SmallestUnsignedFor_t<kChildrenSize>; \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE bool IsLeaf() const noexcept { return is_leaf_; } \
+    DOCK_ALLOC_FORCE_INLINE void SetIsLeaf(const bool value) noexcept { is_leaf_ = value; } \
+    [[nodiscard]] DOCK_ALLOC_FORCE_INLINE bool IsInternal() const noexcept { return !is_leaf_; } \
     [[nodiscard]] DOCK_ALLOC_FORCE_INLINE TimeType GetMinStartTime() const noexcept { return min_start_time_; } \
     DOCK_ALLOC_FORCE_INLINE void SetMinStartTime(TimeType value) noexcept { min_start_time_ = value; } \
     [[nodiscard]] DOCK_ALLOC_FORCE_INLINE TimeType GetMaxEndTime() const noexcept { return max_end_time_; } \
@@ -192,7 +195,7 @@ namespace dockalloc::solver
                                               TimeIntervalTreeNodeFieldLayoutOrder::TimeIndexPointer>
         {
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
-            // Boolean
+            // Leaf flag
             bool is_leaf_{false};
 
             // Time
@@ -231,7 +234,7 @@ namespace dockalloc::solver
                                               TimeIntervalTreeNodeFieldLayoutOrder::TimePointerIndex>
         {
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
-            // Boolean
+            // Leaf flag
             bool is_leaf_{false};
             // Time
 
@@ -269,7 +272,7 @@ namespace dockalloc::solver
                                               TimeIntervalTreeNodeFieldLayoutOrder::IndexTimePointer>
         {
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
-            // Boolean
+            // Leaf flag
             bool is_leaf_{false};
             // Index
 
@@ -307,7 +310,7 @@ namespace dockalloc::solver
                                               TimeIntervalTreeNodeFieldLayoutOrder::IndexPointerTime>
         {
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
-            // Boolean
+            // Leaf flag
             bool is_leaf_{false};
             // Index
 
@@ -345,7 +348,7 @@ namespace dockalloc::solver
                                               TimeIntervalTreeNodeFieldLayoutOrder::PointerTimeIndex>
         {
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
-            // Boolean
+            // Leaf flag
             bool is_leaf_{false};
 
             // Pointer
@@ -384,7 +387,7 @@ namespace dockalloc::solver
                                               TimeIntervalTreeNodeFieldLayoutOrder::PointerIndexTime>
         {
             DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_FIELD_LAYOUT_API
-            // Boolean
+            // Leaf flag
             bool is_leaf_{false};
 
             // Pointer
@@ -477,6 +480,37 @@ namespace dockalloc::solver
             ///
             /// This is the smallest unsigned type that can hold the number of children in the node.
             using IndexType = typename Base::IndexType;
+
+            /// @brief Checks if the node is a leaf node.
+            ///
+            /// This function checks if the node is a leaf node, meaning it has no children.
+            ///
+            /// @return \c true if the node is a leaf, \c false otherwise.
+            [[nodiscard]] DOCK_ALLOC_FORCE_INLINE bool IsLeaf() const noexcept
+            {
+                return fields_.IsLeaf();
+            }
+
+            /// @brief Checks if the node is an internal node.
+            ///
+            /// This function checks if the node is an internal node,
+            /// which means it has at least one child.
+            ///
+            /// @return \c true if the node is internal, \c false if it is a leaf.
+            [[nodiscard]] DOCK_ALLOC_FORCE_INLINE bool IsInternal() const noexcept
+            {
+                return !fields_.IsLeaf();
+            }
+
+            /// @brief Sets whether this node is a leaf node.
+            ///
+            /// This function sets the leaf status of this node to the given value.
+            ///
+            /// @param value The value to set for the leaf status of this node.
+            DOCK_ALLOC_FORCE_INLINE void SetIsLeaf(const bool value) noexcept
+            {
+                fields_.SetIsLeaf(value);
+            }
 
             /// @brief Returns a pointer to the parent node.
             ///
