@@ -18,7 +18,8 @@ cc_library(
         "include/type_traits/bigger_size.h",
         "include/type_traits/max_align.h",
         "include/type_traits/size_sum.h",
-        "include/type_traits/smallest_unsigned_for.h",
+        "include/type_traits/smallest_for.h",
+        "include/type_traits/type_traits.h",
     ],
     copts = select({
         "//:compiler_msvc": [
@@ -47,7 +48,7 @@ cc_test(
         "tests/algorithm/almost_equal_tests.cc",
         "tests/algorithm/pow_tests.cc",
         "tests/container/interval_tests.cc",
-        "tests/type_traits/smallest_unsigned_for_tests.cc",
+        "tests/type_traits/smallest_for_tests.cc",
     ],
     copts = select({
         "//:compiler_msvc": [

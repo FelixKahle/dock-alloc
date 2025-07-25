@@ -4,7 +4,7 @@
 #define DOCK_ALLOC_SOLVER_TIME_INTERVAL_TREE_NODE_H_
 
 #include <type_traits>
-#include "dockalloc/core/type_traits/smallest_unsigned_for.h"
+#include "dockalloc/core/type_traits/type_traits.h"
 #include "dockalloc/core/miscellaneous/core_defines.h"
 #include "dockalloc/solver/time_interval_tree_node_layout.h"
 

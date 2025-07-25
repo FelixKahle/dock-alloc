@@ -6,7 +6,7 @@
 #include <concepts>
 #include <cstddef>
 #include "absl/log/check.h"
-#include "dockalloc/core/type_traits/smallest_unsigned_for.h"
+#include "dockalloc/core/type_traits/type_traits.h"
 #include "dockalloc/core/miscellaneous/inline.h"
 #include "dockalloc/core/miscellaneous/core_types.h"
 
