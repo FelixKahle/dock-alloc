@@ -16,6 +16,11 @@ namespace dockalloc::core
     /// @tparam T The type of the value to compute the absolute value for.
     /// @param x The value for which to compute the absolute value.
     ///
+    /// @note The introduction of this function is to provide a consistent way to compute absolute values
+    /// for all arithmetic types, including both signed and unsigned integers, as well as floating-point types.
+    /// The standard library provides `std::abs` for integers and `std::fabs` for floating-point types,
+    /// but this function unifies the behavior across all arithmetic types.
+    ///
     /// @return The absolute value of the input.
     template <typename T>
         requires std::is_arithmetic_v<T>

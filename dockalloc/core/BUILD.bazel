@@ -35,6 +35,7 @@ cc_library(
     strip_include_prefix = "include",
     visibility = ["//visibility:public"],
     deps = [
+        "@abseil-cpp//absl/hash:hash",
         "@abseil-cpp//absl/strings:str_format",
     ],
 )
