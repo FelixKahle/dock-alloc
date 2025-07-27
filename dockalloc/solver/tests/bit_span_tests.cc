@@ -22,12 +22,24 @@
 #include <vector>
 #include "gtest/gtest.h"
 #include "dockalloc/solver/bit_span.h"
+#include "dockalloc/core/memory/aligned_allocator.h"
+#if DOCK_ALLOC_SOLVER_BIT_SPAN_USE_SIMD
+#include "xsimd/xsimd.hpp"
+#endif
 
 namespace dockalloc::solver
 {
-    template <typename StorageType>
+#if DOCK_ALLOC_SOLVER_BIT_SPAN_USE_SIMD
+    static constexpr size_t kAlignment = alignof(xsimd::batch<uint8_t>);
+    static_assert(kAlignment >= alignof(uint8_t), "SIMD alignment must be at least the alignment of uint8_t");
+#else
+    static constexpr size_t kAlignment = alignof(uint8_t);
+#endif
+
+
+    template <typename StorageType, typename Allocator>
         requires std::unsigned_integral<StorageType>
-    static size_t CalculateBitCount(const std::vector<StorageType>& data)
+    static size_t CalculateBitCount(const std::vector<StorageType, Allocator>& data)
     {
         return data.size() * std::numeric_limits<StorageType>::digits;
     }
@@ -48,34 +60,37 @@ namespace dockalloc::solver
 
     TEST(BitSpanTest, IsBitSetWithSetBit)
     {
-        std::vector data(4, std::numeric_limits<uint8_t>::max());
+        std::vector<uint8_t, core::AlignedAllocator<uint8_t, kAlignment>> data(4, std::numeric_limits<uint8_t>::max());
         const size_t bit_count = CalculateBitCount(data);
-        const BitSpan bit_span(data.data(), bit_count);
+        const core::AlignedStorage<uint8_t, kAlignment> aligned_storage(data.data());
+        const BitSpan<core::AlignedStorage<uint8_t, kAlignment>> span(aligned_storage, bit_count);
 
 
         for (size_t i = 0; i < bit_count; i++)
         {
-            EXPECT_TRUE(bit_span.IsBitSet(i));
+            EXPECT_TRUE(span.IsBitSet(i));
         }
     }
 
     TEST(BitSpanTest, IsBitSetWithClearBit)
     {
-        std::vector<uint8_t> data(4, 0);
+        std::vector<uint8_t, core::AlignedAllocator<uint8_t, kAlignment>> data(4, 0);
         const size_t bit_count = CalculateBitCount(data);
-        const BitSpan bit_span(data.data(), bit_count);
+        const core::AlignedStorage<uint8_t, 64> aligned_storage(data.data());
+        const BitSpan<core::AlignedStorage<uint8_t, 64>> span(aligned_storage, bit_count);
 
         for (size_t i = 0; i < bit_count; i++)
         {
-            EXPECT_FALSE(bit_span.IsBitSet(i));
+            EXPECT_FALSE(span.IsBitSet(i));
         }
     }
 
     TEST(BitSpanTest, FindFreeRangeZeroLength)
     {
-        std::vector<uint8_t> data(2, 0xFF); // all ones, but n=0 is special
+        std::vector<uint8_t, core::AlignedAllocator<uint8_t, kAlignment>> data(2, 0xFF); // all ones, but n=0 is special
         const size_t bit_count = CalculateBitCount(data);
-        const BitSpan span(data.data(), bit_count);
+        const core::AlignedStorage<uint8_t, kAlignment> aligned_storage(data.data());
+        const BitSpan<core::AlignedStorage<uint8_t, kAlignment>> span(aligned_storage, bit_count);
 
         // n=0 should return 'from' as long as from < to
         const auto r1 = span.FindClearRange(0, bit_count, 0);
@@ -89,9 +104,11 @@ namespace dockalloc::solver
 
     TEST(BitSpanTest, FindFreeRangeAllClear)
     {
-        std::vector<uint8_t> data(3, 0x00); // all bits clear
+        std::vector<uint8_t, core::AlignedAllocator<uint8_t, kAlignment>> data(3, 0x00); // all bits clear
         const size_t bit_count = CalculateBitCount(data);
-        const BitSpan span(data.data(), bit_count);
+        const core::AlignedStorage<uint8_t, kAlignment> aligned_storage(data.data());
+        const BitSpan<core::AlignedStorage<uint8_t, kAlignment>> span(aligned_storage, bit_count);
+
         const auto whole = span.FindClearRange(0, bit_count, bit_count);
         EXPECT_TRUE(whole.has_value());
         EXPECT_EQ(whole.value(), 0u);
@@ -104,9 +121,11 @@ namespace dockalloc::solver
 
     TEST(BitSpanTest, FindFreeRangeAllSet)
     {
-        std::vector<uint8_t> data(5, std::numeric_limits<uint8_t>::max());
+        std::vector<uint8_t, core::AlignedAllocator<uint8_t, kAlignment>> data(5, std::numeric_limits<uint8_t>::max());
         const size_t bit_count = CalculateBitCount(data);
-        const BitSpan span(data.data(), bit_count);
+        const core::AlignedStorage<uint8_t, kAlignment> aligned_storage(data.data());
+        const BitSpan<core::AlignedStorage<uint8_t, kAlignment>> span(aligned_storage, bit_count);
+
         for (size_t n = 1; n <= bit_count; ++n)
         {
             auto r = span.FindClearRange(0, bit_count, n);
@@ -116,9 +135,10 @@ namespace dockalloc::solver
 
     TEST(BitSpanTest, FindFreeRangeSingleWordPattern)
     {
-        std::vector<uint8_t> data = {0xF0};
+        std::vector<uint8_t, core::AlignedAllocator<uint8_t, kAlignment>> data = {0xF0};
         const size_t bit_count = CalculateBitCount(data);
-        const BitSpan span(data.data(), bit_count);
+        const core::AlignedStorage<uint8_t, kAlignment> aligned_storage(data.data());
+        const BitSpan<core::AlignedStorage<uint8_t, kAlignment>> span(aligned_storage, bit_count);
 
         const auto r1 = span.FindClearRange(0, bit_count, 3);
         EXPECT_TRUE(r1.has_value());
@@ -134,9 +154,10 @@ namespace dockalloc::solver
 
     TEST(BitSpanTest, FindFreeRangeCrossWord)
     {
-        std::vector<uint8_t> data = {0xF0, 0x0F};
+        std::vector<uint8_t, core::AlignedAllocator<uint8_t, kAlignment>> data = {0xF0, 0x0F};
         const size_t bit_count = CalculateBitCount(data);
-        const BitSpan span(data.data(), bit_count);
+        const core::AlignedStorage<uint8_t, kAlignment> aligned_storage(data.data());
+        const BitSpan<core::AlignedStorage<uint8_t, kAlignment>> span(aligned_storage, bit_count);
 
         const auto r1 = span.FindClearRange(0, bit_count, 4);
         EXPECT_TRUE(r1.has_value());

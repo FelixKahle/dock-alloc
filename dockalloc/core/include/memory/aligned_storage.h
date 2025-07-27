@@ -98,6 +98,23 @@ namespace dockalloc::core
     private:
         T* data_;
     };
+
+    /// @brief Concept that checks if a type is an aligned storage view.
+    ///
+    /// This concept checks if a type \c S is an aligned storage view, which means it has a \c Type member,
+    /// a \c value_type member that is the same as \c Type, a static constant \c kAlignment that is convertible
+    /// to \c size_t and provides \c Get() and \c Set() member functions.
+    ///
+    /// @tparam S The type to check.
+    template <typename S>
+    concept AlignedStorageView =
+        std::same_as<typename S::Type, typename S::value_type> && requires(S s, typename S::Type* p)
+        {
+            { S::kAlignment } -> std::convertible_to<size_t>;
+            { s.Get() } -> std::same_as<typename S::Type*>;
+            { std::as_const(s).Get() } -> std::same_as<typename S::Type const*>;
+            { s.Set(p) } -> std::same_as<void>;
+        };
 }
 
 #endif

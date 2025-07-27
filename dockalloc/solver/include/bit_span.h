@@ -34,6 +34,7 @@
 #if DOCK_ALLOC_SOLVER_BIT_SPAN_USE_SIMD
 #include "xsimd/xsimd.hpp"
 #endif
+#include "dockalloc/core/memory/aligned_storage.h"
 
 namespace dockalloc::solver
 {
@@ -54,10 +55,22 @@ namespace dockalloc::solver
     /// @note The number of valid bits is tracked independently of the number of storage words.
     /// It is the caller’s responsibility to ensure that the storage contains enough words
     /// to safely represent all bits.
-    template <typename StorageType>
-        requires std::unsigned_integral<StorageType>
+    template <typename Storage>
+        requires core::AlignedStorageView<Storage> && std::unsigned_integral<typename Storage::Type>
     class BitSpan
     {
+    public:
+        /// @brief The type of the storage used to hold bits.
+        ///
+        /// This type is an alias for the underlying storage type used to hold the bits.
+        using StorageType = typename Storage::Type;
+
+        /// @brief The alignment of the data stored.
+        ///
+        /// This constant specifies the alignment in bytes required for the storage.
+        static constexpr size_t kAlignedSize = Storage::kAlignment;
+
+    private:
         /// @brief A reference to a single bit in the bit span.
         ///
         /// This class provides a reference to a single bit in the bit span, allowing for
@@ -158,14 +171,14 @@ namespace dockalloc::solver
 
             /// @brief Constructs a new iterator at a given index.
             ///
-            /// @param data Pointer to the bit storage.
+            /// @param data Aligned storage containing the bit data.
             /// @param index Bit index the iterator points to.
             ///
             /// @pre data != nullptr
-            explicit BitSpanIterator(StorageType* data, const size_t index) noexcept
+            explicit BitSpanIterator(Storage data, const size_t index) noexcept
                 : data_(data), index_(index)
             {
-                DCHECK_NE(data, nullptr);
+                DCHECK_NE(data.Get(), nullptr);
             }
 
             /// @brief Dereference operator.
@@ -177,7 +190,7 @@ namespace dockalloc::solver
             {
                 const size_t word = index_ / kBitsPerWord;
                 const size_t bit = index_ % kBitsPerWord;
-                return BitReference(data_[word], bit);
+                return BitReference(data_.Get()[word], bit);
             }
 
             /// @brief Pre-increment operator.
@@ -261,7 +274,7 @@ namespace dockalloc::solver
             /// @return New iterator advanced by \c n.
             BitSpanIterator operator+(const difference_type n) const noexcept
             {
-                return iterator(data_, index_ + n);
+                return iterator(data_.Get(), index_ + n);
             }
 
             /// @brief Iterator subtraction.
@@ -273,7 +286,7 @@ namespace dockalloc::solver
             /// @return New iterator retreated by \c n.
             BitSpanIterator operator-(const difference_type n) const noexcept
             {
-                return iterator(data_, index_ - n);
+                return iterator(data_.Get(), index_ - n);
             }
 
             /// @brief Distance between iterators.
@@ -313,7 +326,7 @@ namespace dockalloc::solver
             }
 
         private:
-            StorageType* data_;
+            Storage data_;
             size_t index_;
         };
 
@@ -344,14 +357,14 @@ namespace dockalloc::solver
             /// This constructor initializes a \c ConstBitSpanIterator to point to a specific bit
             /// in the bit span.
             ///
-            /// @param data Pointer to the beginning of the storage array.
+            /// @param data Aligned storage containing the bit data.
             /// @param index Bit index the iterator points to.
             ///
             /// @pre data != nullptr
-            explicit ConstBitSpanIterator(const StorageType* data, const size_t index) noexcept
+            explicit ConstBitSpanIterator(const Storage data, const size_t index) noexcept
                 : data_(data), index_(index)
             {
-                DCHECK_NE(data, nullptr);
+                DCHECK_NE(data.Get(), nullptr);
             }
 
             /// @brief Returns the boolean value of the current bit.
@@ -363,7 +376,7 @@ namespace dockalloc::solver
             {
                 size_t word = index_ / kBitsPerWord;
                 size_t bit = index_ % kBitsPerWord;
-                return (data_[word] >> bit & StorageType{1}) != 0;
+                return (data_.Get()[word] >> bit & StorageType{1}) != 0;
             }
 
             /// @brief Advances iterator to the next bit (pre-increment).
@@ -447,7 +460,7 @@ namespace dockalloc::solver
             /// @return New iterator at position index + n.
             ConstBitSpanIterator operator+(difference_type n) const noexcept
             {
-                return ConstBitSpanIterator(data_, index_ + n);
+                return ConstBitSpanIterator(data_.Get(), index_ + n);
             }
 
             /// @brief Returns a new iterator retreated by n bits.
@@ -459,7 +472,7 @@ namespace dockalloc::solver
             /// @return New iterator at position index - n.
             ConstBitSpanIterator operator-(difference_type n) const noexcept
             {
-                return ConstBitSpanIterator(data_, index_ - n);
+                return ConstBitSpanIterator(data_.Get(), index_ - n);
             }
 
             /// @brief Computes the distance between two iterators.
@@ -493,7 +506,7 @@ namespace dockalloc::solver
             bool operator!=(const ConstBitSpanIterator& other) const noexcept { return index_ != other.index_; }
 
         private:
-            const StorageType* data_;
+            const Storage data_;
             size_t index_;
         };
 
@@ -504,15 +517,15 @@ namespace dockalloc::solver
         ///
         /// This constructor initializes a \c BitSpan object with the specified data pointer and bit count.
         ///
-        /// @param data The pointer to the data.
+        /// @param data The aligned storage containing the bit data.
         /// @param bit_count The number of bits in the span.
         ///
         /// @pre data != nullptr
         /// @pre bit_count > 0
-        explicit BitSpan(StorageType* const data, const size_t bit_count) noexcept
+        explicit BitSpan(const Storage data, const size_t bit_count) noexcept
             : data_(data), bit_count_(bit_count)
         {
-            CHECK(data != nullptr);
+            CHECK(data.Get() != nullptr);
         }
 
         /// @brief Getter for the data pointer.
@@ -522,7 +535,7 @@ namespace dockalloc::solver
         /// @return The pointer to the data.
         [[nodiscard]] StorageType* GetData() const noexcept
         {
-            return data_;
+            return data_.Get();
         }
 
         /// @brief Getter for the bit count.
@@ -550,7 +563,7 @@ namespace dockalloc::solver
 
             const size_t word = bit_index / kBitsPerWord;
             const size_t bit = bit_index % kBitsPerWord;
-            return data_[word] >> bit & StorageType{1};
+            return data_.Get()[word] >> bit & StorageType{1};
         }
 
         /// @brief Checks if a range of bits is set.
@@ -579,12 +592,12 @@ namespace dockalloc::solver
             if (first_word == last_word)
             {
                 StorageType mask = BitsBetweenInclusive(start_bit, end_bit);
-                return (data_[first_word] & mask) == mask;
+                return (data_.Get()[first_word] & mask) == mask;
             }
 
             // Head word
             StorageType head_mask = HighBitsFrom(start_bit);
-            if ((data_[first_word] & head_mask) != head_mask)
+            if ((data_.Get()[first_word] & head_mask) != head_mask)
             {
                 return false;
             }
@@ -597,7 +610,15 @@ namespace dockalloc::solver
 
             for (size_t w = second_word; w < aligned_last; w += kSimdWidth)
             {
-                SimdType vec = xsimd::load_unaligned(&data_[w]);
+                SimdType vec;
+                if constexpr (kAlignedSize >= kSimdAlignment)
+                {
+                    vec = xsimd::load_aligned(data_.Get() + w);
+                }
+                else
+                {
+                    vec = xsimd::load_unaligned(data_.Get() + w);
+                }
                 if (!xsimd::all(vec == SimdType{~StorageType{0}}))
                 {
                     return false;
@@ -606,7 +627,7 @@ namespace dockalloc::solver
 
             for (size_t w = aligned_last; w < last_word; ++w)
             {
-                if (data_[w] != ~StorageType{0})
+                if (data_.Get()[w] != ~StorageType{0})
                 {
                     return false;
                 }
@@ -615,7 +636,7 @@ namespace dockalloc::solver
             // Scalar fallback: middle words must be entirely ones
             for (size_t w = second_word; w < last_word; ++w)
             {
-                if (data_[w] != ~StorageType{0})
+                if (data_.Get()[w] != ~StorageType{0})
                 {
                     return false;
                 }
@@ -624,7 +645,7 @@ namespace dockalloc::solver
 
             // Tail word: bits from LSB up to end_bit
             StorageType tail_mask = LowBitsTo(end_bit);
-            return (data_[last_word] & tail_mask) == tail_mask;
+            return (data_.Get()[last_word] & tail_mask) == tail_mask;
         }
 
         /// @brief Sets a bit to \c 1.
@@ -640,7 +661,7 @@ namespace dockalloc::solver
 
             const size_t word = bit_index / kBitsPerWord;
             const size_t bit = bit_index % kBitsPerWord;
-            data_[word] |= StorageType{1} << bit;
+            data_.Get()[word] |= StorageType{1} << bit;
         }
 
         /// @brief Sets a range of bits to \c 1.
@@ -669,12 +690,12 @@ namespace dockalloc::solver
             // Case 1: entirely within one word
             if (first_word == last_word)
             {
-                data_[first_word] |= BitsBetweenInclusive(start_bit, end_bit);
+                data_.Get()[first_word] |= BitsBetweenInclusive(start_bit, end_bit);
                 return;
             }
 
             // Head.
-            data_[first_word] |= HighBitsFrom(start_bit);
+            data_.Get()[first_word] |= HighBitsFrom(start_bit);
 
             const size_t second_word = first_word + 1;
 #if DOCK_ALLOC_SOLVER_BIT_SPAN_USE_SIMD
@@ -687,24 +708,31 @@ namespace dockalloc::solver
             // SIMD over aligned region
             for (size_t w = second_word; w < aligned_last; w += kSimdWidth)
             {
-                xsimd::store_unaligned(&data_[w], ones);
+                if constexpr (kAlignedSize >= kSimdAlignment)
+                {
+                    xsimd::store_aligned(&data_.Get()[w], ones);
+                }
+                else
+                {
+                    xsimd::store_unaligned(&data_.Get()[w], ones);
+                }
             }
 
             // Scalar check for the remaining tail
             for (size_t w = aligned_last; w < last_word; ++w)
             {
-                data_[w] = ~StorageType{0};
+                data_.Get()[w] = ~StorageType{0};
             }
 #else
             // scalar fallback
             for (size_t w = second_word; w < last_word; ++w)
             {
-                data_[w] = ~StorageType{0};
+                data_.Get()[w] = ~StorageType{0};
             }
 #endif
 
             // Tail.
-            data_[last_word] |= LowBitsTo(end_bit);
+            data_.Get()[last_word] |= LowBitsTo(end_bit);
         }
 
         /// @brief Checks if a bit is clear.
@@ -722,7 +750,7 @@ namespace dockalloc::solver
 
             const size_t word = bit_index / kBitsPerWord;
             const size_t bit = bit_index % kBitsPerWord;
-            return (data_[word] >> bit & StorageType{1}) == 0;
+            return (data_.Get()[word] >> bit & StorageType{1}) == 0;
         }
 
         /// @brief Checks if a range of bits is set to \c 0.
@@ -751,12 +779,12 @@ namespace dockalloc::solver
             if (first_word == last_word)
             {
                 StorageType mask = BitsBetweenInclusive(start_bit, end_bit);
-                return (data_[first_word] & mask) == StorageType{0};
+                return (data_.Get()[first_word] & mask) == StorageType{0};
             }
 
             // Head word: bits from start_bit to MSB
             StorageType head_mask = HighBitsFrom(start_bit);
-            if ((data_[first_word] & head_mask) != StorageType{0})
+            if ((data_.Get()[first_word] & head_mask) != StorageType{0})
             {
                 return false;
             }
@@ -769,7 +797,15 @@ namespace dockalloc::solver
 
             for (size_t w = second_word; w < aligned_last; w += kSimdWidth)
             {
-                SimdType vec = xsimd::load_unaligned(&data_[w]);
+                SimdType vec;
+                if constexpr (kAlignedSize >= kSimdAlignment)
+                {
+                    vec = xsimd::load_aligned(&data_.Get()[w]);
+                }
+                else
+                {
+                    vec = xsimd::load_unaligned(&data_.Get()[w]);
+                }
                 if (!xsimd::all(vec == SimdType{0}))
                 {
                     return false;
@@ -778,7 +814,7 @@ namespace dockalloc::solver
 
             for (size_t w = aligned_last; w < last_word; ++w)
             {
-                if (data_[w] != StorageType{0})
+                if (data_.Get()[w] != StorageType{0})
                 {
                     return false;
                 }
@@ -787,7 +823,7 @@ namespace dockalloc::solver
             // Scalar fallback: middle words must be entirely zero
             for (size_t w = second_word; w < last_word; ++w)
             {
-                if (data_[w] != StorageType{0})
+                if (data_.Get()[w] != StorageType{0})
                 {
                     return false;
                 }
@@ -795,7 +831,7 @@ namespace dockalloc::solver
 #endif
             // Tail word: bits from LSB up to end_bit
             StorageType tail_mask = LowBitsTo(end_bit);
-            return (data_[last_word] & tail_mask) == StorageType{0};
+            return (data_.Get()[last_word] & tail_mask) == StorageType{0};
         }
 
         /// @brief Sets a bit to \c 0.
@@ -811,7 +847,7 @@ namespace dockalloc::solver
 
             const size_t word = bit_index / kBitsPerWord;
             const size_t bit = bit_index % kBitsPerWord;
-            data_[word] &= ~(StorageType{1} << bit);
+            data_.Get()[word] &= ~(StorageType{1} << bit);
         }
 
         /// @brief Clears a range of bits.
@@ -840,12 +876,12 @@ namespace dockalloc::solver
             // Case 1: entirely within one word
             if (first_word == last_word)
             {
-                data_[first_word] &= ~BitsBetweenInclusive(start_bit, end_bit);
+                data_.Get()[first_word] &= ~BitsBetweenInclusive(start_bit, end_bit);
                 return;
             }
 
             // Head.
-            data_[first_word] &= ~HighBitsFrom(start_bit);
+            data_.Get()[first_word] &= ~HighBitsFrom(start_bit);
 
             const size_t second_word = first_word + 1;
 #if DOCK_ALLOC_SOLVER_BIT_SPAN_USE_SIMD
@@ -858,24 +894,31 @@ namespace dockalloc::solver
             // SIMD over aligned region
             for (size_t w = second_word; w < aligned_last; w += kSimdWidth)
             {
-                xsimd::store_unaligned(&data_[w], zeros);
+                if constexpr (kAlignedSize >= kSimdAlignment)
+                {
+                    xsimd::store_aligned(&data_.Get()[w], zeros);
+                }
+                else
+                {
+                    xsimd::store_unaligned(&data_.Get()[w], zeros);
+                }
             }
 
             // Scalar check for the remaining tail
             for (size_t w = aligned_last; w < last_word; ++w)
             {
-                data_[w] = StorageType{0};
+                data_.Get()[w] = StorageType{0};
             }
 #else
             // scalar fallback
             for (size_t w = second_word; w < last_word; ++w)
             {
-                data_[w] = StorageType{0};
+                data_.Get()[w] = StorageType{0};
             }
 #endif
 
             // Tail.
-            data_[last_word] &= ~LowBitsTo(end_bit);
+            data_.Get()[last_word] &= ~LowBitsTo(end_bit);
         }
 
         /// @brief Finds a clear range of bits.
@@ -925,7 +968,7 @@ namespace dockalloc::solver
                     mask &= LowBitsTo(last_bit);
                 }
 
-                StorageType word = data_[w];
+                StorageType word = data_.Get()[w];
 
                 if ((word & mask) == StorageType{0})
                 {
@@ -1021,7 +1064,7 @@ namespace dockalloc::solver
 
             size_t word = bit_index / kBitsPerWord;
             size_t bit = bit_index % kBitsPerWord;
-            return BitReference(data_[word], bit);
+            return BitReference(data_.Get()[word], bit);
         }
 
         /// @brief The iterator type for the \c BitSpan class.
@@ -1043,7 +1086,7 @@ namespace dockalloc::solver
         /// @return An iterator pointing to the start of the bit span.
         iterator begin() noexcept
         {
-            return iterator(data_, 0);
+            return iterator(data_.Get(), 0);
         }
 
         /// @brief End iterator
@@ -1053,7 +1096,7 @@ namespace dockalloc::solver
         /// @return An iterator pointing to the end of the bit span.
         iterator end() noexcept
         {
-            return iterator(data_, bit_count_);
+            return iterator(data_.Get(), bit_count_);
         }
 
         /// @brief Begin iterator (const)
@@ -1063,7 +1106,7 @@ namespace dockalloc::solver
         /// @return A const iterator pointing to the start of the bit span.
         const_iterator begin() const noexcept
         {
-            return const_iterator(data_, 0);
+            return const_iterator(data_.Get(), 0);
         }
 
         /// @brief End iterator (const)
@@ -1073,7 +1116,7 @@ namespace dockalloc::solver
         /// @return A const iterator pointing to the end of the bit span.
         const_iterator end() const noexcept
         {
-            return const_iterator(data_, bit_count_);
+            return const_iterator(data_.Get(), bit_count_);
         }
 
         /// @brief Const begin iterator
@@ -1083,7 +1126,7 @@ namespace dockalloc::solver
         /// @return A const iterator pointing to the start of the bit span.
         const_iterator cbegin() const noexcept
         {
-            return const_iterator(data_, 0);
+            return const_iterator(data_.Get(), 0);
         }
 
         /// @brief Const end iterator
@@ -1093,7 +1136,7 @@ namespace dockalloc::solver
         /// @return A const iterator pointing to the end of the bit span.
         const_iterator cend() const noexcept
         {
-            return const_iterator(data_, bit_count_);
+            return const_iterator(data_.Get(), bit_count_);
         }
 
         /// @brief Start reverse iterator
@@ -1156,14 +1199,18 @@ namespace dockalloc::solver
             return const_reverse_iterator(begin());
         }
 
-    private:
 #if DOCK_ALLOC_SOLVER_BIT_SPAN_USE_SIMD
         /// @brief The SIMD type used for vectorized operations.
         using SimdType = xsimd::batch<StorageType>;
 
         /// @brief The Width of the SIMD type.
         static constexpr std::size_t kSimdWidth = SimdType::size;
+
+        /// @brief The alignment requirement for the SIMD type.
+        static constexpr size_t kSimdAlignment = alignof(SimdType);
 #endif
+
+    private:
         /// @brief Creates a bitmask with all bits from the given index (inclusive) to the most significant bit set to 1.
         ///
         /// This function is used to generate a bitmask where all bits at or above the specified bit index
@@ -1224,11 +1271,11 @@ namespace dockalloc::solver
         }
 
         /// @brief Non owning pointer to the data.
-        StorageType* data_;
+        Storage data_;
 
         /// @brief The number of bits in the span.
         ///
-        /// Assumption is that \c data_ is large enough to hold the number of bits.
+        /// Assumption is that \c data_.Get() is large enough to hold the number of bits.
         size_t bit_count_;
     };
 }
