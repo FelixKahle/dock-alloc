@@ -4,3 +4,13 @@ config_setting(
     name = "compiler_msvc",
     values = {"compiler": "msvc"},
 )
+
+config_setting(
+    name = "compiler_gcc",
+    values = {"compiler": "gcc"},
+)
+
+config_setting(
+    name = "compiler_clang",
+    values = {"compiler": "clang"},
+)

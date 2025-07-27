@@ -11,10 +11,12 @@ cc_library(
             "/EHs-",
             "/EHc-",
             "/std:c++23",
+            "/O2",
         ],
         "//conditions:default": [
             "-fno-exceptions",
             "-std=c++23",
+            "-O3 -march=native -ffast-math",
         ],
     }),
     include_prefix = "dockalloc/model",
@@ -37,10 +39,12 @@ cc_test(
             "/EHs-",
             "/EHc-",
             "/std:c++23",
+            "/O2",
         ],
         "//conditions:default": [
             "-fno-exceptions",
             "-std=c++23",
+            "-O3 -march=native -ffast-math",
         ],
     }),
     deps = [
