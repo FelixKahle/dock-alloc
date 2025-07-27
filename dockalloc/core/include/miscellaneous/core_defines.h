@@ -3,6 +3,7 @@
 #ifndef DOCK_ALLOC_CORE_MISCELLANEOUS_CORE_DEFINES_H_
 #define DOCK_ALLOC_CORE_MISCELLANEOUS_CORE_DEFINES_H_
 
+// config.h must be included first
 #include "dockalloc/core/miscellaneous/config.h"
 #include "dockalloc/core/miscellaneous/inline.h"
 #include "dockalloc/core/miscellaneous/compiler.h"
