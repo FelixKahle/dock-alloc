@@ -68,6 +68,21 @@ namespace dockalloc::core
         // This is the next power of two ≥ original `value`.
         return x + 1;
     }
+
+    /// @brief Checks if the given value is a power of two.
+    ///
+    /// This function checks whether the specified value is a power of two.
+    ///
+    /// @tparam T The type of the value. Must be an integral type.
+    /// @param value The value to check.
+    ///
+    /// @return True if the value is a power of two, false otherwise.
+    template <typename T>
+        requires std::integral<T>
+    [[nodiscard]] constexpr DOCK_ALLOC_FORCE_INLINE bool IsPowerOfTwo(const T value) noexcept
+    {
+        return value > 0 && (value & (value - 1)) == 0;
+    }
 }
 
 #endif

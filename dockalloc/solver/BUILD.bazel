@@ -22,7 +22,6 @@
 cc_library(
     name = "solver",
     hdrs = [
-        "include/bit_span.h",
         "include/time_interval_tree.h",
         "include/time_interval_tree_node.h",
         "include/time_interval_tree_node_layout.h",
@@ -57,7 +56,6 @@ cc_library(
 cc_test(
     name = "solver-test",
     srcs = [
-        "tests/bit_span_tests.cc",
         "tests/time_interval_tree_node_layout_tests.cc",
         "tests/time_interval_tree_node_tests.cc",
     ],

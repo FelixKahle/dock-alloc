@@ -57,8 +57,7 @@ namespace dockalloc::core
         ASSERT_NE(ptr, nullptr);
 
         // Check if the returned pointer is aligned to 128 bytes.
-        EXPECT_TRUE(is_aligned(ptr, alignment))
-            << "Pointer " << ptr << " is not aligned to " << alignment;
+        EXPECT_TRUE(is_aligned(ptr, alignment)) << "Pointer " << ptr << " is not aligned to " << alignment;
 
         alloc.deallocate(ptr, 100);
     }
@@ -88,7 +87,7 @@ namespace dockalloc::core
         AlignedAllocator<int, 64> alloc;
 
         // Allocating zero elements should return a nullptr as per the implementation.
-        int* ptr = alloc.allocate(0);
+        const int* ptr = alloc.allocate(0);
         EXPECT_EQ(ptr, nullptr);
     }
 
