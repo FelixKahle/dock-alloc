@@ -13,10 +13,13 @@ cc_library(
             "/EHs-",
             "/EHc-",
             "/std:c++23",
+            "/O2",
         ],
         "//conditions:default": [
             "-fno-exceptions",
             "-std=c++23",
+            "-O3",
+            "-march=native",
         ],
     }),
     include_prefix = "dockalloc/solver",

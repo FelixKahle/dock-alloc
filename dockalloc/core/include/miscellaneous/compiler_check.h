@@ -26,4 +26,8 @@
 #error "dock-alloc requires a C++20 compliant compiler."
 #endif
 
+#if DOCK_ALLOC_EXCEPTIONS_ENABLED
+#error "dock-alloc does not support exceptions. Please disable exceptions in your compiler settings."
+#endif
+
 #endif

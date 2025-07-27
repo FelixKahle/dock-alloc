@@ -16,7 +16,7 @@ cc_library(
         "//conditions:default": [
             "-fno-exceptions",
             "-std=c++23",
-            "-O3 -march=native -ffast-math",
+            "-O3 -march=native",
         ],
     }),
     include_prefix = "dockalloc/model",
@@ -44,7 +44,7 @@ cc_test(
         "//conditions:default": [
             "-fno-exceptions",
             "-std=c++23",
-            "-O3 -march=native -ffast-math",
+            "-O3 -march=native",
         ],
     }),
     deps = [
