@@ -63,13 +63,15 @@
 #define DOCK_ALLOC_COMPILER_SUPPORTS_GUARANTEED_COPY_ELISION 0
 #endif
 
-# if defined(__EXCEPTIONS)
+#if defined(__cpp_exceptions) && __cpp_exceptions >= 199711L
 #define DOCK_ALLOC_EXCEPTIONS_ENABLED 1
-# elif defined(_CPPUNWIND)
+#elif defined(__EXCEPTIONS)
 #define DOCK_ALLOC_EXCEPTIONS_ENABLED 1
-# else
+#elif defined(_CPPUNWIND)
+#define DOCK_ALLOC_EXCEPTIONS_ENABLED 1
+#else
 #define DOCK_ALLOC_EXCEPTIONS_ENABLED 0
-# endif
+#endif
 
 
 #endif

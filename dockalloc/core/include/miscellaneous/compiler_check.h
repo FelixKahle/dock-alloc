@@ -49,7 +49,8 @@
 // dock‑alloc disables C++ exceptions to maintain maximum performance and minimal code size.
 // Enabling exceptions incurs additional compiler overhead (unwind tables, hidden branches),
 // increases binary size and complexity, and can inhibit optimizations such as inlining
-// and effective branch prediction. Please compile without exception support.
+// and effective branch prediction. I do not allow compiling dock-alloc with exceptions enabled,
+// to never allow these bad practices.
 #if DOCK_ALLOC_EXCEPTIONS_ENABLED
 #error "dock-alloc does not support exceptions. Please disable exceptions in your compiler settings."
 #endif
