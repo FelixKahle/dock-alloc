@@ -48,11 +48,15 @@ namespace dockalloc::core
         if constexpr (std::is_unsigned_v<T>)
         {
             // Unsigned types are always non-negative, so we can return them directly.
+            // This will result in a zero cost operation for unsigned types,
+            // and any major compiler will optimize this away.
             return x;
         }
         else if constexpr (std::is_floating_point_v<T>)
         {
             // Use std::fabs for floating-point types.
+            // Overloads exist for both float and double types.
+            // https://en.cppreference.com/w/cpp/numeric/math/fabs
             return std::fabs(x);
         }
         else

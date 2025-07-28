@@ -65,12 +65,14 @@ namespace dockalloc::core
         /// @brief The alignment of the allocator.
         static constexpr size_t kAlignment = Alignment;
 
-        template <class U>
+        /// @brief Rebinding structure for AlignedAllocator.
+        ///
+        /// This structure allows the allocator to be used with different types while maintaining the same alignment.
+        template <typename U>
         struct rebind
         {
             using other = AlignedAllocator<U, Alignment>;
         };
-
 
         /// @brief Default constructor for AlignedAllocator.
         ///
@@ -102,6 +104,10 @@ namespace dockalloc::core
 
         // ReSharper disable once CppMemberFunctionMayBeStatic
         /// @brief Allocates memory for n objects of type T.
+        ///
+        /// @note Any errors during allocation will result in an assertion failure
+        /// and thus in a crash of the program. This is intended behavior - allocation failure
+        /// creates security issues and should be avoided at all costs.
         ///
         /// @param n The number of objects to allocate.
         ///
@@ -137,6 +143,10 @@ namespace dockalloc::core
         /// This function is similar to the allocate function but allows passing a hint
         /// for the allocation. The hint is ignored in this implementation.
         ///
+        /// @note Any errors during allocation will result in an assertion failure
+        /// and thus in a crash of the program. This is intended behavior - allocation failure
+        /// creates security issues and should be avoided at all costs.
+        ///
         /// @param n The number of objects to allocate.
         /// @param hint A pointer to a memory location that can be used as a hint for allocation.
         ///
@@ -155,6 +165,10 @@ namespace dockalloc::core
         //ReSharper disable once CppMemberFunctionMayBeStatic
         DOCK_ALLOC_FORCE_INLINE void deallocate(T* p, size_type) noexcept
         {
+            [[unlikely]] if (p == nullptr)
+            {
+                return;
+            }
 #if DOCK_ALLOC_PLATFORM_WINDOWS
             _aligned_free(p);
 #else
