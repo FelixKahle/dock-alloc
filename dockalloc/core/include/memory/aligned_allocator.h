@@ -24,12 +24,16 @@
 
 #include <limits>
 #include <cstdint>
-#include <cstdlib>
 #include <memory>
 #include <new>
 #include <type_traits>
 #include <cstddef>
 #include <cassert>
+#if DOCK_ALLOC_PLATFORM_WINDOWS
+#include <malloc.h>
+#else
+#include <cstdlib>
+#endif
 #include "absl/log/check.h"
 #include "dockalloc/core/miscellaneous/core_defines.h"
 #include "dockalloc/core/algorithm/pow.h"
@@ -111,15 +115,18 @@ namespace dockalloc::core
             {
                 return nullptr;
             }
-
             CHECK_LE(n, max_size()) << "Requested allocation size exceeds maximum size.";
-
             const size_type size = n * sizeof(T);
-            const size_type padded_size = ((size + Alignment - 1) / Alignment) * Alignment;
-
-            void* ptr = std::aligned_alloc(Alignment, padded_size);
-            CHECK_NE(ptr, nullptr) << "Memory allocation failed for size: " << padded_size;
-
+#if DOCK_ALLOC_PLATFORM_WINDOWS
+            void* ptr = _aligned_malloc(size, Alignment);
+#else
+            void* ptr = nullptr;
+            if (posix_memalign(&ptr, Alignment, size) != 0)
+            {
+                ptr = nullptr;
+            }
+#endif
+            CHECK_NE(ptr, nullptr) << "Memory allocation failed for size: " << size;
             return static_cast<T*>(ptr);
         }
 
@@ -146,7 +153,11 @@ namespace dockalloc::core
         //ReSharper disable once CppMemberFunctionMayBeStatic
         DOCK_ALLOC_FORCE_INLINE void deallocate(T* p, size_type) noexcept
         {
+#if DOCK_ALLOC_PLATFORM_WINDOWS
+            _aligned_free(p);
+#else
             std::free(p);
+#endif
         }
 
         /// @brief Returns the maximum number of objects of type T that can be allocated.

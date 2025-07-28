@@ -27,7 +27,7 @@
 // In general, a C++20 compliant compiler is required, as dock-alloc uses
 // concepts and `constexpr` features extensively.
 
-#include "dockalloc/core/miscellaneous/compiler.h"
+#include "dockalloc/core/miscellaneous/platform.h"
 
 #if !DOCK_ALLOC_COMPILER_IS_CXX
 #error "dock-alloc requires a C++ compiler."

@@ -24,8 +24,8 @@
 
 // config.h must be included first
 #include "dockalloc/core/miscellaneous/config.h"
+#include "dockalloc/core/miscellaneous/platform.h"
 #include "dockalloc/core/miscellaneous/inline.h"
-#include "dockalloc/core/miscellaneous/compiler.h"
 #include "dockalloc/core/miscellaneous/compiler_check.h"
 
 #define DOCK_ALLOC_DEFAULT_CONSTRUCT(Type) Type() = default;
