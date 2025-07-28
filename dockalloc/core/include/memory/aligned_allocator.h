@@ -36,7 +36,7 @@
 #endif
 #include "absl/log/check.h"
 #include "dockalloc/core/miscellaneous/core_defines.h"
-#include "dockalloc/core/algorithm/pow.h"
+#include "dockalloc/core/type_traits/type_traits.h"
 
 namespace dockalloc::core
 {
@@ -50,7 +50,7 @@ namespace dockalloc::core
     /// @tparam Alignment The alignment boundary in bytes. Must be a power of two and
     /// at least as large as the size of a pointer.
     template <typename T, size_t Alignment>
-        requires (IsPowerOfTwo(Alignment)) && (Alignment >= sizeof(void*))
+        requires IsPowerOfTwo_v<Alignment> && (Alignment >= sizeof(void*))
     class AlignedAllocator
     {
     public:
@@ -115,8 +115,9 @@ namespace dockalloc::core
             {
                 return nullptr;
             }
-            CHECK_LE(n, max_size()) << "Requested allocation size exceeds maximum size.";
+            CHECK_LE(n, max_size()) << "Requested allocation for " << n << " elements exceeds maximum size.";
             const size_type size = n * sizeof(T);
+
 #if DOCK_ALLOC_PLATFORM_WINDOWS
             void* ptr = _aligned_malloc(size, Alignment);
 #else
@@ -127,6 +128,7 @@ namespace dockalloc::core
             }
 #endif
             CHECK_NE(ptr, nullptr) << "Memory allocation failed for size: " << size;
+
             return static_cast<T*>(ptr);
         }
 
@@ -156,7 +158,7 @@ namespace dockalloc::core
 #if DOCK_ALLOC_PLATFORM_WINDOWS
             _aligned_free(p);
 #else
-            std::free(p);
+            free(p);
 #endif
         }
 
@@ -211,6 +213,9 @@ namespace dockalloc::core
         /// @param r The reference to the object.
         ///
         /// @return A pointer to the object referenced by r.
+        [[deprecated(
+            "The 'address' member is obsolete (deprecated in C++17, removed in C++20). Please use std::to_address() instead."
+        )]]
         DOCK_ALLOC_FORCE_INLINE auto address(reference r) noexcept -> pointer
         {
             return &r;
@@ -224,6 +229,9 @@ namespace dockalloc::core
         /// @param r The const reference to the object.
         ///
         /// @return A const pointer to the object referenced by r.
+        [[deprecated(
+            "The 'address' member is obsolete (deprecated in C++17, removed in C++20). Please use std::to_address() instead."
+        )]]
         DOCK_ALLOC_FORCE_INLINE auto address(const_reference r) const noexcept -> const_pointer
         {
             return &r;

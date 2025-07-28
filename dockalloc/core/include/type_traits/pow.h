@@ -19,15 +19,18 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-#ifndef DOCK_ALLOC_CORE_TYPE_TRAITS_TYPE_TRAITS_H_
-#define DOCK_ALLOC_CORE_TYPE_TRAITS_TYPE_TRAITS_H_
+#ifndef DOCK_ALLOC_CORE_TYPE_TRAITS_POW_H_
+#define DOCK_ALLOC_CORE_TYPE_TRAITS_POW_H_
 
-#include "dockalloc/core/type_traits/smallest_for.h"
-#include "dockalloc/core/type_traits/align_up.h"
-#include "dockalloc/core/type_traits/bigger_alignment.h"
-#include "dockalloc/core/type_traits/bigger_size.h"
-#include "dockalloc/core/type_traits/max_align.h"
-#include "dockalloc/core/type_traits/size_sum.h"
-#include "dockalloc/core/type_traits/pow.h"
+#include "dockalloc/core/algorithm/pow.h"
+
+namespace dockalloc::core
+{
+    /// @brief A type trait to check if a given value is a power of two.
+    ///
+    /// @tparam N The value to check.
+    template <size_t N>
+    inline constexpr bool IsPowerOfTwo_v = IsPowerOfTwo(N);
+}
 
 #endif
