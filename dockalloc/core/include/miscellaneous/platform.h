@@ -36,10 +36,10 @@
 #endif
 #endif
 #elif defined(__APPLE__)
-// Detect iOS before MacOSX (__MACH__ is also defined for iOS)
-#if defined(IPHONE)
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE
 #define DOCK_ALLOC_PLATFORM_IOS 1
-#elif defined(__MACH__)
+#elif TARGET_OS_MAC
 #define DOCK_ALLOC_PLATFORM_MAC 1
 #endif
 #elif defined(__EMSCRIPTEN__)
@@ -103,7 +103,7 @@
 #endif
 
 // Define macros for supported CPU instruction sets
-#if defined(PLATFORM_GCC_COMPATIBLE)
+#if defined(DOCK_ALLOC_PLATFORM_GCC_COMPATIBLE)
 #if defined(__MMX__)
 #define DOCK_ALLOC_PLATFORM_MMX 1
 #endif
