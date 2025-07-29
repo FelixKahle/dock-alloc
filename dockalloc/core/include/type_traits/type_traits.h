@@ -29,5 +29,6 @@
 #include "dockalloc/core/type_traits/max_align.h"
 #include "dockalloc/core/type_traits/size_sum.h"
 #include "dockalloc/core/type_traits/pow.h"
+#include "dockalloc/core/type_traits/concepts.h"
 
 #endif

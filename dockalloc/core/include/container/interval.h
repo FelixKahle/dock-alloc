@@ -26,6 +26,7 @@
 #include <type_traits>
 #include "absl/strings/str_format.h"
 #include "dockalloc/core/miscellaneous/core_defines.h"
+#include "dockalloc/core/type_traits/concepts.h"
 
 namespace dockalloc::core
 {
@@ -272,6 +273,7 @@ namespace dockalloc::core
         ///
         /// @return The combined hash value.
         template <typename H>
+            requires AbslHasher<H>
         friend constexpr DOCK_ALLOC_FORCE_INLINE H AbslHashValue(H h, const Interval& interval) noexcept
         {
             return H::combine(std::move(h), interval.GetStart(), interval.GetEnd());
@@ -286,6 +288,7 @@ namespace dockalloc::core
         /// @param sink The sink to which the formatted string will be written.
         /// @param interval The interval to format.
         template <typename Sink>
+            requires AbslStringifySink<Sink>
         friend DOCK_ALLOC_FORCE_INLINE void AbslStringify(Sink& sink, const Interval& interval) noexcept
         {
             absl::Format(&sink, "[%v, %v)", interval.GetStart(), interval.GetEnd());
