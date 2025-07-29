@@ -18,3 +18,56 @@
 # LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+config_setting(
+    name = "clang_compiler",
+    flag_values = {
+        "@bazel_tools//tools/cpp:compiler": "clang",
+    },
+)
+
+config_setting(
+    name = "gcc_compiler",
+    flag_values = {
+        "@bazel_tools//tools/cpp:compiler": "gcc",
+    },
+)
+
+config_setting(
+    name = "msvc_compiler",
+    flag_values = {
+        "@bazel_tools//tools/cpp:compiler": "msvc",
+    },
+)
+
+config_setting(
+    name = "mingw_unspecified_compiler",
+    flag_values = {
+        "@bazel_tools//tools/cpp:compiler": "mingw",
+    },
+)
+
+config_setting(
+    name = "mingw-gcc_compiler",
+    flag_values = {
+        "@bazel_tools//tools/cpp:compiler": "mingw-gcc",
+    },
+)
+
+config_setting(
+    name = "fuchsia",
+    constraint_values = [
+        "@platforms//os:fuchsia",
+    ],
+)
+
+selects.config_setting_group(
+    name = "mingw_compiler",
+    match_any = [
+        ":mingw_unspecified_compiler",
+        ":mingw-gcc_compiler",
+    ],
+    visibility = [":__subpackages__"],
+)

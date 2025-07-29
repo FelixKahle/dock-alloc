@@ -41,6 +41,6 @@ jobs:
           repository-cache: true
 
       - name: Run Bazel Build
-        run: bazel build //... --config=gcc
+        run: bazel build //...
       - name: Run Bazel Test
-        run: bazel test //... --config=gcc --test_output=all
+        run: bazel test //... --test_output=all

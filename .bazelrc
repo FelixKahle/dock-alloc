@@ -21,21 +21,3 @@
 
 # enable opt‑mode by default
 build --compilation_mode=opt
-build --config=gcc
-
-build:clang --cxxopt=-O3
-build:clang --cxxopt=-march=native
-build:clang --cxxopt=-fno-exceptions
-build:clang --compiler=clang
-
-build:gcc --cxxopt=-O3
-build:gcc --cxxopt=-march=native
-build:gcc --cxxopt=-fno-exceptions
-build:gcc --compiler=gcc
-
-build:msvc --compilation_mode=opt
-build:msvc --cxxopt=/O2
-build:msvc --cxxopt=/GL
-build:msvc --cxxopt=/EHs-
-build:msvc --cxxopt=/EHc-
-build:msvc --compiler=msvc
