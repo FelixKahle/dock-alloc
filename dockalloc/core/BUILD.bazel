@@ -27,6 +27,7 @@ cc_library(
         "include/algorithm/pow.h",
         "include/container/interval.h",
         "include/memory/aligned_allocator.h",
+        "include/miscellaneous/compiler.h",
         "include/miscellaneous/compiler_check.h",
         "include/miscellaneous/config.h",
         "include/miscellaneous/core_defines.h",

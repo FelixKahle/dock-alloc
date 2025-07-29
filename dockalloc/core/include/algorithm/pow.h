@@ -19,8 +19,8 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-#ifndef DOCK_ALLOC_CORE_POW_H_
-#define DOCK_ALLOC_CORE_POW_H_
+#ifndef DOCK_ALLOC_CORE_ALGORITHM_POW_H_
+#define DOCK_ALLOC_CORE_ALGORITHM_POW_H_
 
 #include <type_traits>
 #include <concepts>
@@ -32,6 +32,8 @@ namespace dockalloc::core
     /// @brief Checks if the given value is a power of two.
     ///
     /// This function checks whether the specified value is a power of two.
+    ///
+    /// @note Negative values are *NOT* considered powers of two, and zero is also *NOT* a power of two.
     ///
     /// @tparam T The type of the value. Must be an integral type.
     /// @param value The value to check.
