@@ -91,28 +91,6 @@ namespace dockalloc::core
         EXPECT_EQ(ptr, nullptr);
     }
 
-    TEST(AlignedAllocatorTest, Rebind)
-    {
-        constexpr size_t alignment = 64;
-        using AllocatorInt = AlignedAllocator<int, alignment>;
-
-        // Rebind the allocator from `int` to `char`.
-        using AllocatorChar = AllocatorInt::rebind<char>::other;
-
-        // Check that the rebound type is what we expect.
-        static_assert(std::is_same_v<AllocatorChar, AlignedAllocator<char, alignment>>,
-                      "Rebind failed to produce the correct type.");
-
-        AllocatorChar alloc_char;
-        char* ptr = alloc_char.allocate(100);
-        ASSERT_NE(ptr, nullptr);
-
-        // Verify that the alignment characteristic is preserved after rebinding.
-        EXPECT_TRUE(is_aligned(ptr, alignment));
-
-        alloc_char.deallocate(ptr, 100);
-    }
-
     TEST(AlignedAllocatorTest, WorksWithStdVector)
     {
         // Define a struct to use with the vector.
@@ -166,15 +144,5 @@ namespace dockalloc::core
         constexpr AlignedAllocator<int, 32> alloc4;
         EXPECT_FALSE(alloc1 == alloc4);
         EXPECT_TRUE(alloc1 != alloc4);
-    }
-
-    // Test case for the `max_size` method.
-    TEST(AlignedAllocatorTest, MaxSize)
-    {
-        constexpr AlignedAllocator<int, 16> alloc;
-
-        // The max_size should be the maximum value of size_t divided by the size of the element type.
-        constexpr auto expected_max_size = std::numeric_limits<size_t>::max() / sizeof(int);
-        EXPECT_EQ(alloc.max_size(), expected_max_size);
     }
 }

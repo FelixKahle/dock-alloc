@@ -22,12 +22,8 @@
 #ifndef DOCK_ALLOC_CORE_MEMORY_ALIGNED_ALLOCATOR_H_
 #define DOCK_ALLOC_CORE_MEMORY_ALIGNED_ALLOCATOR_H_
 
-#include <limits>
-#include <cstdint>
 #include <memory>
-#include <new>
 #include <type_traits>
-#include <cstddef>
 #include <cassert>
 #if DOCK_ALLOC_PLATFORM_WINDOWS
 #include <malloc.h>
@@ -55,24 +51,21 @@ namespace dockalloc::core
     {
     public:
         using value_type = T;
-        using pointer = T*;
-        using const_pointer = const T*;
-        using reference = T&;
-        using const_reference = const T&;
         using size_type = size_t;
         using difference_type = ptrdiff_t;
 
-        /// @brief The alignment of the allocator.
-        static constexpr size_t kAlignment = Alignment;
-
-        /// @brief Rebinding structure for AlignedAllocator.
+        /// @brief Rebind structure for \c AlignedAllocator.
         ///
-        /// This structure allows the allocator to be used with different types while maintaining the same alignment.
+        /// This structure allows the allocator to be used with different types
+        /// while maintaining the same alignment.
         template <typename U>
         struct rebind
         {
             using other = AlignedAllocator<U, Alignment>;
         };
+
+        /// @brief The alignment of the allocator.
+        static constexpr size_t kAlignment = Alignment;
 
         /// @brief Default constructor for AlignedAllocator.
         ///
@@ -95,7 +88,8 @@ namespace dockalloc::core
         /// @tparam U The type of the other allocator.
         /// @param other The instance to copy from.
         template <typename U>
-        explicit constexpr AlignedAllocator(const AlignedAllocator<U, Alignment>& other) noexcept
+        explicit constexpr DOCK_ALLOC_FORCE_INLINE AlignedAllocator(
+            [[maybe_unused]] const AlignedAllocator<U, Alignment>& other) noexcept
         {
         }
 
@@ -115,13 +109,17 @@ namespace dockalloc::core
         /// @pre n <= max_size()
         ///
         /// @return A pointer to the allocated memory. If n is 0, returns nullptr.
-        [[nodiscard]] DOCK_ALLOC_FORCE_INLINE T* allocate(const size_type n) noexcept
+        [[nodiscard]] constexpr DOCK_ALLOC_FORCE_INLINE T* allocate(const size_type n) noexcept
         {
+            // ReSharper disable once CppUnsignedZeroComparison
+            static_assert(sizeof(T) >= 0, "cannot allocate memory for an incomplete type"); // NOLINT(*-sizeof-expression)
+
             [[unlikely]] if (n == 0)
             {
                 return nullptr;
             }
-            CHECK_LE(n, max_size()) << "Requested allocation for " << n << " elements exceeds maximum size.";
+            CHECK_LE(n, std::allocator_traits<AlignedAllocator>::max_size(*this)) <<
+                "Requested allocation for " << n << " elements exceeds maximum size.";
             const size_type size = n * sizeof(T);
 
 #if DOCK_ALLOC_PLATFORM_WINDOWS
@@ -138,37 +136,18 @@ namespace dockalloc::core
             return static_cast<T*>(ptr);
         }
 
-        /// @brief Allocates memory for n objects of type T with a hint.
-        ///
-        /// This function is similar to the allocate function but allows passing a hint
-        /// for the allocation. The hint is ignored in this implementation.
-        ///
-        /// @note Any errors during allocation will result in an assertion failure
-        /// and thus in a crash of the program. This is intended behavior - allocation failure
-        /// creates security issues and should be avoided at all costs.
-        ///
-        /// @param n The number of objects to allocate.
-        /// @param hint A pointer to a memory location that can be used as a hint for allocation.
-        ///
-        /// @pre n > 0
-        /// @pre n <= max_size()
-        ///
-        /// @return A pointer to the allocated memory. If n is 0, returns nullptr.
-        DOCK_ALLOC_FORCE_INLINE T* allocate(const size_type n, const void* hint) noexcept
-        {
-            return allocate(n);
-        }
-
         /// @brief Deallocates memory previously allocated for n objects of type T.
         ///
         /// @param p Pointer to the memory to deallocate.
+        /// @param n number of objects earlier passed to allocate(),
+        /// or a number between requested and actually allocated number of objects via allocate_at_least()
+        /// (maybe equal to either bound)
         //ReSharper disable once CppMemberFunctionMayBeStatic
-        DOCK_ALLOC_FORCE_INLINE void deallocate(T* p, size_type) noexcept
+        constexpr DOCK_ALLOC_FORCE_INLINE void deallocate(T* p, [[maybe_unused]] size_type n) noexcept
         {
-            [[unlikely]] if (p == nullptr)
-            {
-                return;
-            }
+            // ReSharper disable once CppUnsignedZeroComparison
+            static_assert(sizeof(T) >= 0, "cannot deallocate memory for an incomplete type"); // NOLINT(*-sizeof-expression)
+
 #if DOCK_ALLOC_PLATFORM_WINDOWS
             _aligned_free(p);
 #else
@@ -176,85 +155,8 @@ namespace dockalloc::core
 #endif
         }
 
-        /// @brief Returns the maximum number of objects of type T that can be allocated.
-        ///
-        /// @return The maximum number of objects that can be allocated without exceeding
-        // ReSharper disable once CppMemberFunctionMayBeStatic
-        [[nodiscard]] constexpr DOCK_ALLOC_FORCE_INLINE size_type max_size() const noexcept
-        {
-            return std::numeric_limits<size_type>::max() / sizeof(T);
-        }
-
-        /// @brief Constructs an object of type U in the allocated memory.
-        ///
-        /// This function constructs an object of type U at the specified memory location
-        ///
-        /// @tparam U The type of the object to construct.
-        /// @tparam Args The types of the arguments to pass to the constructor of U.
-        ///
-        /// @param p Pointer to the memory location where the object should be constructed.
-        /// @param args The arguments to pass to the constructor of U.
-        ///
-        /// @pre p != nullptr
-        template <class U, class... Args>
-            requires std::constructible_from<U, Args...>
-        DOCK_ALLOC_FORCE_INLINE void construct(U* p, Args&&... args) noexcept
-        {
-            DCHECK_NE(p, nullptr);
-            new(static_cast<void*>(p)) U(std::forward<Args>(args)...);
-        }
-
-        // ReSharper disable once CppMemberFunctionMayBeStatic
-        /// @brief Destroys an object of type U at the specified memory location.
-        ///
-        /// This function calls the destructor of the object at the specified memory location.
-        ///
-        /// @tparam U The type of the object to destroy.
-        ///
-        /// @param p Pointer to the memory location where the object is located.
-        template <class U>
-        DOCK_ALLOC_FORCE_INLINE void destroy(U* p) noexcept
-        {
-            DCHECK_NE(p, nullptr);
-            p->~U();
-        }
-
-        // ReSharper disable once CppMemberFunctionMayBeStatic
-        /// @brief Returns the address of the object referenced by r.
-        ///
-        /// This function returns the address of the object referenced by r.
-        ///
-        /// @param r The reference to the object.
-        ///
-        /// @return A pointer to the object referenced by r.
-        [[deprecated(
-            "The 'address' member is obsolete (deprecated in C++17, removed in C++20). Please use std::to_address() instead."
-        )]]
-        DOCK_ALLOC_FORCE_INLINE auto address(reference r) noexcept -> pointer
-        {
-            return &r;
-        }
-
-        // ReSharper disable once CppMemberFunctionMayBeStatic
-        /// @brief Returns the address of the object referenced by r (const version).
-        ///
-        /// This function returns the address of the object referenced by r.
-        ///
-        /// @param r The const reference to the object.
-        ///
-        /// @return A const pointer to the object referenced by r.
-        [[deprecated(
-            "The 'address' member is obsolete (deprecated in C++17, removed in C++20). Please use std::to_address() instead."
-        )]]
-        DOCK_ALLOC_FORCE_INLINE auto address(const_reference r) const noexcept -> const_pointer
-        {
-            return &r;
-        }
-
         using is_always_equal = std::true_type;
-        using propagate_on_container_copy_assignment = std::true_type;
         using propagate_on_container_move_assignment = std::true_type;
-        using propagate_on_container_swap = std::true_type;
     };
 
     /// @brief Comparison operator for AlignedAllocator.
@@ -266,10 +168,13 @@ namespace dockalloc::core
     /// @tparam T2 The type of the second allocator.
     /// @tparam A2 The alignment of the second allocator.
     ///
+    /// @param left The first allocator to compare.
+    /// @param right The second allocator to compare.
+    ///
     /// @return \c true if both allocators have the same alignment, \c false otherwise.
     template <typename T1, size_t A1, typename T2, size_t A2>
-    constexpr DOCK_ALLOC_FORCE_INLINE bool operator==(const AlignedAllocator<T1, A1>&,
-                                                      const AlignedAllocator<T2, A2>&) noexcept
+    constexpr DOCK_ALLOC_FORCE_INLINE bool operator==([[maybe_unused]] const AlignedAllocator<T1, A1>& left,
+                                                      [[maybe_unused]] const AlignedAllocator<T2, A2>& right) noexcept
     {
         return A1 == A2;
     }
@@ -283,10 +188,13 @@ namespace dockalloc::core
     /// @tparam T2 The type of the second allocator.
     /// @tparam A2 The alignment of the second allocator.
     ///
+    /// @param left The first allocator to compare.
+    /// @param right The second allocator to compare.
+    ///
     /// @return \c true if the allocators have different alignments, \c false otherwise.
     template <typename T1, size_t A1, typename T2, size_t A2>
-    constexpr DOCK_ALLOC_FORCE_INLINE bool operator!=(const AlignedAllocator<T1, A1>&,
-                                                      const AlignedAllocator<T2, A2>&) noexcept
+    constexpr DOCK_ALLOC_FORCE_INLINE bool operator!=([[maybe_unused]] const AlignedAllocator<T1, A1>& left,
+                                                      [[maybe_unused]] const AlignedAllocator<T2, A2>& right) noexcept
     {
         return A1 != A2;
     }
