@@ -37,6 +37,7 @@ cc_library(
         "include/type_traits/align_up.h",
         "include/type_traits/bigger_alignment.h",
         "include/type_traits/bigger_size.h",
+        "include/type_traits/complete.h",
         "include/type_traits/concepts.h",
         "include/type_traits/max_align.h",
         "include/type_traits/pow.h",

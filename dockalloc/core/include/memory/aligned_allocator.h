@@ -24,6 +24,7 @@
 
 #include <memory>
 #include <type_traits>
+#include <concepts>
 #include <cassert>
 #if DOCK_ALLOC_PLATFORM_WINDOWS
 #include <malloc.h>
@@ -109,10 +110,10 @@ namespace dockalloc::core
         /// @pre n <= max_size()
         ///
         /// @return A pointer to the allocated memory. If n is 0, returns nullptr.
-        [[nodiscard]] constexpr DOCK_ALLOC_FORCE_INLINE T* allocate(const size_type n) noexcept
+        [[nodiscard]] DOCK_ALLOC_FORCE_INLINE T* allocate(const size_type n) noexcept
         {
             // ReSharper disable once CppUnsignedZeroComparison
-            static_assert(sizeof(T) >= 0, "cannot allocate memory for an incomplete type"); // NOLINT(*-sizeof-expression)
+            static_assert(IsComplete_v<T>, "cannot allocate memory for an incomplete type"); // NOLINT(*-sizeof-expression)
 
             [[unlikely]] if (n == 0)
             {
@@ -143,10 +144,10 @@ namespace dockalloc::core
         /// or a number between requested and actually allocated number of objects via allocate_at_least()
         /// (maybe equal to either bound)
         //ReSharper disable once CppMemberFunctionMayBeStatic
-        constexpr DOCK_ALLOC_FORCE_INLINE void deallocate(T* p, [[maybe_unused]] size_type n) noexcept
+        DOCK_ALLOC_FORCE_INLINE void deallocate(T* p, [[maybe_unused]] size_type n) noexcept
         {
             // ReSharper disable once CppUnsignedZeroComparison
-            static_assert(sizeof(T) >= 0, "cannot deallocate memory for an incomplete type"); // NOLINT(*-sizeof-expression)
+            static_assert(IsComplete_v<T>, "cannot deallocate memory for an incomplete type"); // NOLINT(*-sizeof-expression)
 
 #if DOCK_ALLOC_PLATFORM_WINDOWS
             _aligned_free(p);

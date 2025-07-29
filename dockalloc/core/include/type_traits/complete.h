@@ -19,17 +19,33 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-#ifndef DOCK_ALLOC_CORE_TYPE_TRAITS_TYPE_TRAITS_H_
-#define DOCK_ALLOC_CORE_TYPE_TRAITS_TYPE_TRAITS_H_
+#ifndef DOCK_ALLOC_CORE_TYPE_TRAITS_COMPLETE_H_
+#define DOCK_ALLOC_CORE_TYPE_TRAITS_COMPLETE_H_
 
-#include "dockalloc/core/type_traits/smallest_for.h"
-#include "dockalloc/core/type_traits/align_up.h"
-#include "dockalloc/core/type_traits/bigger_alignment.h"
-#include "dockalloc/core/type_traits/bigger_size.h"
-#include "dockalloc/core/type_traits/max_align.h"
-#include "dockalloc/core/type_traits/size_sum.h"
-#include "dockalloc/core/type_traits/pow.h"
-#include "dockalloc/core/type_traits/concepts.h"
-#include "dockalloc/core/include/type_traits/complete.h"
+namespace dockalloc::core
+{
+    /// @brief A type trait to check if a type is complete.
+    ///
+    /// This trait can be used to determine if a type is complete, meaning that its size can be determined.
+    /// A type is considered complete if it has a defined size, which is the case for
+    /// all types except for incomplete types like forward declarations of classes or structs.
+    template <typename T>
+    struct IsComplete
+    {
+        enum
+        {
+            /// @brief The value is \c true if the type \p T is complete, and \c false if it is incomplete.
+            Value = requires { sizeof(T); }
+        };
+    };
+
+    /// @brief A helper variable template to simplify usage of the \c IsComplete type trait.
+    ///
+    /// This variable template can be used to check if a type is complete.
+    /// It is equivalent to \c IsComplete<T>::Value, but provides a more concise
+    /// syntax.
+    template <typename T>
+    constexpr inline bool IsComplete_v = IsComplete<T>::Value;
+}
 
 #endif
