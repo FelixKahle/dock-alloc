@@ -60,7 +60,7 @@ namespace dockalloc::solver
             ///
             /// @param word The reference to the storage word.
             /// @param bit The index of the bit within the word.
-            BitReference(WordType& word, const size_t bit)
+            constexpr DOCK_ALLOC_FORCE_INLINE BitReference(WordType& word, const size_t bit)
                 : word_(word), bit_(bit)
             {
             }
@@ -75,7 +75,7 @@ namespace dockalloc::solver
             /// @return \c true if the bit is set; \c false if the bit is clear.
             ///
             /// @note This operator does not modify the bit. It only reads its current value.
-            operator bool() const noexcept // NOLINT(*-explicit-constructor)
+            constexpr DOCK_ALLOC_FORCE_INLINE operator bool() const noexcept // NOLINT(*-explicit-constructor)
             {
                 return word_ >> bit_ & WordType{1};
             }
@@ -89,7 +89,7 @@ namespace dockalloc::solver
             /// @return A reference to this \c BitReference, allowing for chained assignments.
             ///
             /// @note This operation modifies the underlying storage word by setting or clearing the bit.
-            BitReference& operator=(const bool value) noexcept
+            constexpr DOCK_ALLOC_FORCE_INLINE BitReference& operator=(const bool value) noexcept
             {
                 const WordType mask = WordType{1} << bit_;
                 word_ = (word_ & ~mask) | (WordType(value) << bit_);
@@ -106,7 +106,7 @@ namespace dockalloc::solver
             ///
             /// @note This does not copy the underlying reference — only the bit value is copied.
             /// @note Implicit conversion to \c bool is allowed and intended.
-            BitReference& operator=(const BitReference& other) noexcept
+            constexpr DOCK_ALLOC_FORCE_INLINE BitReference& operator=(const BitReference& other) noexcept
             {
                 *this = static_cast<bool>(other);
                 return *this;
@@ -159,6 +159,16 @@ namespace dockalloc::solver
             return bit_count_;
         }
 
+        /// @brief Returns the number of words in the \c BitVector.
+        ///
+        /// This method retrieves the total number of words (storage units) used to represent the bits in the BitVector.
+        ///
+        /// @return The total number of words in the BitVector.
+        [[nodiscard]] DOCK_ALLOC_FORCE_INLINE size_t GetWordCount() const noexcept
+        {
+            return data_.size();
+        }
+
         /// @brief Resizes the BitVector to the specified number of bits.
         ///
         /// This function changes the size of the BitVector to \p new_bit_count.
@@ -169,33 +179,39 @@ namespace dockalloc::solver
         /// @param new_bits_set If \c true, new bits are set to one, otherwise, they are set to zero.
         void Resize(const size_t new_bit_count, const bool new_bits_set = false) noexcept
         {
-            if (new_bit_count == bit_count_)
+            const size_t old_bit_count = bit_count_;
+            const size_t old_words = data_.size();
+            const size_t new_words = (new_bit_count + kBitsPerWord - 1) / kBitsPerWord;
+            if (new_bit_count > old_bit_count && old_words > 0)
             {
-                return;
+                if (const size_t old_valid = old_bit_count % kBitsPerWord; old_valid != 0)
+                {
+                    if (new_bits_set)
+                    {
+                        data_[old_words - 1] |= HighBitsFrom(old_valid);
+                    }
+                    else
+                    {
+                        data_[old_words - 1] &= LowBitsTo(old_valid - 1);
+                    }
+                }
+            }
+            if (new_bit_count < old_bit_count && new_words > 0)
+            {
+                if (const size_t valid = new_bit_count % kBitsPerWord; valid != 0)
+                {
+                    data_[new_words - 1] &= LowBitsTo(valid - 1);
+                }
             }
 
-            const size_t old_bit_count = bit_count_;
-            const size_t new_word_count = (new_bit_count + kBitsPerWord - 1) / kBitsPerWord;
-            data_.resize(new_word_count);
+            data_.resize(new_words, new_bits_set ? ~WordType{0} : WordType{0});
             bit_count_ = new_bit_count;
 
-            if (new_bit_count > old_bit_count)
+            if (new_words > 0)
             {
-                if (new_bits_set)
+                if (const size_t valid = new_bit_count % kBitsPerWord; valid != 0)
                 {
-                    SetBits(old_bit_count, new_bit_count);
-                }
-                else
-                {
-                    ClearBits(old_bit_count, new_bit_count);
-                }
-            }
-
-            if (new_word_count > 0)
-            {
-                if (const size_t valid_bits_in_last = new_bit_count % kBitsPerWord; valid_bits_in_last != 0)
-                {
-                    data_.back() &= LowBitsTo(valid_bits_in_last - 1);
+                    data_.back() &= LowBitsTo(valid - 1);
                 }
             }
         }
@@ -299,7 +315,7 @@ namespace dockalloc::solver
         /// @param bit_index The index of the bit to set.
         ///
         /// @pre bit_index < GetBitCount()
-        void SetBit(const size_t bit_index) noexcept
+        DOCK_ALLOC_FORCE_INLINE void SetBit(const size_t bit_index) noexcept
         {
             DCHECK_LT(bit_index, bit_count_);
 
@@ -435,7 +451,7 @@ namespace dockalloc::solver
             for (size_t w = second_word; w < aligned_last; w += kSimdWidth)
             {
                 SimdType vec = xsimd::load_aligned(&data_[w]);
-                if (!xsimd::all(vec == SimdType{0}))
+                if (!xsimd::all(vec == SimdType{static_cast<WordType>(WordType{0})}))
                 {
                     return false;
                 }
@@ -690,17 +706,48 @@ namespace dockalloc::solver
             return BitReference(data_[word], bit);
         }
 
-    private:
-        /// @brief Returns the pointer to the underlying data of the BitVector.
+        /// @brief Checks if two \c BitVector objects are equal.
         ///
-        /// This method provides direct access to the data stored in the BitVector.
+        /// This function compares two \c BitVector objects for equality.
         ///
-        /// @return A pointer to the underlying data of the BitVector.
-        DOCK_ALLOC_FORCE_INLINE WordType* GetData() noexcept
+        /// @param lhs The first \c BitVector to compare.
+        /// @param rhs The second \c BitVector to compare.
+        ///
+        /// @return \c true if both \c BitVector objects have the same bit count and identical bit values;
+        /// \c false otherwise.
+        friend constexpr DOCK_ALLOC_FORCE_INLINE bool operator==(const BitVector& lhs, const BitVector& rhs) noexcept
         {
-            return data_.data();
+            if (lhs.bit_count_ != rhs.bit_count_)
+            {
+                return false;
+            }
+
+            const size_t words = lhs.GetWordCount();
+            for (size_t i = 0; i < words; ++i)
+            {
+                if (lhs.data_[i] != rhs.data_[i])
+                {
+                    return false;
+                }
+            }
+            return true;
         }
 
+        /// @brief Checks if two \c BitVector objects are not equal.
+        ///
+        /// This function compares two \c BitVector objects for inequality.
+        ///
+        /// @param lhs The first \c BitVector to compare.
+        /// @param rhs The second \c BitVector to compare.
+        ///
+        /// @return \c true if the two \c BitVector objects differ in bit count or bit values;
+        /// \c false if they are equal.
+        friend constexpr DOCK_ALLOC_FORCE_INLINE bool operator!=(const BitVector& lhs, const BitVector& rhs) noexcept
+        {
+            return !(lhs == rhs);
+        }
+
+    private:
         /// @brief Creates a bitmask with all bits from the given index (inclusive) to the most significant bit set to 1.
         ///
         /// This function is used to generate a bitmask where all bits at or above the specified bit index
@@ -713,7 +760,7 @@ namespace dockalloc::solver
         /// @return A bitmask with bits [\p bit, \c kBitsPerWord - 1] set to \c 1 and bits [0, \p bit - 1] set to \c 0.
         static constexpr DOCK_ALLOC_FORCE_INLINE WordType HighBitsFrom(const size_t bit) noexcept
         {
-            WordType all_ones = static_cast<WordType>(~WordType{0});
+            static constexpr auto all_ones = static_cast<WordType>(~WordType{0});
             return (bit >= kBitsPerWord) ? WordType{0} : static_cast<WordType>(all_ones << bit);
         }
 
@@ -730,7 +777,7 @@ namespace dockalloc::solver
         /// @return A bitmask with bits [0, \p bit] set to \c 1 and bits [\p bit + 1, \c kBitsPerWord - 1] set to \c 0.
         static constexpr DOCK_ALLOC_FORCE_INLINE WordType LowBitsTo(const size_t bit) noexcept
         {
-            WordType all_ones = static_cast<WordType>(~WordType{0});
+            static constexpr auto all_ones = static_cast<WordType>(~WordType{0});
             return (bit >= kBitsPerWord) ? all_ones : static_cast<WordType>(all_ones >> (kBitsPerWord - bit - 1));
         }
 
@@ -767,7 +814,7 @@ namespace dockalloc::solver
         /// @brief The Width of the SIMD type.
         static constexpr std::size_t kSimdWidth = SimdType::size;
 
-        std::vector<WordType, xsimd::default_allocator<WordType>> data_;
+        std::vector<WordType, xsimd::aligned_allocator<WordType>> data_;
 #else
         std::vector<WordType> data_;
 #endif
