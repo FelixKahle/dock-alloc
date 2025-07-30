@@ -22,6 +22,7 @@
 cc_library(
     name = "solver",
     hdrs = [
+        "include/container/bit_vector.h",
         "include/container/free_interval.h",
     ],
     copts = select({
@@ -42,12 +43,15 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//dockalloc/core",
+        "//third_party:xsimd",
+        "@abseil-cpp//absl/log:check",
     ],
 )
 
 cc_test(
     name = "solver_tests",
     srcs = [
+        "tests/container/bit_vector_tests.cc",
         "tests/container/free_interval_tests.cc",
     ],
     copts = select({
