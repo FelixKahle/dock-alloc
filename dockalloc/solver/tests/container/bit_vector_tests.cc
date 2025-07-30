@@ -186,4 +186,46 @@ namespace dockalloc::solver
             EXPECT_EQ(static_cast<bool>(cbv[i]), bv[i]);
         }
     }
+
+    TYPED_TEST(BitVectorTest, EqualityOperator)
+    {
+        {
+            // Same size, same contents → ==
+            const auto K = static_cast<size_t>(this->kBits);
+            const size_t N = K + 7;
+            BitVector<TypeParam> a(N), b(N);
+
+            const std::vector<size_t> positions = {
+                static_cast<size_t>(0),
+                static_cast<size_t>(3),
+                static_cast<size_t>(K - 1),
+                static_cast<size_t>(N - 1)
+            };
+            for (size_t p : positions)
+            {
+                a.SetBit(p);
+                b.SetBit(p);
+            }
+            EXPECT_TRUE(a == b);
+            EXPECT_FALSE(a != b);
+        }
+        {
+            // Case 1: different bit counts
+            BitVector<TypeParam> a1(10), b1(11);
+            EXPECT_FALSE(a1 == b1);
+            EXPECT_TRUE(a1 != b1);
+
+            // Case 2: same size, but one bit differs
+            const auto K = static_cast<size_t>(this->kBits);
+            const size_t N = K + 5;
+            BitVector<TypeParam> a2(N, true), b2(N, true);
+
+            // clear a single bit in a2
+            const auto flip = static_cast<size_t>(2 * sizeof(TypeParam));
+            a2.ClearBit(flip);
+
+            EXPECT_FALSE(a2 == b2);
+            EXPECT_TRUE(a2 != b2);
+        }
+    }
 }

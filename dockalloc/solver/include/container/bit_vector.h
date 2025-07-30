@@ -722,6 +722,30 @@ namespace dockalloc::solver
                 return false;
             }
 
+#if DOCK_ALLOC_SOLVER_CONTAINER_BIT_VECTOR_USES_SIMD
+            const size_t words = lhs.GetWordCount();
+            // aligned_last is the first word we cannot include in a full SIMD block
+            const size_t aligned_last = words - (words % kSimdWidth);
+
+            for (size_t i = 0; i < aligned_last; i += kSimdWidth)
+            {
+                SimdType a = xsimd::load_aligned(&lhs.data_[i]);
+                SimdType b = xsimd::load_aligned(&rhs.data_[i]);
+                if (!xsimd::all(a == b))
+                {
+                    return false;
+                }
+            }
+
+            // Scalar tail over [aligned_last, words)
+            for (size_t i = aligned_last; i < words; ++i)
+            {
+                if (lhs.data_[i] != rhs.data_[i])
+                {
+                    return false;
+                }
+            }
+#else
             const size_t words = lhs.GetWordCount();
             for (size_t i = 0; i < words; ++i)
             {
@@ -730,6 +754,7 @@ namespace dockalloc::solver
                     return false;
                 }
             }
+#endif
             return true;
         }
 
