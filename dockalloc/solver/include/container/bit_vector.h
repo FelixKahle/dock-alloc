@@ -359,7 +359,7 @@ namespace dockalloc::solver
 
             const size_t second_word = first_word + 1;
 #if DOCK_ALLOC_SOLVER_CONTAINER_BIT_VECTOR_USES_SIMD
-            SimdType ones = SimdType(~WordType{0});
+            static SimdType ones = SimdType(~WordType{0});
 
             // aligned_last is the first word we cannot include in a full SIMD block
             // SIMD loop will process words in [first_word+1, aligned_last), step kSimdWidth
@@ -530,7 +530,7 @@ namespace dockalloc::solver
 
             const size_t second_word = first_word + 1;
 #if DOCK_ALLOC_SOLVER_CONTAINER_BIT_VECTOR_USES_SIMD
-            SimdType zeros = SimdType(WordType{0});
+            static SimdType zeros = SimdType(WordType{0});
 
             // aligned_last is the first word we cannot include in a full SIMD block
             // SIMD loop will process words in [first_word+1, aligned_last), step kSimdWidth

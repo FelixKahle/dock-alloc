@@ -74,3 +74,27 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_binary(
+    name = "solver_benchmark",
+    srcs = [
+        "benchmarks/container/bit_vector_benchmarks.cc",
+    ],
+    copts = select({
+        "//dockalloc:msvc_compiler": [
+            "/EHs-",
+            "/EHc-",
+            "/std:c++23",
+            "/O2",
+        ],
+        "//conditions:default": [
+            "-fno-exceptions",
+            "-std=c++23",
+            "-O3 -march=native",
+        ],
+    }),
+    deps = [
+        "//dockalloc/solver",
+        "@google_benchmark//:benchmark",
+    ],
+)
