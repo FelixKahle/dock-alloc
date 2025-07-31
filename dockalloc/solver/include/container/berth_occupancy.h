@@ -399,8 +399,10 @@ namespace dockalloc::solver
             const auto& child2 = nodes_[2 * k + 1];
 
             auto& nd = nodes_[k];
-            nd.GetFreeMask() = child1.GetFreeMask() & child2.GetFreeMask();
-            nd.GetPendingMask() = child1.GetPendingMask() & child2.GetPendingMask();
+            nd.GetFreeMask() &= child1.GetFreeMask();
+            nd.GetFreeMask() &= child2.GetFreeMask();
+            nd.GetPendingMask() &= child1.GetPendingMask();
+            nd.GetPendingMask() &= child2.GetPendingMask();
         }
 
 
