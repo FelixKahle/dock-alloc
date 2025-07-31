@@ -45,6 +45,7 @@ namespace dockalloc::solver
         requires std::unsigned_integral<WordType>
     class BitVector
     {
+    public:
         /// @brief A reference to a single bit in the bit vector
         ///
         /// This class provides a reference to a single bit in the bit vector, allowing for
@@ -117,7 +118,6 @@ namespace dockalloc::solver
             size_t bit_;
         };
 
-    public:
         /// @brief The count of bits in a single Storage word.
         static constexpr int kBitsPerWord = std::numeric_limits<WordType>::digits;
 
@@ -726,6 +726,14 @@ namespace dockalloc::solver
             return BitReference(data_[word], bit);
         }
 
+        /// @brief Bitwise AND assignment operator for two \c BitVector objects.
+        ///
+        /// This operator performs a bitwise AND operation between the current \c BitVector
+        /// and another \c BitVector, modifying the current object in place.
+        ///
+        /// @param other The \c BitVector to AND with the current object.
+        ///
+        /// @return A reference to the current \c BitVector after the operation.
         DOCK_ALLOC_FORCE_INLINE BitVector& operator&=(const BitVector& other) noexcept
         {
             DCHECK_EQ(bit_count_, other.bit_count_);
@@ -756,7 +764,15 @@ namespace dockalloc::solver
             return *this;
         }
 
-        // Free-function bitwise AND
+        /// @brief Bitwise AND operator for two \c BitVector objects.
+        ///
+        /// This operator performs a bitwise AND operation between two \c BitVector objects,
+        /// returning a new \c BitVector that contains the result.
+        ///
+        /// @param lhs The first \c BitVector to AND.
+        /// @param rhs The second \c BitVector to AND.
+        ///
+        /// @return A new \c BitVector containing the result of the bitwise AND operation.
         friend DOCK_ALLOC_FORCE_INLINE BitVector operator&(BitVector lhs, const BitVector& rhs) noexcept
         {
             lhs &= rhs;
