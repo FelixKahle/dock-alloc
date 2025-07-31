@@ -169,6 +169,26 @@ namespace dockalloc::solver
             return data_.size();
         }
 
+        /// @brief Clears the \c BitVector.
+        ///
+        /// This function resets the BitVector, clearing all bits and setting the bit count to zero.
+        DOCK_ALLOC_FORCE_INLINE void Clear() noexcept
+        {
+            data_.clear();
+            bit_count_ = 0;
+        }
+
+        /// @brief Sets all bits in the \c BitVector to a specified value.
+        ///
+        /// This function sets all bits in the \c BitVector.
+        ///
+        /// @param value The value to set all bits to.
+        DOCK_ALLOC_FORCE_INLINE void SetAll(const bool value) noexcept
+        {
+            const WordType fill_word = value ? ~WordType{0} : WordType{0};
+            std::fill(data_.begin(), data_.end(), fill_word);
+        }
+
         /// @brief Resizes the BitVector to the specified number of bits.
         ///
         /// This function changes the size of the BitVector to \p new_bit_count.
@@ -706,6 +726,43 @@ namespace dockalloc::solver
             return BitReference(data_[word], bit);
         }
 
+        DOCK_ALLOC_FORCE_INLINE BitVector& operator&=(const BitVector& other) noexcept
+        {
+            DCHECK_EQ(bit_count_, other.bit_count_);
+            const size_t words = GetWordCount();
+
+#if DOCK_ALLOC_SOLVER_CONTAINER_BIT_VECTOR_USES_SIMD
+            // Process the bulk of the data using SIMD registers.
+            const size_t aligned_last = words - words % kSimdWidth;
+            for (size_t i = 0; i < aligned_last; i += kSimdWidth)
+            {
+                SimdType a = xsimd::load_aligned(&data_[i]);
+                SimdType b = xsimd::load_aligned(&other.data_[i]);
+                xsimd::store_aligned(&data_[i], a & b);
+            }
+
+            // Handle any remaining elements that didn't fit in a full SIMD register.
+            for (size_t i = aligned_last; i < words; ++i)
+            {
+                data_[i] &= other.data_[i];
+            }
+#else
+            // The original scalar fallback for when SIMD is disabled.
+            for (size_t i = 0; i < words; ++i)
+            {
+                data_[i] &= other.data_[i];
+            }
+#endif
+            return *this;
+        }
+
+        // Free-function bitwise AND
+        friend DOCK_ALLOC_FORCE_INLINE BitVector operator&(BitVector lhs, const BitVector& rhs) noexcept
+        {
+            lhs &= rhs;
+            return lhs;
+        }
+
         /// @brief Checks if two \c BitVector objects are equal.
         ///
         /// This function compares two \c BitVector objects for equality.
@@ -721,9 +778,8 @@ namespace dockalloc::solver
             {
                 return false;
             }
-
-#if DOCK_ALLOC_SOLVER_CONTAINER_BIT_VECTOR_USES_SIMD
             const size_t words = lhs.GetWordCount();
+#if DOCK_ALLOC_SOLVER_CONTAINER_BIT_VECTOR_USES_SIMD
             // aligned_last is the first word we cannot include in a full SIMD block
             const size_t aligned_last = words - (words % kSimdWidth);
 
@@ -746,7 +802,6 @@ namespace dockalloc::solver
                 }
             }
 #else
-            const size_t words = lhs.GetWordCount();
             for (size_t i = 0; i < words; ++i)
             {
                 if (lhs.data_[i] != rhs.data_[i])

@@ -22,6 +22,7 @@
 cc_library(
     name = "solver",
     hdrs = [
+        "include/container/berth_occupancy.h",
         "include/container/bit_vector.h",
         "include/container/free_interval.h",
     ],
@@ -51,6 +52,7 @@ cc_library(
 cc_test(
     name = "solver_tests",
     srcs = [
+        "tests/container/berth_occupancy_tests.cc",
         "tests/container/bit_vector_tests.cc",
         "tests/container/free_interval_tests.cc",
     ],
