@@ -25,6 +25,7 @@ cc_library(
         "include/container/berth_occupancy.h",
         "include/container/bit_vector.h",
         "include/container/free_interval.h",
+        "include/container/quay.h",
         "include/container/quay_segment_tree.h",
     ],
     copts = select({
@@ -59,6 +60,7 @@ cc_test(
         "tests/container/bit_vector_tests.cc",
         "tests/container/free_interval_tests.cc",
         "tests/container/quay_segment_tree_tests.cc",
+        "tests/container/quay_tests.cc",
     ],
     copts = select({
         "//dockalloc:msvc_compiler": [

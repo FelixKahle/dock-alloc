@@ -30,13 +30,12 @@ namespace dockalloc::solver
     public:
         using TimeType = typename std::tuple_element<0, T>::type;
         using PositionType = typename std::tuple_element<1, T>::type;
-        using WordType = typename std::tuple_element<2, T>::type;
     };
 
     using TestTypes = ::testing::Types<
-        std::tuple<uint32_t, uint32_t, uint32_t>,
-        std::tuple<uint64_t, size_t, uint64_t>,
-        std::tuple<uint16_t, uint16_t, uint8_t>
+        std::tuple<uint32_t, uint32_t>,
+        std::tuple<uint64_t, size_t>,
+        std::tuple<uint16_t, uint16_t>
     >;
 
     TYPED_TEST_SUITE(BerthOccupancyTest, TestTypes);
@@ -45,10 +44,9 @@ namespace dockalloc::solver
     {
         using TimeType = typename TestFixture::TimeType;
         using PositionType = typename TestFixture::PositionType;
-        using WordType = typename TestFixture::WordType;
 
         constexpr size_t num_segments = 100;
-        BerthOccupancy<TimeType, PositionType, WordType> bo(num_segments);
+        BerthOccupancy<TimeType, PositionType> bo(num_segments);
 
         EXPECT_EQ(bo.GetQuaySegmentCount(), num_segments);
         EXPECT_EQ(bo.GetTimeEventCount(), 1);
@@ -63,9 +61,8 @@ namespace dockalloc::solver
     {
         using TimeType = typename TestFixture::TimeType;
         using PositionType = typename TestFixture::PositionType;
-        using WordType = typename TestFixture::WordType;
 
-        BerthOccupancy<TimeType, PositionType, WordType> bo(100);
+        BerthOccupancy<TimeType, PositionType> bo(100);
         const core::TimeInterval<TimeType> ti = {10, 20};
         const core::SegmentRange<PositionType> sr = {5, 15};
 
@@ -86,9 +83,8 @@ namespace dockalloc::solver
     {
         using TimeType = typename TestFixture::TimeType;
         using PositionType = typename TestFixture::PositionType;
-        using WordType = typename TestFixture::WordType;
 
-        BerthOccupancy<TimeType, PositionType, WordType> bo(100);
+        BerthOccupancy<TimeType, PositionType> bo(100);
         const core::SegmentRange<PositionType> sr = {10, 20};
         const core::TimeInterval<TimeType> time1 = {10, 20};
         const core::TimeInterval<TimeType> time2 = {20, 30};
@@ -112,9 +108,8 @@ namespace dockalloc::solver
     {
         using TimeType = typename TestFixture::TimeType;
         using PositionType = typename TestFixture::PositionType;
-        using WordType = typename TestFixture::WordType;
 
-        BerthOccupancy<TimeType, PositionType, WordType> bo(100);
+        BerthOccupancy<TimeType, PositionType> bo(100);
         const core::TimeInterval<TimeType> large_ti = {10, 100};
         const core::SegmentRange<PositionType> large_sr = {10, 50};
 
@@ -142,9 +137,8 @@ namespace dockalloc::solver
     {
         using TimeType = typename TestFixture::TimeType;
         using PositionType = typename TestFixture::PositionType;
-        using WordType = typename TestFixture::WordType;
 
-        BerthOccupancy<TimeType, PositionType, WordType> bo(50);
+        BerthOccupancy<TimeType, PositionType> bo(50);
         const core::TimeInterval<TimeType> ti = {10, 20};
         const core::SegmentRange<PositionType> sr = {5, 15};
         bo.Occupy(ti, sr);
@@ -163,9 +157,8 @@ namespace dockalloc::solver
     {
         using TimeType = typename TestFixture::TimeType;
         using PositionType = typename TestFixture::PositionType;
-        using WordType = typename TestFixture::WordType;
 
-        BerthOccupancy<TimeType, PositionType, WordType> bo(100);
+        BerthOccupancy<TimeType, PositionType> bo(100);
 
         // Empty time interval
         const core::TimeInterval<TimeType> empty_ti = {10, 10};
@@ -191,9 +184,8 @@ namespace dockalloc::solver
     {
         using TimeType = typename TestFixture::TimeType;
         using PositionType = typename TestFixture::PositionType;
-        using WordType = typename TestFixture::WordType;
 
-        BerthOccupancy<TimeType, PositionType, WordType> bo(50);
+        BerthOccupancy<TimeType, PositionType> bo(50);
         const core::TimeInterval<TimeType> ti = {10, 20};
 
         // Range is partially out of bounds, should be clamped
@@ -221,9 +213,8 @@ namespace dockalloc::solver
     {
         using TimeType = typename TestFixture::TimeType;
         using PositionType = typename TestFixture::PositionType;
-        using WordType = typename TestFixture::WordType;
 
-        BerthOccupancy<TimeType, PositionType, WordType> bo(0);
+        BerthOccupancy<TimeType, PositionType> bo(0);
         EXPECT_EQ(bo.GetQuaySegmentCount(), 0);
         EXPECT_EQ(bo.GetTimeEventCount(), 1);
 

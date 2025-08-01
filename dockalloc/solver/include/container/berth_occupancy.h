@@ -23,6 +23,8 @@
 #define DOCK_ALLOC_SOLVER_CONTAINER_BERTH_OCCUPANCY_H_
 
 #include <concepts>
+
+#include "quay.h"
 #include "absl/container/btree_map.h"
 #include "dockalloc/core/miscellaneous/core_types.h"
 #include "dockalloc/solver/container/bit_vector.h"
@@ -39,10 +41,8 @@ namespace dockalloc::solver
     ///
     /// @tparam TimeType The unsigned integral type for time points.
     /// @tparam PositionType The unsigned integral type for segment positions.
-    /// @tparam WordType The underlying unsigned integral type used by the \c BitVector.
-    template <typename TimeType, typename PositionType, typename WordType>
-        requires std::unsigned_integral<TimeType> && std::unsigned_integral<PositionType> && std::unsigned_integral<
-            WordType>
+    template <typename TimeType, typename PositionType, QuayBackend BackendType = QuayBackend::BitVector>
+        requires std::unsigned_integral<TimeType> && std::unsigned_integral<PositionType>
     class BerthOccupancy
     {
     public:
@@ -54,7 +54,7 @@ namespace dockalloc::solver
         explicit DOCK_ALLOC_FORCE_INLINE BerthOccupancy(const size_t num_segments)
             : number_quay_segments_(num_segments)
         {
-            timeline_.emplace(TimeType{0}, BitVector<WordType>(number_quay_segments_, true));
+            timeline_.emplace(TimeType{0}, Quay<PositionType, BackendType>(num_segments));
         }
 
         /// @brief Gets the total number of quay segments this container manages.
@@ -93,13 +93,10 @@ namespace dockalloc::solver
             SplitAt(time_interval.GetStart());
             SplitAt(time_interval.GetEnd());
 
-            const size_t end_segment = std::min(static_cast<size_t>(segment_range.GetEnd()), number_quay_segments_);
-            const size_t start_segment = std::min(static_cast<size_t>(segment_range.GetStart()), end_segment);
-
             for (auto it = timeline_.lower_bound(time_interval.GetStart());
                  it != timeline_.end() && it->first < time_interval.GetEnd(); ++it)
             {
-                it->second.ClearBits(start_segment, end_segment);
+                it->second.Occupy(segment_range);
             }
 
             CoalesceAt(time_interval.GetStart());
@@ -124,13 +121,10 @@ namespace dockalloc::solver
             SplitAt(time_interval.GetStart());
             SplitAt(time_interval.GetEnd());
 
-            const size_t end_segment = std::min(static_cast<size_t>(segment_range.GetEnd()), number_quay_segments_);
-            const size_t start_segment = std::min(static_cast<size_t>(segment_range.GetStart()), end_segment);
-
             for (auto it = timeline_.lower_bound(time_interval.GetStart());
                  it != timeline_.end() && it->first < time_interval.GetEnd(); ++it)
             {
-                it->second.SetBits(start_segment, end_segment);
+                it->second.Free(segment_range);
             }
 
             CoalesceAt(time_interval.GetStart());
@@ -153,20 +147,12 @@ namespace dockalloc::solver
                 return true;
             }
 
-            const size_t end_segment = std::min(static_cast<size_t>(segment_range.GetEnd()), number_quay_segments_);
-            const size_t start_segment = std::min(static_cast<size_t>(segment_range.GetStart()), end_segment);
-
-            if (start_segment >= end_segment)
-            {
-                return true;
-            }
-
             auto it = timeline_.upper_bound(time_interval.GetStart());
             if (it != timeline_.begin()) --it;
 
             for (; it != timeline_.end() && it->first < time_interval.GetEnd(); ++it)
             {
-                if (!it->second.AreBitsSet(start_segment, end_segment))
+                if (it->second.IsRangeOccupied(segment_range))
                 {
                     return false;
                 }
@@ -238,7 +224,7 @@ namespace dockalloc::solver
         }
 
         size_t number_quay_segments_;
-        absl::btree_map<TimeType, BitVector<WordType>> timeline_;
+        absl::btree_map<TimeType, Quay<PositionType, BackendType>> timeline_;
     };
 }
 

@@ -185,6 +185,10 @@ namespace dockalloc::solver
         /// @param target_range The range of segments [start, end) to mark as occupied.
         void Occupy(const core::SegmentRange<PositionType>& target_range) noexcept
         {
+            if (size_ == 0)
+            {
+                return;
+            }
             Update(1, core::SegmentRange<PositionType>{0, size_}, target_range, LazyState::Occupied);
         }
 
@@ -193,6 +197,10 @@ namespace dockalloc::solver
         /// @param target_range The range of segments [start, end) to mark as free.
         void Free(const core::SegmentRange<PositionType>& target_range) noexcept
         {
+            if (size_ == 0)
+            {
+                return;
+            }
             Update(1, core::SegmentRange<PositionType>{0, size_}, target_range, LazyState::Free);
         }
 
@@ -241,7 +249,54 @@ namespace dockalloc::solver
                                                            const core::SegmentRange<PositionType>& search_range) const
             noexcept
         {
+            if (k == 0)
+            {
+                return std::min(search_range.GetStart(), size_);
+            }
+            if (size_ == 0 || search_range.IsEmpty())
+            {
+                return std::nullopt;
+            }
             return FindFreeRangeRec(1, core::SegmentRange<PositionType>{0, size_}, search_range, k);
+        }
+
+        /// @brief Checks if this segment tree is logically equal to another one.
+        ///
+        /// Two trees are considered logically equal if they have the same size and represent
+        /// the same occupancy state for all segments, regardless of their internal lazy
+        /// propagation states. This comparison is efficient and does not modify either tree.
+        ///
+        /// @param other The other segment tree to compare against.
+        /// @return \c true if the trees are logically equal, \c false otherwise.
+        [[nodiscard]] bool operator==(const QuaySegmentTree& other) const noexcept
+        {
+            if (this == &other)
+            {
+                return true;
+            }
+            if (size_ != other.size_)
+            {
+                return false;
+            }
+            if (size_ == 0)
+            {
+                return true;
+            }
+
+            return AreEqualRec(*this, other, 1, {0, size_}, LazyState::None, LazyState::None);
+        }
+
+        /// @brief Checks if this segment tree is logically unequal to another one.
+        ///
+        /// Two trees are considered logically unequal if they have different sizes or represent
+        /// different occupancy states for any segment. This comparison is efficient and does not modify
+        /// either tree.
+        ///
+        /// @param other The other segment tree to compare against.
+        /// @return \c true if the trees are logically equal, \c false otherwise.
+        [[nodiscard]] bool operator!=(const QuaySegmentTree& other) const noexcept
+        {
+            return !(*this == other);
         }
 
     private:
@@ -487,6 +542,76 @@ namespace dockalloc::solver
             result.SetLongestFreeSuffix(suffix);
             result.SetMaxGap(gap);
             return result;
+        }
+
+        /// @brief Recursively checks if two subtrees are logically equal.
+        ///
+        /// This function compares two subtrees, taking into account the lazy propagation states
+        /// inherited from their parents. It avoids expensive state normalization by virtually
+        /// applying lazy updates during the traversal and prunes the search when a subtree is
+        /// determined to be in a uniform state (all free or all occupied).
+        ///
+        /// @param lhs The left-hand side segment tree.
+        /// @param rhs The right-hand side segment tree.
+        /// @param node_index The index of the current node in the trees.
+        /// @param node_range The segment range covered by the current nodes.
+        /// @param lhs_inherited_lazy The lazy state inherited from the parent of the LHS node.
+        /// @param rhs_inherited_lazy The lazy state inherited from the parent of the RHS node.
+        /// @return \c true if the subtrees are logically equal, \c false otherwise.
+        static bool AreEqualRec(const QuaySegmentTree& lhs, const QuaySegmentTree& rhs, size_t node_index,
+                                const core::SegmentRange<PositionType>& node_range, LazyState lhs_inherited_lazy,
+                                LazyState rhs_inherited_lazy) noexcept
+        {
+            // Determine the effective lazy state for the current node in each tree.
+            // An inherited state from a parent overrides the node's own lazy flag.
+            const LazyState lhs_effective_lazy = (lhs_inherited_lazy != LazyState::None)
+                                                     ? lhs_inherited_lazy
+                                                     : lhs.lazy_[node_index];
+            const LazyState rhs_effective_lazy = (rhs_inherited_lazy != LazyState::None)
+                                                     ? rhs_inherited_lazy
+                                                     : rhs.lazy_[node_index];
+
+            // If LHS's subtree is uniformly free or occupied due to a lazy state...
+            if (lhs_effective_lazy != LazyState::None)
+            {
+                // ...check if RHS's subtree matches that uniform state.
+                if (rhs_effective_lazy != LazyState::None)
+                {
+                    return lhs_effective_lazy == rhs_effective_lazy; // Both lazy, compare states.
+                }
+                // RHS is not lazy; check if its node represents the required uniform state.
+                const auto& rhs_node = rhs.tree_[node_index];
+                const auto len = node_range.Length();
+                const PositionType expected_gap = (lhs_effective_lazy == LazyState::Free) ? len : 0;
+                return rhs_node.GetMaxGap() == expected_gap;
+            }
+            // Symmetrical check if RHS is lazy but LHS is not.
+            if (rhs_effective_lazy != LazyState::None)
+            {
+                const auto& lhs_node = lhs.tree_[node_index];
+                const auto len = node_range.Length();
+                const PositionType expected_gap = (rhs_effective_lazy == LazyState::Free) ? len : 0;
+                return lhs_node.GetMaxGap() == expected_gap;
+            }
+
+            // Base Case: At a leaf node with no effective lazy states.
+            if (node_range.Length() == 1)
+            {
+                // For a leaf, max_gap is sufficient to determine its state (1=free, 0=occupied).
+                return lhs.tree_[node_index].GetMaxGap() == rhs.tree_[node_index].GetMaxGap();
+            }
+
+            // Recursive Step: Neither node is covered by a lazy state, so we descend to children.
+            const auto mid = node_range.template Midpoint<PositionType>();
+            const auto left_range = core::SegmentRange<PositionType>{node_range.GetStart(), mid};
+            const auto right_range = core::SegmentRange<PositionType>{mid, node_range.GetEnd()};
+
+            if (!AreEqualRec(lhs, rhs, node_index << 1, left_range, lhs_effective_lazy, rhs_effective_lazy))
+            {
+                return false;
+            }
+
+            return AreEqualRec(lhs, rhs, (node_index << 1) | 1, right_range, lhs_effective_lazy, rhs_effective_lazy);
         }
 
         PositionType size_;

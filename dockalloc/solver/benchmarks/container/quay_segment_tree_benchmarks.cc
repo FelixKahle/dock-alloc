@@ -21,11 +21,12 @@
 
 #include <benchmark/benchmark.h>
 #include <random>
+#include <sys/stat.h>
+
 #include "dockalloc/solver/include/container/quay_segment_tree.h"
 
 namespace dockalloc::solver
 {
-    // Benchmark für die Konstruktion des Segment Trees
     static void BM_QuaySegmentTree_Construction(benchmark::State& state)
     {
         const auto size = static_cast<uint32_t>(state.range(0));
@@ -39,7 +40,6 @@ namespace dockalloc::solver
         state.SetComplexityN(size);
     }
 
-    // Benchmark für Occupy-Operationen
     static void BM_QuaySegmentTree_Occupy(benchmark::State& state)
     {
         const auto size = static_cast<uint32_t>(state.range(0));
@@ -63,7 +63,6 @@ namespace dockalloc::solver
         state.SetComplexityN(size);
     }
 
-    // Benchmark für Free-Operationen
     static void BM_QuaySegmentTree_Free(benchmark::State& state)
     {
         const auto size = static_cast<uint32_t>(state.range(0));
@@ -87,7 +86,6 @@ namespace dockalloc::solver
         state.SetComplexityN(size);
     }
 
-    // Benchmark für IsRangeFree-Queries
     static void BM_QuaySegmentTree_IsRangeFree(benchmark::State& state)
     {
         const auto size = static_cast<uint32_t>(state.range(0));
@@ -111,13 +109,11 @@ namespace dockalloc::solver
         state.SetComplexityN(size);
     }
 
-    // Benchmark für FindFree-Operationen
     static void BM_QuaySegmentTree_FindFree(benchmark::State& state)
     {
         const auto size = static_cast<uint32_t>(state.range(0));
         QuaySegmentTree<uint32_t> tree(size);
 
-        // Teilweise besetzen für realistischere Bedingungen
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_int_distribution<uint32_t> occupy_start(0, size - 1);
@@ -142,7 +138,6 @@ namespace dockalloc::solver
         state.SetComplexityN(size);
     }
 
-    // Benchmark für gemischte Operationen
     static void BM_QuaySegmentTree_Mixed(benchmark::State& state)
     {
         const auto size = static_cast<uint32_t>(state.range(0));

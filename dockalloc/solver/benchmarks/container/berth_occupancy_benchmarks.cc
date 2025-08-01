@@ -28,7 +28,7 @@ namespace dockalloc::solver
     {
         for (auto _ : st)
         {
-            BerthOccupancy<uint64_t, uint64_t, uint64_t> bo(st.range(0));
+            BerthOccupancy<uint64_t, uint64_t> bo(st.range(0));
             benchmark::DoNotOptimize(bo);
         }
     }
@@ -40,7 +40,7 @@ namespace dockalloc::solver
         const size_t n = st.range(0);
         for (auto _ : st)
         {
-            BerthOccupancy<uint64_t, uint64_t, uint64_t> bo(n);
+            BerthOccupancy<uint64_t, uint64_t> bo(n);
             benchmark::DoNotOptimize(bo);
         }
     }
@@ -54,7 +54,7 @@ namespace dockalloc::solver
         const core::SegmentRange<uint64_t> range{0, n / 2};
         for (auto _ : st)
         {
-            BerthOccupancy<uint64_t, uint64_t, uint64_t> bo(n);
+            BerthOccupancy<uint64_t, uint64_t> bo(n);
             bo.Occupy(interval, range);
             benchmark::ClobberMemory();
         }
@@ -69,7 +69,7 @@ namespace dockalloc::solver
         const core::SegmentRange<uint64_t> range{0, n / 2};
         for (auto _ : st)
         {
-            BerthOccupancy<uint64_t, uint64_t, uint64_t> bo(n);
+            BerthOccupancy<uint64_t, uint64_t> bo(n);
             bo.Free(interval, range);
             benchmark::ClobberMemory();
         }
@@ -83,7 +83,7 @@ namespace dockalloc::solver
         constexpr core::TimeInterval<uint64_t> interval{0, 100};
         const core::SegmentRange<uint64_t> range{0, n / 2};
         // pre-populate a mixed timeline
-        BerthOccupancy<uint64_t, uint64_t, uint64_t> bo(n);
+        BerthOccupancy<uint64_t, uint64_t> bo(n);
         bo.Occupy(interval, range);
         for (auto _ : st)
         {
@@ -98,7 +98,7 @@ namespace dockalloc::solver
         const size_t n = st.range(0);
         constexpr core::TimeInterval<uint64_t> interval{0, 100};
         const core::SegmentRange<uint64_t> range{0, n / 2};
-        BerthOccupancy<uint64_t, uint64_t, uint64_t> bo(n);
+        BerthOccupancy<uint64_t, uint64_t> bo(n);
         bo.Occupy(interval, range);
         for (auto _ : st)
         {
@@ -110,7 +110,7 @@ namespace dockalloc::solver
 
     static void BM_GetQuaySegmentCount(benchmark::State& st)
     {
-        const BerthOccupancy<uint64_t, uint64_t, uint64_t> bo(1024);
+        const BerthOccupancy<uint64_t, uint64_t> bo(1024);
         for (auto _ : st)
         {
             benchmark::DoNotOptimize(bo.GetQuaySegmentCount());
@@ -121,7 +121,7 @@ namespace dockalloc::solver
 
     static void BM_GetTimeEventCount(benchmark::State& st)
     {
-        BerthOccupancy<uint64_t, uint64_t, uint64_t> bo(1024);
+        BerthOccupancy<uint64_t, uint64_t> bo(1024);
         // introduce several splits
         for (uint64_t t = 1; t <= 100; ++t)
         {
@@ -138,7 +138,7 @@ namespace dockalloc::solver
     static void BM_PopulatedIsOccupied(benchmark::State& st)
     {
         const size_t num_segments = st.range(0);
-        BerthOccupancy<uint64_t, uint64_t, uint64_t> bo(num_segments);
+        BerthOccupancy<uint64_t, uint64_t> bo(num_segments);
 
         constexpr uint64_t event_step = 10;
         constexpr size_t num_events = 1000;
