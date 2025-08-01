@@ -25,6 +25,7 @@ cc_library(
         "include/container/berth_occupancy.h",
         "include/container/bit_vector.h",
         "include/container/free_interval.h",
+        "include/container/quay_segment_tree.h",
     ],
     copts = select({
         "//dockalloc:msvc_compiler": [
@@ -45,7 +46,9 @@ cc_library(
     deps = [
         "//dockalloc/core",
         "//third_party:xsimd",
+        "@abseil-cpp//absl/container:btree",
         "@abseil-cpp//absl/log:check",
+        "@abseil-cpp//absl/log:log",
     ],
 )
 
@@ -55,6 +58,7 @@ cc_test(
         "tests/container/berth_occupancy_tests.cc",
         "tests/container/bit_vector_tests.cc",
         "tests/container/free_interval_tests.cc",
+        "tests/container/quay_segment_tree_tests.cc",
     ],
     copts = select({
         "//dockalloc:msvc_compiler": [
@@ -78,9 +82,33 @@ cc_test(
 )
 
 cc_binary(
-    name = "solver_benchmark",
+    name = "bit_vector_benchmarks",
     srcs = [
         "benchmarks/container/bit_vector_benchmarks.cc",
+    ],
+    copts = select({
+        "//dockalloc:msvc_compiler": [
+            "/EHs-",
+            "/EHc-",
+            "/std:c++23",
+            "/O2",
+        ],
+        "//conditions:default": [
+            "-fno-exceptions",
+            "-std=c++23",
+            "-O3 -march=native",
+        ],
+    }),
+    deps = [
+        "//dockalloc/solver",
+        "@google_benchmark//:benchmark",
+    ],
+)
+
+cc_binary(
+    name = "berth_occupancy_benchmarks",
+    srcs = [
+        "benchmarks/container/berth_occupancy_benchmarks.cc",
     ],
     copts = select({
         "//dockalloc:msvc_compiler": [

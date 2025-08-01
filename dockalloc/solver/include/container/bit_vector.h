@@ -118,6 +118,12 @@ namespace dockalloc::solver
             size_t bit_;
         };
 
+        /// @brief A \c WordType with all bits set to zeroes.
+        static constexpr auto kAllZeroes = static_cast<WordType>(0);
+
+        /// @brief A \c WordType with all bits set to ones.
+        static constexpr auto kAllOnes = static_cast<WordType>(~WordType{0});
+
         /// @brief The count of bits in a single Storage word.
         static constexpr int kBitsPerWord = std::numeric_limits<WordType>::digits;
 
@@ -132,7 +138,7 @@ namespace dockalloc::solver
         /// @param bit_count The number of bits in the BitVector.
         explicit constexpr DOCK_ALLOC_FORCE_INLINE BitVector(const size_t bit_count) noexcept
             : bit_count_(bit_count),
-              data_((bit_count + kBitsPerWord - 1) / kBitsPerWord, WordType{0})
+              data_((bit_count + kBitsPerWord - 1) / kBitsPerWord, kAllZeroes)
         {
         }
 
@@ -145,8 +151,15 @@ namespace dockalloc::solver
         /// @param all_bits_set If \c true, all bits are set to \c 1; otherwise, they are set to \c 0.
         explicit constexpr DOCK_ALLOC_FORCE_INLINE BitVector(const size_t bit_count, const bool all_bits_set) noexcept
             : bit_count_(bit_count),
-              data_((bit_count + kBitsPerWord - 1) / kBitsPerWord, all_bits_set ? ~WordType{0} : WordType{0})
+              data_((bit_count + kBitsPerWord - 1) / kBitsPerWord, all_bits_set ? kAllOnes : kAllZeroes)
         {
+            if (all_bits_set && bit_count > 0)
+            {
+                if (const size_t valid_bits = bit_count % kBitsPerWord; valid_bits != 0)
+                {
+                    data_.back() &= BitsBetweenInclusive(0, valid_bits - 1);
+                }
+            }
         }
 
         /// @brief Returns the number of bits in the \c BitVector.
@@ -185,7 +198,7 @@ namespace dockalloc::solver
         /// @param value The value to set all bits to.
         DOCK_ALLOC_FORCE_INLINE void SetAll(const bool value) noexcept
         {
-            const WordType fill_word = value ? ~WordType{0} : WordType{0};
+            const WordType fill_word = value ? kAllOnes : kAllZeroes;
             std::fill(data_.begin(), data_.end(), fill_word);
         }
 
@@ -224,7 +237,7 @@ namespace dockalloc::solver
                 }
             }
 
-            data_.resize(new_words, new_bits_set ? ~WordType{0} : WordType{0});
+            data_.resize(new_words, new_bits_set ? kAllOnes : kAllZeroes);
             bit_count_ = new_bit_count;
 
             if (new_words > 0)
@@ -289,9 +302,10 @@ namespace dockalloc::solver
             {
                 return false;
             }
-
             const size_t second_word = first_word + 1;
 #if DOCK_ALLOC_SOLVER_CONTAINER_BIT_VECTOR_USES_SIMD
+            static SimdType ones = SimdType(kAllOnes);
+
             // aligned_last is the first word we cannot include in a full SIMD block
             // SIMD loop will process words in [first_word+1, aligned_last), step kSimdWidth
             const size_t aligned_last = last_word - (last_word - second_word) % kSimdWidth;
@@ -299,7 +313,7 @@ namespace dockalloc::solver
             for (size_t w = second_word; w < aligned_last; w += kSimdWidth)
             {
                 SimdType vec = xsimd::load_aligned(&data_[w]);
-                if (!xsimd::all(vec == SimdType{static_cast<WordType>(~WordType{0})}))
+                if (!xsimd::all(vec == ones))
                 {
                     return false;
                 }
@@ -307,7 +321,7 @@ namespace dockalloc::solver
 
             for (size_t w = aligned_last; w < last_word; ++w)
             {
-                if (data_[w] != ~WordType{0})
+                if (data_[w] != kAllOnes)
                 {
                     return false;
                 }
@@ -316,7 +330,7 @@ namespace dockalloc::solver
             // Scalar fallback: middle words must be entirely ones
             for (size_t w = second_word; w < last_word; ++w)
             {
-                if (data_[w] != ~WordType{0})
+                if (data_[w] != kAllOnes)
                 {
                     return false;
                 }
@@ -376,10 +390,9 @@ namespace dockalloc::solver
 
             // Head.
             data_[first_word] |= HighBitsFrom(start_bit);
-
             const size_t second_word = first_word + 1;
 #if DOCK_ALLOC_SOLVER_CONTAINER_BIT_VECTOR_USES_SIMD
-            static SimdType ones = SimdType(~WordType{0});
+            static SimdType ones = SimdType(kAllOnes);
 
             // aligned_last is the first word we cannot include in a full SIMD block
             // SIMD loop will process words in [first_word+1, aligned_last), step kSimdWidth
@@ -394,13 +407,13 @@ namespace dockalloc::solver
             // Scalar check for the remaining tail
             for (size_t w = aligned_last; w < last_word; ++w)
             {
-                data_[w] = ~WordType{0};
+                data_[w] = kAllOnes;
             }
 #else
             // scalar fallback
             for (size_t w = second_word; w < last_word; ++w)
             {
-                data_[w] = ~WordType{0};
+                data_[w] = kAllOnes;
             }
 #endif
 
@@ -452,18 +465,19 @@ namespace dockalloc::solver
             if (first_word == last_word)
             {
                 WordType mask = BitsBetweenInclusive(start_bit, end_bit);
-                return (data_[first_word] & mask) == WordType{0};
+                return (data_[first_word] & mask) == kAllZeroes;
             }
 
             // Head word: bits from start_bit to MSB
             WordType head_mask = HighBitsFrom(start_bit);
-            if ((data_[first_word] & head_mask) != WordType{0})
+            if ((data_[first_word] & head_mask) != kAllZeroes)
             {
                 return false;
             }
-
             const size_t second_word = first_word + 1;
 #if DOCK_ALLOC_SOLVER_CONTAINER_BIT_VECTOR_USES_SIMD
+            static const SimdType zeroes = SimdType{kAllZeroes};
+
             // aligned_last is the first word we cannot include in a full SIMD block
             // SIMD loop will process words in [first_word+1, aligned_last), step kSimdWidth
             const size_t aligned_last = last_word - (last_word - second_word) % kSimdWidth;
@@ -471,7 +485,7 @@ namespace dockalloc::solver
             for (size_t w = second_word; w < aligned_last; w += kSimdWidth)
             {
                 SimdType vec = xsimd::load_aligned(&data_[w]);
-                if (!xsimd::all(vec == SimdType{static_cast<WordType>(WordType{0})}))
+                if (!xsimd::all(vec == zeroes))
                 {
                     return false;
                 }
@@ -479,7 +493,7 @@ namespace dockalloc::solver
 
             for (size_t w = aligned_last; w < last_word; ++w)
             {
-                if (data_[w] != WordType{0})
+                if (data_[w] != kAllZeroes)
                 {
                     return false;
                 }
@@ -488,15 +502,15 @@ namespace dockalloc::solver
             // Scalar fallback: middle words must be entirely zero
             for (size_t w = second_word; w < last_word; ++w)
             {
-                if (data_[w] != WordType{0})
+                if (data_[w] != kAllZeroes)
                 {
                     return false;
                 }
             }
 #endif
             // Tail word: bits from LSB up to end_bit
-            WordType tail_mask = LowBitsTo(end_bit);
-            return (data_[last_word] & tail_mask) == WordType{0};
+            WordType tail_mask = BitsBetweenInclusive(0, end_bit);
+            return (data_[last_word] & tail_mask) == kAllZeroes;
         }
 
         /// @brief Sets a bit to \c 0.
@@ -547,10 +561,9 @@ namespace dockalloc::solver
 
             // Head.
             data_[first_word] &= ~HighBitsFrom(start_bit);
-
             const size_t second_word = first_word + 1;
 #if DOCK_ALLOC_SOLVER_CONTAINER_BIT_VECTOR_USES_SIMD
-            static SimdType zeros = SimdType(WordType{0});
+            static SimdType zeros = SimdType(kAllZeroes);
 
             // aligned_last is the first word we cannot include in a full SIMD block
             // SIMD loop will process words in [first_word+1, aligned_last), step kSimdWidth
@@ -565,13 +578,13 @@ namespace dockalloc::solver
             // Scalar check for the remaining tail
             for (size_t w = aligned_last; w < last_word; ++w)
             {
-                data_[w] = WordType{0};
+                data_[w] = kAllZeroes;
             }
 #else
             // scalar fallback
             for (size_t w = second_word; w < last_word; ++w)
             {
-                data_[w] = WordType{0};
+                data_[w] = kAllZeroes;
             }
 #endif
 
@@ -628,7 +641,7 @@ namespace dockalloc::solver
 
                 WordType word = data_[w];
 
-                if ((word & mask) == WordType{0})
+                if ((word & mask) == kAllZeroes)
                 {
                     const size_t chunk = std::min<size_t>(
                         w * kBitsPerWord + kBitsPerWord - pos,
@@ -856,8 +869,7 @@ namespace dockalloc::solver
         /// @return A bitmask with bits [\p bit, \c kBitsPerWord - 1] set to \c 1 and bits [0, \p bit - 1] set to \c 0.
         static constexpr DOCK_ALLOC_FORCE_INLINE WordType HighBitsFrom(const size_t bit) noexcept
         {
-            static constexpr auto all_ones = static_cast<WordType>(~WordType{0});
-            return (bit >= kBitsPerWord) ? WordType{0} : static_cast<WordType>(all_ones << bit);
+            return (bit >= kBitsPerWord) ? kAllZeroes : static_cast<WordType>(kAllOnes << bit);
         }
 
         /// @brief Creates a bitmask with all bits from the least significant bit up to and
@@ -873,8 +885,7 @@ namespace dockalloc::solver
         /// @return A bitmask with bits [0, \p bit] set to \c 1 and bits [\p bit + 1, \c kBitsPerWord - 1] set to \c 0.
         static constexpr DOCK_ALLOC_FORCE_INLINE WordType LowBitsTo(const size_t bit) noexcept
         {
-            static constexpr auto all_ones = static_cast<WordType>(~WordType{0});
-            return (bit >= kBitsPerWord) ? all_ones : static_cast<WordType>(all_ones >> (kBitsPerWord - bit - 1));
+            return (bit >= kBitsPerWord) ? kAllOnes : static_cast<WordType>(kAllOnes >> (kBitsPerWord - bit - 1));
         }
 
         /// @brief Creates a bitmask with all bits in the closed interval [\p from, \p to] set to 1.

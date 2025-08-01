@@ -43,58 +43,62 @@ namespace dockalloc::solver
 
     TYPED_TEST(BitVectorTest, ConstructorClear)
     {
-        const size_t N = this->kBits * 2 + 3;
-        BitVector<TypeParam> bv(N);
-        EXPECT_EQ(bv.GetBitCount(), N);
-        for (size_t i = 0; i < N; ++i)
+        const size_t n = this->kBits * 2 + 3;
+        BitVector<TypeParam> bv(n);
+        EXPECT_EQ(bv.GetBitCount(), n);
+        for (size_t i = 0; i < n; ++i)
         {
             EXPECT_FALSE(bv.IsBitSet(i)) << "bit " << i << " should be clear";
             EXPECT_TRUE(bv.IsBitClear(i)) << "bit " << i << " should be clear";
         }
+
+        EXPECT_TRUE(bv.AreBitsClear(0, n));
     }
 
     TYPED_TEST(BitVectorTest, ConstructorAllSet)
     {
-        const size_t N = this->kBits + 5;
-        BitVector<TypeParam> bv(N, true);
-        EXPECT_EQ(bv.GetBitCount(), N);
-        for (size_t i = 0; i < N; ++i)
+        const size_t n = this->kBits + 5;
+        BitVector<TypeParam> bv(n, true);
+        EXPECT_EQ(bv.GetBitCount(), n);
+        for (size_t i = 0; i < n; ++i)
         {
             EXPECT_TRUE(bv.IsBitSet(i)) << "bit " << i << " should be set";
             EXPECT_FALSE(bv.IsBitClear(i)) << "bit " << i << " should be set";
         }
+
+        EXPECT_TRUE(bv.AreBitsSet(0, n));
     }
 
     TYPED_TEST(BitVectorTest, SetAndClearSingleBits)
     {
-        const size_t N = this->kBits + 1;
-        BitVector<TypeParam> bv(N);
+        const size_t n = this->kBits + 1;
+        BitVector<TypeParam> bv(n);
         bv.SetBit(0);
-        bv.SetBit(N - 1);
+        bv.SetBit(n - 1);
         EXPECT_TRUE(bv.GetBit(0));
-        EXPECT_TRUE(bv.GetBit(N-1));
+        EXPECT_TRUE(bv.GetBit(n-1));
         bv.ClearBit(0);
-        bv.ClearBit(N - 1);
+        bv.ClearBit(n - 1);
         EXPECT_FALSE(bv.GetBit(0));
-        EXPECT_FALSE(bv.GetBit(N-1));
+        EXPECT_FALSE(bv.GetBit(n-1));
     }
 
     TYPED_TEST(BitVectorTest, AreBitsSetAndClear)
     {
-        const size_t N = this->kBits * 3;
-        BitVector<TypeParam> bv(N);
-        EXPECT_TRUE(bv.AreBitsClear(0, N));
-        EXPECT_FALSE(bv.AreBitsSet(0, N));
+        const size_t n = this->kBits * 3;
+        BitVector<TypeParam> bv(n);
+        EXPECT_TRUE(bv.AreBitsClear(0, n));
+        EXPECT_FALSE(bv.AreBitsSet(0, n));
         bv.SetBits(this->kBits / 2, this->kBits + this->kBits / 2);
         EXPECT_TRUE(bv.AreBitsSet(this->kBits/2, this->kBits + this->kBits/2));
-        EXPECT_FALSE(bv.AreBitsSet(0, N));
+        EXPECT_FALSE(bv.AreBitsSet(0, n));
         EXPECT_FALSE(bv.AreBitsClear(this->kBits/2, this->kBits + this->kBits/2));
     }
 
     TYPED_TEST(BitVectorTest, RangeSetAndClear)
     {
-        const size_t N = this->kBits * 2;
-        BitVector<TypeParam> bv(N);
+        const size_t n = this->kBits * 2;
+        BitVector<TypeParam> bv(n);
         const size_t from = this->kBits - 3;
         const size_t to = this->kBits + 4;
         bv.SetBits(from, to);
@@ -113,8 +117,8 @@ namespace dockalloc::solver
 
     TYPED_TEST(BitVectorTest, ProxyReferenceAssignment)
     {
-        constexpr size_t N = 10;
-        BitVector<TypeParam> bv(N);
+        constexpr size_t n = 10;
+        BitVector<TypeParam> bv(n);
         bv[3] = true;
         EXPECT_TRUE(bv[3]);
         bv[3] = false;
@@ -126,13 +130,13 @@ namespace dockalloc::solver
 
     TYPED_TEST(BitVectorTest, FindClearRangeSimple)
     {
-        const size_t N = this->kBits + 5;
-        BitVector<TypeParam> bv(N, true);
+        const size_t n = this->kBits + 5;
+        BitVector<TypeParam> bv(n, true);
         bv.ClearBits(4, 4 + 3);
-        auto opt = bv.FindClearRange(0, N, 3);
+        auto opt = bv.FindClearRange(0, n, 3);
         ASSERT_TRUE(opt.has_value());
         EXPECT_EQ(opt.value(), 4u);
-        EXPECT_FALSE(bv.FindClearRange(0, N, N+1).has_value());
+        EXPECT_FALSE(bv.FindClearRange(0, n, n+1).has_value());
         auto zero = bv.FindClearRange(2, 5, 0);
         ASSERT_TRUE(zero.has_value());
         EXPECT_EQ(zero.value(), 2u);
@@ -163,11 +167,11 @@ namespace dockalloc::solver
 
     TYPED_TEST(BitVectorTest, ConstAndNonConstAccess)
     {
-        constexpr size_t N = 8;
-        BitVector<TypeParam> bv(N);
+        constexpr size_t n = 8;
+        BitVector<TypeParam> bv(n);
         bv.SetBits(2, 5);
         const BitVector<TypeParam>& cbv = bv;
-        for (size_t i = 0; i < N; ++i)
+        for (size_t i = 0; i < n; ++i)
         {
             EXPECT_EQ(static_cast<bool>(cbv[i]), bv[i]);
         }
@@ -177,14 +181,14 @@ namespace dockalloc::solver
     {
         {
             const auto K = static_cast<size_t>(this->kBits);
-            const size_t N = K + 7;
-            BitVector<TypeParam> a(N), b(N);
+            const size_t n = K + 7;
+            BitVector<TypeParam> a(n), b(n);
 
             const std::vector<size_t> positions = {
                 static_cast<size_t>(0),
                 static_cast<size_t>(3),
                 static_cast<size_t>(K - 1),
-                static_cast<size_t>(N - 1)
+                static_cast<size_t>(n - 1)
             };
             for (size_t p : positions)
             {
@@ -199,8 +203,8 @@ namespace dockalloc::solver
             EXPECT_FALSE(a1 == b1);
             EXPECT_TRUE(a1 != b1);
             const auto K = static_cast<size_t>(this->kBits);
-            const size_t N = K + 5;
-            BitVector<TypeParam> a2(N, true), b2(N, true);
+            const size_t n = K + 5;
+            BitVector<TypeParam> a2(n, true), b2(n, true);
 
             const auto flip = static_cast<size_t>(2 * sizeof(TypeParam));
             a2.ClearBit(flip);

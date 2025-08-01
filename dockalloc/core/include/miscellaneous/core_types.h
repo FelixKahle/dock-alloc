@@ -35,6 +35,10 @@ namespace dockalloc::core
     template <typename TimeType>
         requires std::unsigned_integral<TimeType>
     using TimeInterval = Interval<TimeType>;
+
+    template <typename PositionType>
+        requires std::unsigned_integral<PositionType>
+    using SegmentRange = Interval<PositionType>;
 }
 
 #endif

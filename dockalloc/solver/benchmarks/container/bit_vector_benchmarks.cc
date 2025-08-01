@@ -45,7 +45,7 @@ namespace dockalloc::solver
         }
     }
 
-    BENCHMARK(BM_SizeConstructor)->Arg(1024)->Arg(1024 * 1024);
+    BENCHMARK(BM_SizeConstructor)->Arg(1024)->Arg(1024 * 1024)->Arg(1024 * 1024 * 1024);
 
     static void BM_SizeConstructorAllSet(benchmark::State& st)
     {
@@ -57,29 +57,29 @@ namespace dockalloc::solver
         }
     }
 
-    BENCHMARK(BM_SizeConstructorAllSet)->Arg(1024)->Arg(1024 * 1024);
+    BENCHMARK(BM_SizeConstructorAllSet)->Arg(1024)->Arg(1024 * 1024)->Arg(1024 * 1024 * 1024);
 
     static void BM_GetBitCount(benchmark::State& st)
     {
-        BitVector<uint64_t> bv(1024 * 1024);
+        const BitVector<uint64_t> bv(st.range(0));
         for (auto _ : st)
         {
             benchmark::DoNotOptimize(bv.GetBitCount());
         }
     }
 
-    BENCHMARK(BM_GetBitCount);
+    BENCHMARK(BM_GetBitCount)->Arg(1024)->Arg(1024 * 1024)->Arg(1024 * 1024 * 1024);
 
     static void BM_GetWordCount(benchmark::State& st)
     {
-        BitVector<uint64_t> bv(1024 * 1024);
+        const BitVector<uint64_t> bv(st.range(0));
         for (auto _ : st)
         {
             benchmark::DoNotOptimize(bv.GetWordCount());
         }
     }
 
-    BENCHMARK(BM_GetWordCount);
+    BENCHMARK(BM_GetWordCount)->Arg(1024)->Arg(1024 * 1024)->Arg(1024 * 1024 * 1024);
 
     static void BM_ResizeUpDown(benchmark::State& st)
     {
@@ -96,29 +96,29 @@ namespace dockalloc::solver
 
     static void BM_IsBitSet(benchmark::State& st)
     {
-        BitVector<uint64_t> bv(1024 * 1024, true);
+        const BitVector<uint64_t> bv(st.range(0), true);
         for (auto _ : st)
         {
             benchmark::DoNotOptimize(bv.IsBitSet(0));
         }
     }
 
-    BENCHMARK(BM_IsBitSet);
+    BENCHMARK(BM_IsBitSet)->Arg(1024)->Arg(1024 * 1024)->Arg(1024 * 1024 * 1024);
 
     static void BM_GetBitOperator(benchmark::State& st)
     {
-        BitVector<uint64_t> bv(1024 * 1024, true);
+        BitVector<uint64_t> bv(st.range(0), true);
         for (auto _ : st)
         {
             benchmark::DoNotOptimize(bv[0]);
         }
     }
 
-    BENCHMARK(BM_GetBitOperator);
+    BENCHMARK(BM_GetBitOperator)->Arg(1024)->Arg(1024 * 1024)->Arg(1024 * 1024 * 1024);
 
     static void BM_SetBit(benchmark::State& st)
     {
-        BitVector<uint64_t> bv(1024 * 1024, false);
+        BitVector<uint64_t> bv(st.range(0), false);
         size_t idx = 0;
         for (auto _ : st)
         {
@@ -128,11 +128,11 @@ namespace dockalloc::solver
         }
     }
 
-    BENCHMARK(BM_SetBit);
+    BENCHMARK(BM_SetBit)->Arg(1024)->Arg(1024 * 1024)->Arg(1024 * 1024 * 1024);
 
     static void BM_ClearBit(benchmark::State& st)
     {
-        BitVector<uint64_t> bv(1024 * 1024, true);
+        BitVector<uint64_t> bv(st.range(0), true);
         size_t idx = 0;
         for (auto _ : st)
         {
@@ -142,11 +142,11 @@ namespace dockalloc::solver
         }
     }
 
-    BENCHMARK(BM_ClearBit);
+    BENCHMARK(BM_ClearBit)->Arg(1024)->Arg(1024 * 1024)->Arg(1024 * 1024 * 1024);
 
     static void BM_SetBits(benchmark::State& st)
     {
-        BitVector<uint64_t> bv(1024 * 1024, false);
+        BitVector<uint64_t> bv(st.range(0), false);
         for (auto _ : st)
         {
             bv.SetBits(0, bv.GetBitCount());
@@ -155,33 +155,33 @@ namespace dockalloc::solver
         }
     }
 
-    BENCHMARK(BM_SetBits);
+    BENCHMARK(BM_SetBits)->Arg(1024)->Arg(1024 * 1024)->Arg(1024 * 1024 * 1024);
 
     static void BM_AreBitsSet(benchmark::State& st)
     {
-        BitVector<uint64_t> bv(1024 * 1024, true);
+        const BitVector<uint64_t> bv(st.range(0), true);
         for (auto _ : st)
         {
             benchmark::DoNotOptimize(bv.AreBitsSet(0, bv.GetBitCount()));
         }
     }
 
-    BENCHMARK(BM_AreBitsSet);
+    BENCHMARK(BM_AreBitsSet)->Arg(1024)->Arg(1024 * 1024)->Arg(1024 * 1024 * 1024);
 
     static void BM_AreBitsClear(benchmark::State& st)
     {
-        BitVector<uint64_t> bv(1024 * 1024, false);
+        const BitVector<uint64_t> bv(st.range(0), false);
         for (auto _ : st)
         {
             benchmark::DoNotOptimize(bv.AreBitsClear(0, bv.GetBitCount()));
         }
     }
 
-    BENCHMARK(BM_AreBitsClear);
+    BENCHMARK(BM_AreBitsClear)->Arg(1024)->Arg(1024 * 1024)->Arg(1024 * 1024 * 1024);
 
     static void BM_ClearBits(benchmark::State& st)
     {
-        BitVector<uint64_t> bv(1024 * 1024, true);
+        BitVector<uint64_t> bv(st.range(0), true);
         for (auto _ : st)
         {
             bv.ClearBits(0, bv.GetBitCount());
@@ -194,18 +194,18 @@ namespace dockalloc::solver
 
     static void BM_FindClearRange(benchmark::State& st)
     {
-        const BitVector<uint64_t> bv(1024 * 1024, false);
+        const BitVector<uint64_t> bv(st.range(0), false);
         for (auto _ : st)
         {
             benchmark::DoNotOptimize(bv.FindClearRange(0, bv.GetBitCount(), 64));
         }
     }
 
-    BENCHMARK(BM_FindClearRange);
+    BENCHMARK(BM_FindClearRange)->Arg(1024)->Arg(1024 * 1024)->Arg(1024 * 1024 * 1024);
 
     static void BM_Equality(benchmark::State& st)
     {
-        BitVector<uint64_t> a(1024 * 1024, true), b(1024 * 1024, true);
+        const BitVector<uint64_t> a(st.range(0), true), b(st.range(0), true);
         for (auto _ : st)
         {
             benchmark::DoNotOptimize(a == b);
@@ -216,14 +216,14 @@ namespace dockalloc::solver
 
     static void BM_Inequality(benchmark::State& st)
     {
-        BitVector<uint64_t> a(1024 * 1024, true), b(1024 * 1024, false);
+        const BitVector<uint64_t> a(st.range(0), true), b(st.range(0), false);
         for (auto _ : st)
         {
             benchmark::DoNotOptimize(a != b);
         }
     }
 
-    BENCHMARK(BM_Inequality);
+    BENCHMARK(BM_Inequality)->Arg(1024)->Arg(1024 * 1024)->Arg(1024 * 1024 * 1024);
 }
 
 BENCHMARK_MAIN();
