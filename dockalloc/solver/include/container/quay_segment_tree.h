@@ -146,7 +146,7 @@ namespace dockalloc::solver
     /// @tparam PositionType The unsigned integral type for segment positions and lengths.
     template <typename PositionType>
         requires std::unsigned_integral<PositionType>
-    class SegmentTree
+    class QuaySegmentTree
     {
     public:
         static constexpr size_t kTreeSizeFactor = 4;
@@ -164,7 +164,7 @@ namespace dockalloc::solver
         /// @note The tree is initialized with all segments marked as free.
         ///
         /// @param size The total number of discrete segments the quay is divided into.
-        explicit SegmentTree(const PositionType size) noexcept
+        explicit QuaySegmentTree(const PositionType size) noexcept
             : size_{size}
         {
             if (size_ == 0)

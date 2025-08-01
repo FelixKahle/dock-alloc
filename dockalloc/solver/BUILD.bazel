@@ -128,3 +128,27 @@ cc_binary(
         "@google_benchmark//:benchmark",
     ],
 )
+
+cc_binary(
+    name = "quay_segment_tree_benchmarks",
+    srcs = [
+        "benchmarks/container/quay_segment_tree_benchmarks.cc",
+    ],
+    copts = select({
+        "//dockalloc:msvc_compiler": [
+            "/EHs-",
+            "/EHc-",
+            "/std:c++23",
+            "/O2",
+        ],
+        "//conditions:default": [
+            "-fno-exceptions",
+            "-std=c++23",
+            "-O3 -march=native",
+        ],
+    }),
+    deps = [
+        "//dockalloc/solver",
+        "@google_benchmark//:benchmark",
+    ],
+)

@@ -32,7 +32,7 @@ namespace dockalloc::solver
     protected:
         using Position = T;
         const Position kSize = 16;
-        SegmentTree<Position> tree{kSize};
+        QuaySegmentTree<Position> tree{kSize};
     };
 
     TYPED_TEST_SUITE(SegmentTreeTest, TestTypes);
