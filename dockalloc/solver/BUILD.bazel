@@ -1,0 +1,84 @@
+# Copyright (c) 2025 Felix Kahle.
+#
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject to
+# the following conditions:
+#
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+# LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+# WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+cc_library(
+    name = "solver",
+    hdrs = [
+        "include/container/berth_occupancy.h",
+        "include/container/bit_vector.h",
+        "include/container/interval_gap_tree.h",
+        "include/container/quay.h",
+        "include/miscellaneous/config.h",
+    ],
+    copts = select({
+        "//dockalloc:msvc_compiler": [
+            "/EHs-",
+            "/EHc-",
+            "/std:c++23",
+            "/O2",
+        ],
+        "//conditions:default": [
+            "-fno-exceptions",
+            "-std=c++23",
+            "-O3 -march=native",
+        ],
+    }),
+    include_prefix = "dockalloc/solver",
+    strip_include_prefix = "include",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//dockalloc/core",
+        "//third_party:xsimd",
+        "@abseil-cpp//absl/container:btree",
+        "@abseil-cpp//absl/container:inlined_vector",
+        "@abseil-cpp//absl/log:check",
+        "@abseil-cpp//absl/log:log",
+    ],
+)
+
+cc_test(
+    name = "solver_tests",
+    srcs = [
+        "tests/container/berth_occupancy_tests.cc",
+        "tests/container/bit_vector_tests.cc",
+        "tests/container/interval_gap_tree_tests.cc",
+        "tests/container/quay_tests.cc",
+    ],
+    copts = select({
+        "//dockalloc:msvc_compiler": [
+            "/EHs-",
+            "/EHc-",
+            "/std:c++23",
+            "/O2",
+        ],
+        "//conditions:default": [
+            "-fno-exceptions",
+            "-std=c++23",
+            "-O3 -march=native",
+        ],
+    }),
+    deps = [
+        "//dockalloc/solver",
+        "@abseil-cpp//absl/hash:hash",
+        "@abseil-cpp//absl/strings:str_format",
+        "@googletest//:gtest_main",
+    ],
+)
