@@ -258,34 +258,37 @@ where
     debug_assert!(left.length_of_maximum_free_gap <= left.segment_length);
     debug_assert!(right.length_of_maximum_free_gap <= right.segment_length);
 
-    let mut out = Node::<T>::default();
+    let segment_length = left.segment_length + right.segment_length;
 
-    out.segment_length = left.segment_length + right.segment_length;
-
-    out.length_of_longest_free_prefix = if left.length_of_longest_free_prefix == left.segment_length
+    let length_of_longest_free_prefix = if left.length_of_longest_free_prefix == left.segment_length
     {
         left.segment_length + right.length_of_longest_free_prefix
     } else {
         left.length_of_longest_free_prefix
     };
 
-    out.length_of_longest_free_suffix =
-        if right.length_of_longest_free_suffix == right.segment_length {
-            right.segment_length + left.length_of_longest_free_suffix
-        } else {
-            right.length_of_longest_free_suffix
-        };
+    let length_of_longest_free_suffix = if right.length_of_longest_free_suffix == right.segment_length
+    {
+        right.segment_length + left.length_of_longest_free_suffix
+    } else {
+        right.length_of_longest_free_suffix
+    };
 
     let cross = left.length_of_longest_free_suffix + right.length_of_longest_free_prefix;
-    out.length_of_maximum_free_gap = max(
+    let length_of_maximum_free_gap = max(
         left.length_of_maximum_free_gap,
         max(right.length_of_maximum_free_gap, cross),
     );
 
-    debug_assert!(out.length_of_maximum_free_gap <= out.segment_length);
+    debug_assert!(length_of_maximum_free_gap <= segment_length);
 
-    out.lazy_propagation_state = LazyState::None;
-    out
+    Node::new(
+        length_of_longest_free_prefix,
+        length_of_longest_free_suffix,
+        length_of_maximum_free_gap,
+        segment_length,
+        LazyState::None,
+    )
 }
 
 impl<T> IntervalGapTree<T>
@@ -335,8 +338,7 @@ where
         let user_leaves_end = leaf_start + total_segment_count;
         let padded_leaves_end = 2 * leaf_node_count;
 
-        for i in leaf_start..user_leaves_end {
-            let node = &mut nodes[i];
+        for node in nodes.iter_mut().take(user_leaves_end).skip(leaf_start) {
             node.segment_length = one;
             if initially_free {
                 node.length_of_longest_free_prefix = one;
@@ -350,8 +352,7 @@ where
             node.lazy_propagation_state = LazyState::None;
         }
 
-        for i in user_leaves_end..padded_leaves_end {
-            let node = &mut nodes[i];
+        for node in nodes.iter_mut().take(padded_leaves_end).skip(user_leaves_end) {
             node.segment_length = one;
             node.length_of_longest_free_prefix = zero;
             node.length_of_longest_free_suffix = zero;
