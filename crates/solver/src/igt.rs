@@ -683,22 +683,26 @@ where
 
         self.push_boundary_paths(start, end);
 
-        let mut left_acc = Node::<T>::default();
-        let mut right_acc = Node::<T>::default();
-
+        let mut left_acc: Option<Node<T>> = None;
+        let mut right_acc: Option<Node<T>> = None;
         while start < end {
             if (start & 1) != 0 {
-                left_acc = merge(&left_acc, &self.nodes[start]);
+                left_acc = Some(if let Some(a) = left_acc { merge(&a, &self.nodes[start]) } else { self.nodes[start] });
                 start += 1;
             }
             if (end & 1) != 0 {
                 end -= 1;
-                right_acc = merge(&self.nodes[end], &right_acc);
+                right_acc = Some(if let Some(b) = right_acc { merge(&self.nodes[end], &b) } else { self.nodes[end] });
             }
             start >>= 1;
             end >>= 1;
         }
-        merge(&left_acc, &right_acc)
+        match (left_acc, right_acc) {
+            (Some(a), Some(b)) => merge(&a, &b),
+            (Some(a), None) => a,
+            (None, Some(b)) => b,
+            (None, None) => Node::default(),
+        }
     }
 
     /// Traverses from the root down to the range boundaries, pushing any lazy updates.
