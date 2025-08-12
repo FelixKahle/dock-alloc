@@ -53,6 +53,9 @@ impl std::fmt::Display for LazyState {
 ///
 /// Each node stores aggregate information about the range of segments it represents,
 /// allowing for efficient queries and updates.
+///
+/// # Type Parameters
+/// * `T` - The numeric type used for segment lengths and counts.s
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Node<T>
 where
@@ -267,12 +270,12 @@ where
         left.length_of_longest_free_prefix
     };
 
-    let length_of_longest_free_suffix = if right.length_of_longest_free_suffix == right.segment_length
-    {
-        right.segment_length + left.length_of_longest_free_suffix
-    } else {
-        right.length_of_longest_free_suffix
-    };
+    let length_of_longest_free_suffix =
+        if right.length_of_longest_free_suffix == right.segment_length {
+            right.segment_length + left.length_of_longest_free_suffix
+        } else {
+            right.length_of_longest_free_suffix
+        };
 
     let cross = left.length_of_longest_free_suffix + right.length_of_longest_free_prefix;
     let length_of_maximum_free_gap = max(
@@ -352,7 +355,11 @@ where
             node.lazy_propagation_state = LazyState::None;
         }
 
-        for node in nodes.iter_mut().take(padded_leaves_end).skip(user_leaves_end) {
+        for node in nodes
+            .iter_mut()
+            .take(padded_leaves_end)
+            .skip(user_leaves_end)
+        {
             node.segment_length = one;
             node.length_of_longest_free_prefix = zero;
             node.length_of_longest_free_suffix = zero;
@@ -558,8 +565,7 @@ where
     /// * `idx` - The index of the node to update.
     /// * `state` - The `LazyState` to apply, which can be `Free`, `Occupied`, or `None`.
     fn apply(&mut self, idx: usize, state: LazyState) {
-        if self.nodes[idx].lazy_propagation_state == state
-        {
+        if self.nodes[idx].lazy_propagation_state == state {
             return;
         }
         let node = &mut self.nodes[idx];
@@ -629,13 +635,11 @@ where
     /// * `range` - A `RangeBounds<usize>` specifying the segments to update.
     /// * `state` - The `LazyState` to apply, which can be `Free`, `Occupied`, or `None`.
     fn range_update<R: RangeBounds<usize>>(&mut self, range: R, state: LazyState) {
-        if self.total_segment_count == 0
-        {
+        if self.total_segment_count == 0 {
             return;
         }
         let (mut start, mut end) = normalize_bounds(self.total_segment_count, range);
-        if start >= end
-        {
+        if start >= end {
             return;
         }
 
@@ -674,9 +678,13 @@ where
     /// # Returns
     /// A `Node<T>` containing the aggregate values for the specified range.
     fn range_query<R: RangeBounds<usize>>(&mut self, range: R) -> Node<T> {
-        if self.total_segment_count == 0 { return Node::<T>::default(); }
+        if self.total_segment_count == 0 {
+            return Node::<T>::default();
+        }
         let (mut start, mut end) = normalize_bounds(self.total_segment_count, range);
-        if start >= end { return Node::<T>::default(); }
+        if start >= end {
+            return Node::<T>::default();
+        }
 
         start += self.leaf_node_count;
         end += self.leaf_node_count;
@@ -687,12 +695,20 @@ where
         let mut right_acc: Option<Node<T>> = None;
         while start < end {
             if (start & 1) != 0 {
-                left_acc = Some(if let Some(a) = left_acc { merge(&a, &self.nodes[start]) } else { self.nodes[start] });
+                left_acc = Some(if let Some(a) = left_acc {
+                    merge(&a, &self.nodes[start])
+                } else {
+                    self.nodes[start]
+                });
                 start += 1;
             }
             if (end & 1) != 0 {
                 end -= 1;
-                right_acc = Some(if let Some(b) = right_acc { merge(&self.nodes[end], &b) } else { self.nodes[end] });
+                right_acc = Some(if let Some(b) = right_acc {
+                    merge(&self.nodes[end], &b)
+                } else {
+                    self.nodes[end]
+                });
             }
             start >>= 1;
             end >>= 1;
@@ -750,9 +766,211 @@ where
     }
 }
 
+/// An iterator that finds all free intervals of at least a certain length
+/// within a given range of the `IntervalGapTree`.
+///
+/// This iterator is created by the `IntervalGapTree::iter_free_intervals` method.
+/// It efficiently skips over occupied segments and combines contiguous free
+/// segments into maximal runs.
+///
+/// # Lifetime
+/// * `'a`: The lifetime of the `IntervalGapTree` being iterated over.
+pub struct FreeIntervalIter<'a, T>
+where
+    T: Unsigned + Copy + Zero + One + Ord + Add<Output=T> + Bounded + ToPrimitive,
+{
+    /// A mutable reference to the tree being searched.
+    tree: &'a mut IntervalGapTree<T>,
+    /// The minimum length of a free interval to be returned by the iterator.
+    required_len: usize,
+    /// The start of the overall range this iterator is allowed to search within.
+    search_start: usize,
+    /// The end of the overall range this iterator is allowed to search within.
+    search_end: usize,
+    /// The current position in the search, used to resume finding the next interval.
+    cursor: usize,
+}
+
+impl<T> IntervalGapTree<T>
+where
+    T: Unsigned + Copy + Zero + One + Ord + Add<Output=T> + Bounded + ToPrimitive,
+{
+    /// Returns an iterator over all free intervals of at least `required_len`
+    /// that are contained within the given `range`.
+    ///
+    /// The iterator yields tuples of `(start, end)` for each qualifying free interval.
+    ///
+    /// # Arguments
+    /// * `required_len` - The minimum size of a free interval to be reported.
+    /// * `range` - The `RangeBounds` to search within.
+    ///
+    /// # Returns
+    /// A `FreeIntervalIter` instance.
+    ///
+    /// # Example
+    /// ```
+    /// # use crate::solver::igt::IntervalGapTree;
+    /// let mut tree = IntervalGapTree::<u32>::new(20, false);
+    /// tree.free(5..10);  // A free block of length 5
+    /// tree.free(12..18); // A free block of length 6
+    ///
+    /// // Find all free blocks of at least length 1
+    /// let intervals: Vec<_> = tree.iter_free_intervals(1, ..).collect();
+    /// assert_eq!(intervals, vec![5..10, 12..18]);
+    ///
+    /// // Find only blocks of at least length 6
+    /// let intervals_len_6: Vec<_> = tree.iter_free_intervals(6, ..).collect();
+    /// assert_eq!(intervals_len_6, vec![12..18]);
+    /// ```
+    pub fn iter_free_intervals<R>(
+        &'_ mut self,
+        required_len: usize,
+        range: R,
+    ) -> FreeIntervalIter<'_, T>
+    where
+        R: RangeBounds<usize>,
+    {
+        let (start_bound, end_bound) = normalize_bounds(self.total_segment_count, range);
+        FreeIntervalIter {
+            tree: self,
+            required_len,
+            search_start: start_bound,
+            search_end: end_bound,
+            cursor: start_bound,
+        }
+    }
+}
+
+impl<'a, T> FreeIntervalIter<'a, T>
+where
+    T: Unsigned + Copy + Zero + One + Ord + Add<Output=T> + Bounded + ToPrimitive,
+{
+    /// Additional capacity for the stack used in the depth-first search.
+    ///
+    /// This is a constant that defines how much extra space to allocate
+    /// for the stack used in the `find_first_candidate_start` method.
+    const STACK_ADDITIONAL_CAPACITY: usize = 2;
+
+    /// Performs a depth-first search on the segment tree to find the first
+    /// free leaf at or after the `from` index.
+    ///
+    /// This method is the first step in finding a new free interval. It efficiently
+    /// prunes the search space by skipping branches of the tree that are known to
+    /// be fully occupied.
+    ///
+    /// # Arguments
+    /// * `from` - The segment index from which to start the search.
+    /// * `to` - The segment index at which to end the search (exclusive).
+    ///
+    /// # Returns
+    /// `Some(index)` of the first free segment if one is found, otherwise `None`.
+    fn find_first_candidate_start(&mut self, from: usize, to: usize) -> Option<usize> {
+        if from >= to || self.tree.total_segment_count == 0 {
+            return None;
+        }
+
+        let leaf_node_count = self.tree.leaf_node_count;
+        let mut stack: Vec<(usize, usize, usize)> =
+            Vec::with_capacity(self.tree.height() + Self::STACK_ADDITIONAL_CAPACITY);
+
+        stack.push((1, 0, leaf_node_count));
+
+        while let Some((node_index, range_start, range_end)) = stack.pop() {
+            if range_end <= from || range_start >= to {
+                continue;
+            }
+
+            self.tree.push(node_index);
+            if self.tree.nodes[node_index].length_of_maximum_free_gap == T::zero() {
+                continue;
+            }
+
+            if range_end - range_start == 1 {
+                if range_start < self.tree.total_segment_count
+                    && self.tree.nodes[node_index].length_of_maximum_free_gap == T::one()
+                {
+                    return Some(range_start.max(from));
+                }
+                continue;
+            }
+
+            let mid_point = (range_start + range_end) >> 1;
+            let left_child_index = node_index << 1;
+            let right_child_index = left_child_index | 1;
+
+            stack.push((right_child_index, mid_point, range_end));
+            stack.push((left_child_index, range_start, mid_point));
+        }
+
+        None
+    }
+
+    /// Extends a search from a known free starting point to find the end
+    /// of the contiguous free block.
+    ///
+    /// This method leverages a single `range_query` to efficiently determine
+    /// the length of the free run starting at `start`.
+    ///
+    /// # Arguments
+    /// * `start` - The index of a segment known to be free.
+    /// * `upper_bound` - The exclusive upper limit for the search.
+    ///
+    /// # Returns
+    /// The index of the first occupied segment after the run, which is the
+    /// exclusive end of the free interval `[start, end)`.
+    fn extend_run_right(&mut self, start: usize, upper_bound: usize) -> usize {
+        if start >= upper_bound {
+            return start;
+        }
+
+        let hard_upper_bound = upper_bound.min(self.tree.total_segment_count);
+        let query_node = self.tree.range_query(start..hard_upper_bound);
+
+        let free_run_length = query_node
+            .length_of_longest_free_prefix
+            .to_usize()
+            .unwrap_or(0);
+
+        start + free_run_length
+    }
+}
+
+impl<'a, T> Iterator for FreeIntervalIter<'a, T>
+where
+    T: Unsigned + Copy + Zero + One + Ord + Add<Output=T> + Bounded + ToPrimitive,
+{
+    type Item = std::ops::Range<usize>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.cursor < self.search_end {
+            let start_of_run = match self.find_first_candidate_start(self.cursor, self.search_end) {
+                Some(index) => index,
+                None => {
+                    self.cursor = self.search_end;
+                    return None;
+                }
+            };
+
+            let end_of_run = self.extend_run_right(start_of_run, self.search_end);
+            self.cursor = end_of_run;
+
+            if end_of_run > start_of_run && (end_of_run - start_of_run) >= self.required_len {
+                let final_start = start_of_run.max(self.search_start);
+                let final_end = end_of_run.min(self.search_end);
+
+                if final_end > final_start && (final_end - final_start) >= self.required_len {
+                    return Some(final_start..final_end);
+                }
+            }
+        }
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{merge, IntervalGapTree, LazyState, Node};
+    use std::ops::RangeBounds;
 
     #[test]
     fn test_private_merge_logic_directly() {
@@ -952,13 +1170,22 @@ mod tests {
         assert_eq!(tree.nodes[3].length_of_maximum_free_gap, 0);
 
         tree.push(1);
-        assert!(matches!(tree.nodes[1].lazy_propagation_state, LazyState::None));
+        assert!(matches!(
+            tree.nodes[1].lazy_propagation_state,
+            LazyState::None
+        ));
         assert_eq!(tree.nodes[2].segment_length, 2);
         assert_eq!(tree.nodes[2].length_of_maximum_free_gap, 2);
-        assert!(matches!(tree.nodes[2].lazy_propagation_state, LazyState::Free));
+        assert!(matches!(
+            tree.nodes[2].lazy_propagation_state,
+            LazyState::Free
+        ));
         assert_eq!(tree.nodes[3].segment_length, 2);
         assert_eq!(tree.nodes[3].length_of_maximum_free_gap, 2);
-        assert!(matches!(tree.nodes[3].lazy_propagation_state, LazyState::Free));
+        assert!(matches!(
+            tree.nodes[3].lazy_propagation_state,
+            LazyState::Free
+        ));
 
         let leaf_start = tree.leaf_count();
         assert_eq!(tree.nodes[leaf_start].length_of_maximum_free_gap, 0);
@@ -993,7 +1220,10 @@ mod tests {
         tree.apply(left_leaf, LazyState::Free);
         tree.apply(right_leaf, LazyState::Occupied);
 
-        assert!(matches!(tree.nodes[2].lazy_propagation_state, LazyState::None));
+        assert!(matches!(
+            tree.nodes[2].lazy_propagation_state,
+            LazyState::None
+        ));
         tree.pull(2);
 
         let n2 = tree.nodes[2];
@@ -1103,15 +1333,7 @@ mod tests {
         tree.range_update(12.., LazyState::Free);
         apply_naive(&mut naive, 12, 16, true);
 
-        let ranges = [
-            (0, 16),
-            (0, 8),
-            (8, 16),
-            (2, 6),
-            (4, 5),
-            (12, 16),
-            (3, 13),
-        ];
+        let ranges = [(0, 16), (0, 8), (8, 16), (2, 6), (4, 5), (12, 16), (3, 13)];
 
         for (s, e) in ranges {
             let q = tree.range_query(s..e);
@@ -1274,5 +1496,146 @@ mod tests {
         t.occupy(..);
         assert!(t.check_occupied(..));
         assert!(!t.check_free(..));
+    }
+
+    fn collect_intervals(
+        t: &mut IntervalGapTree<u32>,
+        required_len: usize,
+        range: impl RangeBounds<usize>,
+    ) -> Vec<std::ops::Range<usize>> {
+        t.iter_free_intervals(required_len, range).collect()
+    }
+
+    fn mk_tree_n_occupied(n: usize) -> IntervalGapTree<u32> {
+        IntervalGapTree::new(n, false)
+    }
+
+    fn naive_intervals(
+        v: &[bool],
+        required_len: usize,
+        range: impl RangeBounds<usize>,
+    ) -> Vec<std::ops::Range<usize>> {
+        let (s, e) = super::normalize_bounds(v.len(), range);
+        if s >= e {
+            return vec![];
+        }
+        let mut out = Vec::new();
+        let mut i = s;
+        while i < e {
+            while i < e && !v[i] {
+                i += 1;
+            }
+            if i >= e {
+                break;
+            }
+            let mut j = i;
+            while j < e && v[j] {
+                j += 1;
+            }
+            if j - i >= required_len {
+                out.push(i..j);
+            }
+            i = j;
+        }
+        out
+    }
+
+    #[test]
+    fn iterator_on_fully_free_tree() {
+        let n = 16usize;
+        let mut t: IntervalGapTree<u32> = IntervalGapTree::new(n, true);
+
+        assert_eq!(collect_intervals(&mut t, 1, ..), vec![0..n]);
+        assert_eq!(collect_intervals(&mut t, n, ..), vec![0..n]);
+        assert!(collect_intervals(&mut t, n + 1, ..).is_empty());
+    }
+
+    #[test]
+    fn iterator_finds_expected_runs_basic() {
+        let mut t = mk_tree_n_occupied(40);
+        t.free(5..10);
+        t.free(12..20);
+        t.free(26..30);
+
+        assert_eq!(
+            collect_intervals(&mut t, 1, ..),
+            vec![5..10, 12..20, 26..30]
+        );
+        assert_eq!(
+            collect_intervals(&mut t, 4, ..),
+            vec![5..10, 12..20, 26..30]
+        );
+        assert_eq!(collect_intervals(&mut t, 5, ..), vec![5..10, 12..20]);
+        assert_eq!(collect_intervals(&mut t, 8, ..), vec![12..20]);
+    }
+
+    #[test]
+    fn iterator_respects_bounded_window() {
+        let mut t = mk_tree_n_occupied(40);
+        t.free(5..10);
+        t.free(12..20);
+        t.free(26..30);
+
+        assert_eq!(collect_intervals(&mut t, 3, 6..28), vec![6..10, 12..20]);
+        assert_eq!(collect_intervals(&mut t, 5, 6..28), vec![12..20]);
+        assert_eq!(collect_intervals(&mut t, 2, 13..18), vec![13..18]);
+    }
+
+    #[test]
+    fn iterator_handles_non_power_of_two_and_padding() {
+        let mut t: IntervalGapTree<u32> = IntervalGapTree::new(5, true);
+        t.occupy(..1);
+        t.occupy(4..);
+
+        assert_eq!(collect_intervals(&mut t, 1, ..), vec![1..4]);
+        assert_eq!(collect_intervals(&mut t, 3, ..), vec![1..4]);
+        assert!(collect_intervals(&mut t, 4, ..).is_empty());
+        assert_eq!(collect_intervals(&mut t, 1, 2..5), vec![2..4]);
+        assert_eq!(collect_intervals(&mut t, 1, 0..2), vec![1..2]);
+    }
+
+    #[test]
+    fn iterator_works_with_lazy_updates_and_pruning() {
+        let mut t: IntervalGapTree<u32> = IntervalGapTree::new(16, false);
+        t.free(..);
+        t.occupy(3..5);
+
+        assert_eq!(collect_intervals(&mut t, 1, ..), vec![0..3, 5..16]);
+        assert!(collect_intervals(&mut t, 12, ..).is_empty());
+        assert_eq!(collect_intervals(&mut t, 10, ..), vec![5..16]);
+    }
+
+
+    #[test]
+    fn iterator_matches_naive_reference_in_various_scenarios() {
+        let n = 64usize;
+        let mut t: IntervalGapTree<u32> = IntervalGapTree::new(n, false);
+        let mut naive = vec![false; n];
+
+        t.free(5..15);
+        apply_naive(&mut naive, 5, 15, true);
+        t.free(20..27);
+        apply_naive(&mut naive, 20, 27, true);
+        t.occupy(22..=23);
+        apply_naive(&mut naive, 22, 24, false);
+        t.free(40..);
+        apply_naive(&mut naive, 40, n, true);
+        t.occupy(50..=55);
+        apply_naive(&mut naive, 50, 56, false);
+        t.free(..3);
+        apply_naive(&mut naive, 0, 3, true);
+        t.occupy(0..1);
+        apply_naive(&mut naive, 0, 1, false);
+
+        let windows: &[&(usize, usize)] = &[&(0, n), &(0, 30), &(10, 30), &(21, 60), &(45, 64)];
+        let ks = [1usize, 3, 6, 10];
+
+        for &(ws, we) in windows {
+            for &k in &ks {
+                let got: Vec<std::ops::Range<usize>> = collect_intervals(&mut t, k, ws..we);
+                let want: Vec<std::ops::Range<usize>> = naive_intervals(&naive, k, ws..we);
+                assert_eq!(got, want, "mismatch for window [{ws},{we}) and k={k}");
+            }
+        }
     }
 }
