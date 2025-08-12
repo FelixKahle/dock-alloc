@@ -202,6 +202,280 @@ where
     }
 }
 
+impl<T> PartialEq for IntervalGapTree<T>
+where
+    T: Unsigned + Copy + Zero + One + Ord + Add<Output=T> + Bounded + ToPrimitive,
+{
+    fn eq(&self, other: &Self) -> bool {
+        if self.total_segment_count != other.total_segment_count {
+            return false;
+        }
+        if self.leaf_node_count != other.leaf_node_count {
+            return false;
+        }
+        if self.total_segment_count == 0 {
+            return true;
+        }
+
+        let mut comparison_stack: Vec<(
+            usize,
+            usize,
+            usize,
+            usize,
+            Option<LazyState>,
+            Option<LazyState>,
+        )> = Vec::with_capacity(self.segment_tree_height + Self::STACK_ADDITIONAL_CAPACITY);
+
+        comparison_stack.push((1, 1, 0, self.leaf_node_count, None, None));
+
+        while let Some((
+                           node_index_self,
+                           node_index_other,
+                           range_start,
+                           range_end,
+                           inherited_lazy_state_self,
+                           inherited_lazy_state_other,
+                       )) = comparison_stack.pop()
+        {
+            if range_start >= self.total_segment_count {
+                continue;
+            }
+
+            if range_end > self.total_segment_count && (range_end - range_start) > 1 {
+                let mid_point = (range_start + range_end) >> 1;
+                let effective_lazy_state_self = inherited_lazy_state_self
+                    .unwrap_or(self.nodes[node_index_self].lazy_propagation_state);
+                let effective_lazy_state_other = inherited_lazy_state_other
+                    .unwrap_or(other.nodes[node_index_other].lazy_propagation_state);
+                let child_inherited_state_self =
+                    if !matches!(effective_lazy_state_self, LazyState::None) {
+                        Some(effective_lazy_state_self)
+                    } else {
+                        None
+                    };
+                let child_inherited_state_other =
+                    if !matches!(effective_lazy_state_other, LazyState::None) {
+                        Some(effective_lazy_state_other)
+                    } else {
+                        None
+                    };
+
+                let left_child_index_self = node_index_self << 1;
+                let right_child_index_self = left_child_index_self | 1;
+                let left_child_index_other = node_index_other << 1;
+                let right_child_index_other = left_child_index_other | 1;
+
+                comparison_stack.push((
+                    right_child_index_self,
+                    right_child_index_other,
+                    mid_point,
+                    range_end,
+                    child_inherited_state_self,
+                    child_inherited_state_other,
+                ));
+                comparison_stack.push((
+                    left_child_index_self,
+                    left_child_index_other,
+                    range_start,
+                    mid_point,
+                    child_inherited_state_self,
+                    child_inherited_state_other,
+                ));
+                continue;
+            }
+
+            let clipped_range_end = range_end.min(self.total_segment_count);
+            if clipped_range_end - range_start == 1 {
+                let effective_lazy_state_self = inherited_lazy_state_self
+                    .unwrap_or(self.nodes[node_index_self].lazy_propagation_state);
+                let effective_lazy_state_other = inherited_lazy_state_other
+                    .unwrap_or(other.nodes[node_index_other].lazy_propagation_state);
+                let is_leaf_in_self_free = match effective_lazy_state_self {
+                    LazyState::Free => true,
+                    LazyState::Occupied => false,
+                    LazyState::None => {
+                        self.nodes[node_index_self].length_of_maximum_free_gap == T::one()
+                    }
+                };
+                let is_leaf_in_other_free = match effective_lazy_state_other {
+                    LazyState::Free => true,
+                    LazyState::Occupied => false,
+                    LazyState::None => {
+                        other.nodes[node_index_other].length_of_maximum_free_gap == T::one()
+                    }
+                };
+
+                if is_leaf_in_self_free != is_leaf_in_other_free {
+                    return false;
+                }
+                continue;
+            }
+
+            let effective_lazy_state_self = inherited_lazy_state_self
+                .unwrap_or(self.nodes[node_index_self].lazy_propagation_state);
+            let effective_lazy_state_other = inherited_lazy_state_other
+                .unwrap_or(other.nodes[node_index_other].lazy_propagation_state);
+
+            let is_uniform_free =
+                |node: &Node<T>| node.length_of_maximum_free_gap == node.segment_length;
+            let is_uniform_occupied = |node: &Node<T>| node.length_of_maximum_free_gap == T::zero();
+
+            match (effective_lazy_state_self, effective_lazy_state_other) {
+                (LazyState::Free, LazyState::Free) | (LazyState::Occupied, LazyState::Occupied) => {
+                    continue;
+                }
+                (LazyState::Free, LazyState::Occupied) | (LazyState::Occupied, LazyState::Free) => {
+                    return false;
+                }
+                (LazyState::Free, LazyState::None) => {
+                    if !is_uniform_free(&other.nodes[node_index_other]) {
+                        let mid_point = (range_start + range_end) >> 1;
+                        let left_child_index_self = node_index_self << 1;
+                        let right_child_index_self = left_child_index_self | 1;
+                        let left_child_index_other = node_index_other << 1;
+                        let right_child_index_other = left_child_index_other | 1;
+                        comparison_stack.push((
+                            right_child_index_self,
+                            right_child_index_other,
+                            mid_point,
+                            range_end,
+                            Some(LazyState::Free),
+                            None,
+                        ));
+                        comparison_stack.push((
+                            left_child_index_self,
+                            left_child_index_other,
+                            range_start,
+                            mid_point,
+                            Some(LazyState::Free),
+                            None,
+                        ));
+                    }
+                }
+                (LazyState::None, LazyState::Free) => {
+                    if !is_uniform_free(&self.nodes[node_index_self]) {
+                        let mid_point = (range_start + range_end) >> 1;
+                        let left_child_index_self = node_index_self << 1;
+                        let right_child_index_self = left_child_index_self | 1;
+                        let left_child_index_other = node_index_other << 1;
+                        let right_child_index_other = left_child_index_other | 1;
+                        comparison_stack.push((
+                            right_child_index_self,
+                            right_child_index_other,
+                            mid_point,
+                            range_end,
+                            None,
+                            Some(LazyState::Free),
+                        ));
+                        comparison_stack.push((
+                            left_child_index_self,
+                            left_child_index_other,
+                            range_start,
+                            mid_point,
+                            None,
+                            Some(LazyState::Free),
+                        ));
+                    }
+                }
+                (LazyState::Occupied, LazyState::None) => {
+                    if !is_uniform_occupied(&other.nodes[node_index_other]) {
+                        let mid_point = (range_start + range_end) >> 1;
+                        let left_child_index_self = node_index_self << 1;
+                        let right_child_index_self = left_child_index_self | 1;
+                        let left_child_index_other = node_index_other << 1;
+                        let right_child_index_other = left_child_index_other | 1;
+                        comparison_stack.push((
+                            right_child_index_self,
+                            right_child_index_other,
+                            mid_point,
+                            range_end,
+                            Some(LazyState::Occupied),
+                            None,
+                        ));
+                        comparison_stack.push((
+                            left_child_index_self,
+                            left_child_index_other,
+                            range_start,
+                            mid_point,
+                            Some(LazyState::Occupied),
+                            None,
+                        ));
+                    }
+                }
+                (LazyState::None, LazyState::Occupied) => {
+                    if !is_uniform_occupied(&self.nodes[node_index_self]) {
+                        let mid_point = (range_start + range_end) >> 1;
+                        let left_child_index_self = node_index_self << 1;
+                        let right_child_index_self = left_child_index_self | 1;
+                        let left_child_index_other = node_index_other << 1;
+                        let right_child_index_other = left_child_index_other | 1;
+                        comparison_stack.push((
+                            right_child_index_self,
+                            right_child_index_other,
+                            mid_point,
+                            range_end,
+                            None,
+                            Some(LazyState::Occupied),
+                        ));
+                        comparison_stack.push((
+                            left_child_index_self,
+                            left_child_index_other,
+                            range_start,
+                            mid_point,
+                            None,
+                            Some(LazyState::Occupied),
+                        ));
+                    }
+                }
+                (LazyState::None, LazyState::None) => {
+                    let node_self = &self.nodes[node_index_self];
+                    let node_other = &other.nodes[node_index_other];
+
+                    if node_self.length_of_longest_free_prefix
+                        != node_other.length_of_longest_free_prefix
+                        || node_self.length_of_longest_free_suffix
+                        != node_other.length_of_longest_free_suffix
+                        || node_self.length_of_maximum_free_gap
+                        != node_other.length_of_maximum_free_gap
+                        || node_self.segment_length != node_other.segment_length
+                    {
+                        return false;
+                    }
+
+                    let mid_point = (range_start + range_end) >> 1;
+                    let left_child_index_self = node_index_self << 1;
+                    let right_child_index_self = left_child_index_self | 1;
+                    let left_child_index_other = node_index_other << 1;
+                    let right_child_index_other = left_child_index_other | 1;
+                    comparison_stack.push((
+                        right_child_index_self,
+                        right_child_index_other,
+                        mid_point,
+                        range_end,
+                        None,
+                        None,
+                    ));
+                    comparison_stack.push((
+                        left_child_index_self,
+                        left_child_index_other,
+                        range_start,
+                        mid_point,
+                        None,
+                        None,
+                    ));
+                }
+            }
+        }
+
+        true
+    }
+}
+
+impl<T> Eq for IntervalGapTree<T>
+where
+    T: Unsigned + Copy + Zero + One + Ord + Add<Output=T> + Bounded + ToPrimitive,
+{}
+
 /// Computes the integer bit width, equivalent to `floor(log2(x)) + 1`.
 ///
 /// This function returns the number of bits required to represent a
@@ -298,6 +572,12 @@ impl<T> IntervalGapTree<T>
 where
     T: Unsigned + Copy + Zero + One + Ord + Add<Output=T> + Bounded + ToPrimitive,
 {
+    /// Additional capacity for the stack used in the depth-first search.
+    ///
+    /// This is a constant that defines how much extra space to allocate
+    /// for the stack used in the `find_first_candidate_start` method.
+    const STACK_ADDITIONAL_CAPACITY: usize = 2;
+
     /// Creates a new `IntervalGapTree` with a specified number of segments.
     ///
     /// # Arguments
@@ -779,16 +1059,12 @@ pub struct FreeIntervalIter<'a, T>
 where
     T: Unsigned + Copy + Zero + One + Ord + Add<Output=T> + Bounded + ToPrimitive,
 {
-    /// A mutable reference to the tree being searched.
     tree: &'a mut IntervalGapTree<T>,
-    /// The minimum length of a free interval to be returned by the iterator.
     required_len: usize,
-    /// The start of the overall range this iterator is allowed to search within.
     search_start: usize,
-    /// The end of the overall range this iterator is allowed to search within.
     search_end: usize,
-    /// The current position in the search, used to resume finding the next interval.
     cursor: usize,
+    stack: Vec<(usize, usize, usize)>,
 }
 
 impl<T> IntervalGapTree<T>
@@ -831,12 +1107,15 @@ where
         R: RangeBounds<usize>,
     {
         let (start_bound, end_bound) = normalize_bounds(self.total_segment_count, range);
+        let height = self.height();
+
         FreeIntervalIter {
             tree: self,
             required_len,
             search_start: start_bound,
             search_end: end_bound,
             cursor: start_bound,
+            stack: Vec::with_capacity(height + Self::STACK_ADDITIONAL_CAPACITY),
         }
     }
 }
@@ -845,12 +1124,6 @@ impl<'a, T> FreeIntervalIter<'a, T>
 where
     T: Unsigned + Copy + Zero + One + Ord + Add<Output=T> + Bounded + ToPrimitive,
 {
-    /// Additional capacity for the stack used in the depth-first search.
-    ///
-    /// This is a constant that defines how much extra space to allocate
-    /// for the stack used in the `find_first_candidate_start` method.
-    const STACK_ADDITIONAL_CAPACITY: usize = 2;
-
     /// Performs a depth-first search on the segment tree to find the first
     /// free leaf at or after the `from` index.
     ///
@@ -870,12 +1143,10 @@ where
         }
 
         let leaf_node_count = self.tree.leaf_node_count;
-        let mut stack: Vec<(usize, usize, usize)> =
-            Vec::with_capacity(self.tree.height() + Self::STACK_ADDITIONAL_CAPACITY);
+        self.stack.clear();
+        self.stack.push((1, 0, leaf_node_count));
 
-        stack.push((1, 0, leaf_node_count));
-
-        while let Some((node_index, range_start, range_end)) = stack.pop() {
+        while let Some((node_index, range_start, range_end)) = self.stack.pop() {
             if range_end <= from || range_start >= to {
                 continue;
             }
@@ -898,8 +1169,8 @@ where
             let left_child_index = node_index << 1;
             let right_child_index = left_child_index | 1;
 
-            stack.push((right_child_index, mid_point, range_end));
-            stack.push((left_child_index, range_start, mid_point));
+            self.stack.push((right_child_index, mid_point, range_end));
+            self.stack.push((left_child_index, range_start, mid_point));
         }
 
         None
@@ -1044,6 +1315,48 @@ mod tests {
         assert_eq!(t.leaf_count(), 0);
         assert_eq!(t.node_count(), 0);
         assert_eq!(t.height(), 0);
+    }
+
+    #[test]
+    fn eq_identical_after_mixed_updates() {
+        let mut a: IntervalGapTree<u32> = IntervalGapTree::new(16, false);
+        let mut b: IntervalGapTree<u32> = IntervalGapTree::new(16, false);
+
+        a.free(2..10);
+        a.occupy(5..7);
+        b.free(2..10);
+        b.occupy(5..7);
+
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn eq_respects_lazy_overrides_without_push() {
+        let mut a: IntervalGapTree<u32> = IntervalGapTree::new(16, false);
+        let mut b: IntervalGapTree<u32> = IntervalGapTree::new(16, false);
+
+        a.free(..);
+        b.free(..);
+        b.occupy(3..9);
+        b.free(3..9);
+
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn eq_detects_single_leaf_difference() {
+        let mut a: IntervalGapTree<u32> = IntervalGapTree::new(8, false);
+        let b: IntervalGapTree<u32> = IntervalGapTree::new(8, false);
+
+        a.free(4..5);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn eq_requires_same_shape_and_count() {
+        let a: IntervalGapTree<u32> = IntervalGapTree::new(15, true);
+        let b: IntervalGapTree<u32> = IntervalGapTree::new(16, true);
+        assert_ne!(a, b);
     }
 
     #[test]
@@ -1604,7 +1917,6 @@ mod tests {
         assert!(collect_intervals(&mut t, 12, ..).is_empty());
         assert_eq!(collect_intervals(&mut t, 10, ..), vec![5..16]);
     }
-
 
     #[test]
     fn iterator_matches_naive_reference_in_various_scenarios() {

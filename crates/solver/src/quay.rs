@@ -478,7 +478,7 @@ impl Quay for BTreeSetQuay {
         }
         let query_range = self.normalize(range);
         if query_range.is_empty() {
-            return false; // empty range is never "occupied"
+            return false;
         }
 
         if let Some(segment) = self.segment_before_or_at(query_range.start)
