@@ -23,7 +23,7 @@
 
 #[allow(dead_code)]
 use crate::primitives::Interval;
-use num_traits::{PrimInt, Signed};
+use num_traits::{PrimInt, Signed, Zero};
 use std::{
     fmt::Display,
     ops::{Add, AddAssign, Neg, Sub, SubAssign},
@@ -373,6 +373,31 @@ impl<T: PrimInt + Signed> TimePoint<T> {
     pub fn saturating_sub(self, rhs: TimeDelta<T>) -> Self {
         TimePoint(self.0.saturating_sub(rhs.0))
     }
+
+    /// Creates a half-open interval `[self, self + len)`.
+    ///
+    /// Returns `None` if `len` is negative. Zero-length is allowed.
+    /// If addition would overflow, it returns `None`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{TimePoint, TimeDelta, TimeInterval};
+    ///
+    /// let tp = TimePoint::new(10);
+    /// let len = TimeDelta::new(5);
+    /// let interval = tp.span_of(len).unwrap();
+    /// assert_eq!(interval.start().value(), 10);
+    /// assert_eq!(interval.end().value(), 15);
+    /// assert!(tp.span_of(TimeDelta::new(-1)).is_none());
+    /// ```
+    #[inline]
+    pub fn span_of(self, len: TimeDelta<T>) -> Option<TimeInterval<T>> {
+        if len.is_negative() {
+            return None;
+        }
+        self.checked_add(len).map(|end| Interval::new(self, end))
+    }
 }
 
 impl<T: PrimInt + Display + Signed> Display for TimeDelta<T> {
@@ -513,7 +538,7 @@ impl<T: PrimInt + Signed> Sub<TimeDelta<T>> for TimePoint<T> {
         TimePoint(
             self.0
                 .checked_sub(&rhs.0)
-                .expect("overflow in TimePoint - TimeDelta"),
+                .expect("underflow in TimePoint - TimeDelta"),
         )
     }
 }
@@ -525,7 +550,7 @@ impl<T: PrimInt + Signed> SubAssign<TimeDelta<T>> for TimePoint<T> {
     ///
     /// # Panics
     ///
-    /// This method will panic if a overflow occurs during the operation.
+    /// This method will panic if a underflow occurs during the operation.
     ///
     /// # Examples
     ///
@@ -541,7 +566,7 @@ impl<T: PrimInt + Signed> SubAssign<TimeDelta<T>> for TimePoint<T> {
         self.0 = self
             .0
             .checked_sub(&rhs.0)
-            .expect("overflow in TimePoint -= TimeDelta");
+            .expect("underflow in TimePoint -= TimeDelta");
     }
 }
 
@@ -555,7 +580,7 @@ impl<T: PrimInt + Signed> Sub<TimePoint<T>> for TimePoint<T> {
     ///
     /// # Panics
     ///
-    /// This method will panic if a overflow occurs during the operation.
+    /// This method will panic if a underflow occurs during the operation.
     ///
     /// # Examples
     ///
@@ -572,7 +597,7 @@ impl<T: PrimInt + Signed> Sub<TimePoint<T>> for TimePoint<T> {
         TimeDelta::new(
             self.0
                 .checked_sub(&rhs.0)
-                .expect("overflow in TimePoint - TimePoint"),
+                .expect("underflow in TimePoint - TimePoint"),
         )
     }
 }
@@ -618,7 +643,7 @@ impl<T: PrimInt + Signed> Sub for TimeDelta<T> {
     ///
     /// # Panics
     ///
-    /// This method will panic if a overflow occurs during the operation.
+    /// This method will panic if a underflow occurs during the operation.
     ///
     /// # Examples
     ///
@@ -634,7 +659,7 @@ impl<T: PrimInt + Signed> Sub for TimeDelta<T> {
         TimeDelta(
             self.0
                 .checked_sub(&rhs.0)
-                .expect("overflow in TimeDelta - TimeDelta"),
+                .expect("underflow in TimeDelta - TimeDelta"),
         )
     }
 }
@@ -674,7 +699,7 @@ impl<T: PrimInt + Signed> SubAssign for TimeDelta<T> {
     ///
     /// # Panics
     ///
-    /// This method will panic if a overflow occurs during the operation.
+    /// This method will panic if a underflow occurs during the operation.
     ///
     /// # Examples
     ///
@@ -690,7 +715,7 @@ impl<T: PrimInt + Signed> SubAssign for TimeDelta<T> {
         self.0 = self
             .0
             .checked_sub(&rhs.0)
-            .expect("overflow in TimeDelta -= TimeDelta");
+            .expect("underflow in TimeDelta -= TimeDelta");
     }
 }
 
@@ -704,7 +729,7 @@ impl<T: PrimInt + Signed> Neg for TimeDelta<T> {
     ///
     /// # Panics
     ///
-    /// This method will panic if a overflow occurs during the operation.
+    /// This method will panic if a underflow occurs during the operation.
     ///
     /// # Examples
     ///
@@ -719,12 +744,12 @@ impl<T: PrimInt + Signed> Neg for TimeDelta<T> {
         TimeDelta::new(
             T::zero()
                 .checked_sub(&self.0)
-                .expect("overflow in -TimeDelta"),
+                .expect("underflow in -TimeDelta"),
         )
     }
 }
 
-impl<T: PrimInt + Signed> num_traits::Zero for TimeDelta<T> {
+impl<T: PrimInt + Signed> Zero for TimeDelta<T> {
     /// Returns a `TimeDelta` with a value of zero.
     ///
     /// This implementation provides a `TimeDelta` with a value of zero,
@@ -814,129 +839,129 @@ impl<T: PrimInt + Signed> Default for TimeDelta<T> {
 
 /// Represents a segment index along the quay.
 ///
-/// A `SegmentIndex` is a wrapper around a primitive unsigned integer type
+/// A `QuayPosition` is a wrapper around a primitive unsigned integer type
 /// that represents a specific segment along the quay.
 ///
 /// # Examples
 ///
 /// ```
-/// use dock_alloc_core::domain::SegmentIndex;
+/// use dock_alloc_core::domain::QuayPosition;
 ///
-/// let seg_idx = SegmentIndex::new(5);
+/// let seg_idx = QuayPosition::new(5);
 /// assert_eq!(seg_idx.value(), 5);
-/// assert_eq!(format!("{}", seg_idx), "SegmentIndex(5)");
+/// assert_eq!(format!("{}", seg_idx), "QuayPosition(5)");
 /// ```
 #[repr(transparent)]
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
-pub struct SegmentIndex(usize);
+pub struct QuayPosition(usize);
 
 /// Represents a segment index along the quay with a length.
 ///
-/// A `SegmentInterval` is a half-open interval defined by a start and end `SegmentIndex`.
+/// A `QuayInterval` is a half-open interval defined by a start and end `QuayPosition`.
 /// It represents a contiguous section of the quay, where the start index is inclusive
 /// and the end index is exclusive.
 ///
 /// # Examples
 ///
 /// ```
-/// use dock_alloc_core::domain::{SegmentIndex, SegmentInterval, SegmentLength};
+/// use dock_alloc_core::domain::{QuayPosition, QuayInterval, QuayLength};
 ///
-/// let start = SegmentIndex::new(5);
-/// let length = SegmentLength::new(10);
+/// let start = QuayPosition::new(5);
+/// let length = QuayLength::new(10);
 ///
-/// let span: SegmentInterval = start.span_of(length);
-/// assert_eq!(span.start().value(), 5);
-/// assert_eq!(span.end().value(), 15);
+/// let span = start.span_of(length);
+/// assert_eq!(span.unwrap().start().value(), 5);
+/// assert_eq!(span.unwrap().end().value(), 15);
 /// ```
-pub type SegmentInterval = Interval<SegmentIndex>;
+pub type QuayInterval = Interval<QuayPosition>;
 
-impl Display for SegmentIndex {
-    /// Formats the `SegmentIndex` as `SegmentIndex(value)`.
+impl Display for QuayPosition {
+    /// Formats the `QuayPosition` as `QuayPosition(value)`.
     ///
-    /// Formats the `SegmentIndex` instance as a string in the format `SegmentIndex(value)`,
-    /// where `value` is the inner value of the `SegmentIndex`.
+    /// Formats the `QuayPosition` instance as a string in the format `QuayPosition(value)`,
+    /// where `value` is the inner value of the `QuayPosition`.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentIndex;
+    /// use dock_alloc_core::domain::QuayPosition;
     ///
-    /// let seg_idx = SegmentIndex::new(5);
-    /// assert_eq!(format!("{}", seg_idx), "SegmentIndex(5)");
+    /// let seg_idx = QuayPosition::new(5);
+    /// assert_eq!(format!("{}", seg_idx), "QuayPosition(5)");
     /// ```
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SegmentIndex({})", self.0)
+        write!(f, "QuayPosition({})", self.0)
     }
 }
 
-impl From<usize> for SegmentIndex {
-    /// Converts a primitive unsigned integer type into a `SegmentIndex`.
+impl From<usize> for QuayPosition {
+    /// Converts a primitive unsigned integer type into a `QuayPosition`.
     ///
     /// This implementation allows for easy conversion from a primitive unsigned integer type
-    /// to a `SegmentIndex`, enabling the use of `SegmentIndex`
+    /// to a `QuayPosition`, enabling the use of `QuayPosition`
     /// in contexts where a primitive unsigned integer is available.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentIndex;
+    /// use dock_alloc_core::domain::QuayPosition;
     ///
     /// let value: usize = 5;
-    /// let seg_idx: SegmentIndex = SegmentIndex::from(value);
+    /// let seg_idx: QuayPosition = QuayPosition::from(value);
     /// assert_eq!(seg_idx.value(), 5);
     /// ```
     #[inline]
     fn from(v: usize) -> Self {
-        SegmentIndex(v)
+        QuayPosition(v)
     }
 }
 
-impl SegmentIndex {
-    /// Creates a new `SegmentIndex` with the given value.
+impl QuayPosition {
+    /// Creates a new `QuayPosition` with the given value.
     ///
-    /// Creates a new `SegmentIndex` instance wrapping the provided value.
+    /// Creates a new `QuayPosition` instance wrapping the provided value.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentIndex;
+    /// use dock_alloc_core::domain::QuayPosition;
     ///
-    /// let seg_idx = SegmentIndex::new(5);
+    /// let seg_idx = QuayPosition::new(5);
     /// assert_eq!(seg_idx.value(), 5);
     /// ```
     #[inline]
     pub const fn new(v: usize) -> Self {
-        SegmentIndex(v)
+        QuayPosition(v)
     }
 
-    /// Creates a new `SegmentIndex` with a value of zero.
+    /// Creates a new `QuayPosition` with a value of zero.
     ///
-    /// Creates a new `SegmentIndex` instance with a value of zero.
+    /// Creates a new `QuayPosition` instance with a value of zero.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentIndex;
+    /// use dock_alloc_core::domain::QuayPosition;
     ///
-    /// let seg_idx = SegmentIndex::zero();
+    /// let seg_idx = QuayPosition::zero();
     /// assert_eq!(seg_idx.value(), 0);
     /// ```
     #[inline]
     pub const fn zero() -> Self {
-        SegmentIndex::new(0)
+        QuayPosition::new(0)
     }
 
-    /// Returns the value of the `SegmentIndex`.
+    /// Returns the value of the `QuayPosition`.
     ///
-    /// Returns the inner value of the `SegmentIndex` instance.
+    /// Returns the inner value of the `QuayPosition` instance.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentIndex;
+    /// use dock_alloc_core::domain::QuayPosition;
     ///
-    /// let seg_idx = SegmentIndex::new(5);
+    /// let seg_idx = QuayPosition::new(5);
     /// assert_eq!(seg_idx.value(), 5);
     /// ```
     #[inline]
@@ -944,134 +969,136 @@ impl SegmentIndex {
         self.0
     }
 
-    /// Checks if the `SegmentIndex` is zero.
+    /// Checks if the `QuayPosition` is zero.
     ///
     /// Returns `true` if the inner value is zero, otherwise `false`.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentIndex;
+    /// use dock_alloc_core::domain::QuayPosition;
     ///
-    /// let seg_idx = SegmentIndex::new(0);
+    /// let seg_idx = QuayPosition::new(0);
     /// assert!(seg_idx.is_zero());
-    /// let non_zero_seg_idx = SegmentIndex::new(5);
+    /// let non_zero_seg_idx = QuayPosition::new(5);
     /// assert!(!non_zero_seg_idx.is_zero());
     /// ```
-    pub fn is_zero(self) -> bool {
+    pub const fn is_zero(self) -> bool {
         self.0 == 0
     }
 
-    /// Adds a `SegmentLength` to the `SegmentIndex`, returning a new `SegmentIndex`.
+    /// Adds a `QuayLength` to the `QuayPosition`, returning a new `QuayPosition`.
     ///
-    /// Adds a `SegmentLength` to the current `SegmentIndex`, returning a new `SegmentIndex`.
+    /// Adds a `QuayLength` to the current `QuayPosition`, returning a new `QuayPosition`.
     /// If the addition would overflow, it returns `None`.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{SegmentIndex, SegmentLength};
+    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
     ///
-    /// let seg_idx = SegmentIndex::new(5);
-    /// let length = SegmentLength::new(3);
+    /// let seg_idx = QuayPosition::new(5);
+    /// let length = QuayLength::new(3);
     /// let new_seg_idx = seg_idx.checked_add_len(length);
     /// assert_eq!(new_seg_idx.unwrap().value(), 8);
     /// ```
     #[inline]
-    pub fn checked_add_len(self, d: SegmentLength) -> Option<Self> {
-        self.0.checked_add(d.0).map(SegmentIndex)
+    pub fn checked_add_len(self, d: QuayLength) -> Option<Self> {
+        self.0.checked_add(d.0).map(QuayPosition)
     }
 
-    /// Subtracts a `SegmentLength` from the `SegmentIndex`, returning a new `SegmentIndex`.
+    /// Subtracts a `QuayLength` from the `QuayPosition`, returning a new `QuayPosition`.
     ///
-    /// Subtracts a `SegmentLength` from the current `SegmentIndex`,
-    /// returning a new `SegmentIndex`.
+    /// Subtracts a `QuayLength` from the current `QuayPosition`,
+    /// returning a new `QuayPosition`.
     /// If the subtraction would underflow, it returns `None`.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{SegmentIndex, SegmentLength};
+    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
     ///
-    /// let seg_idx = SegmentIndex::new(5);
-    /// let length = SegmentLength::new(3);
+    /// let seg_idx = QuayPosition::new(5);
+    /// let length = QuayLength::new(3);
     /// let new_seg_idx = seg_idx.checked_sub_len(length);
     /// assert_eq!(new_seg_idx.unwrap().value(), 2);
     /// ```
     #[inline]
-    pub fn checked_sub_len(self, d: SegmentLength) -> Option<Self> {
-        self.0.checked_sub(d.0).map(SegmentIndex)
+    pub fn checked_sub_len(self, d: QuayLength) -> Option<Self> {
+        self.0.checked_sub(d.0).map(QuayPosition)
     }
 
-    /// Adds a `SegmentLength` to the `SegmentIndex`, returning a new `SegmentIndex`.
+    /// Adds a `QuayLength` to the `QuayPosition`, returning a new `QuayPosition`.
     ///
-    /// Adds a `SegmentLength` to the current `SegmentIndex`, returning a new `SegmentIndex`.
-    /// If the addition would overflow, it returns a `SegmentIndex` with the maximum value.
+    /// Adds a `QuayLength` to the current `QuayPosition`, returning a new `QuayPosition`.
+    /// If the addition would overflow, it returns a `QuayPosition` with the maximum value.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{SegmentIndex, SegmentLength};
+    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
     ///
-    /// let seg_idx = SegmentIndex::new(5);
-    /// let length = SegmentLength::new(3);
+    /// let seg_idx = QuayPosition::new(5);
+    /// let length = QuayLength::new(3);
     /// let new_seg_idx = seg_idx.saturating_add_len(length);
     /// assert_eq!(new_seg_idx.value(), 8);
     /// ```
     #[inline]
-    pub fn saturating_add_len(self, d: SegmentLength) -> Self {
-        SegmentIndex(self.0.saturating_add(d.0))
+    pub fn saturating_add_len(self, d: QuayLength) -> Self {
+        QuayPosition(self.0.saturating_add(d.0))
     }
 
-    /// Subtracts a `SegmentLength` from the `SegmentIndex`, returning a new `SegmentIndex`.
+    /// Subtracts a `QuayLength` from the `QuayPosition`, returning a new `QuayPosition`.
     ///
-    /// Subtracts a `SegmentLength` from the current `SegmentIndex`, returning a new `SegmentIndex`.
-    /// If the subtraction would underflow, it returns a `SegmentIndex` with a value of zero.
+    /// Subtracts a `QuayLength` from the current `QuayPosition`, returning a new `QuayPosition`.
+    /// If the subtraction would underflow, it returns a `QuayPosition` with a value of zero.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{SegmentIndex, SegmentLength};
+    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
     ///
-    /// let seg_idx = SegmentIndex::new(5);
-    /// let length = SegmentLength::new(3);
+    /// let seg_idx = QuayPosition::new(5);
+    /// let length = QuayLength::new(3);
     /// let new_seg_idx = seg_idx.saturating_sub_len(length);
     /// assert_eq!(new_seg_idx.value(), 2);
     /// ```
     #[inline]
-    pub fn saturating_sub_len(self, d: SegmentLength) -> Self {
-        SegmentIndex(self.0.saturating_sub(d.0))
+    pub fn saturating_sub_len(self, d: QuayLength) -> Self {
+        QuayPosition(self.0.saturating_sub(d.0))
     }
 
-    /// Creates a `SegmentInterval` starting from the current `SegmentIndex` with the specified length.
+    /// Creates a `QuayInterval` starting from the current `QuayPosition` with the specified length.
     ///
-    /// Creates a `SegmentInterval` that represents a half-open interval starting from the current `SegmentIndex`
-    /// and extending by the specified `SegmentLength`.
+    /// Creates a `QuayInterval` that represents a half-open interval starting from the current `QuayPosition`
+    /// and extending by the specified `QuayLength`.
+    /// If addition of the length would overflow, it returns `None`.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{SegmentIndex, SegmentInterval, SegmentLength}; // Add SegmentLength here
+    /// use dock_alloc_core::domain::{QuayPosition, QuayInterval, QuayLength}; // Add QuayLength here
     ///
-    /// let start = SegmentIndex::new(5);
-    /// let length = SegmentLength::new(10);
-    /// let span: SegmentInterval = start.span_of(length);
-    /// assert_eq!(span.start().value(), 5);
-    /// assert_eq!(span.end().value(), 15);
+    /// let start = QuayPosition::new(5);
+    /// let length = QuayLength::new(10);
+    /// let span = start.span_of(length);
+    /// assert_eq!(span.unwrap().start().value(), 5);
+    /// assert_eq!(span.unwrap().end().value(), 15);
     /// ```
     #[inline]
-    pub fn span_of(self, len: SegmentLength) -> SegmentInterval {
-        Interval::new(self, self + len)
+    pub fn span_of(self, len: QuayLength) -> Option<QuayInterval> {
+        self.checked_add_len(len)
+            .map(|end| QuayInterval::new(self, end))
     }
 }
 
-impl Add<SegmentLength> for SegmentIndex {
-    type Output = SegmentIndex;
+impl Add<QuayLength> for QuayPosition {
+    type Output = QuayPosition;
 
-    /// Adds a `SegmentLength` to a `SegmentIndex`, returning a new `SegmentIndex`.
+    /// Adds a `QuayLength` to a `QuayPosition`, returning a new `QuayPosition`.
     ///
-    /// This method takes a `SegmentLength` and adds it to the current `SegmentIndex`,
-    /// returning a new `SegmentIndex` with the updated value.
+    /// This method takes a `QuayLength` and adds it to the current `QuayPosition`,
+    /// returning a new `QuayPosition` with the updated value.
     ///
     /// # Panics
     ///
@@ -1080,30 +1107,58 @@ impl Add<SegmentLength> for SegmentIndex {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{SegmentIndex, SegmentLength};
+    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
     ///
-    /// let seg_idx = SegmentIndex::new(5);
-    /// let length = SegmentLength::new(3);
+    /// let seg_idx = QuayPosition::new(5);
+    /// let length = QuayLength::new(3);
     /// let new_seg_idx = seg_idx + length;
     /// assert_eq!(new_seg_idx.value(), 8);
     /// ```
     #[inline]
-    fn add(self, rhs: SegmentLength) -> Self::Output {
-        SegmentIndex(
+    fn add(self, rhs: QuayLength) -> Self::Output {
+        QuayPosition(
             self.0
                 .checked_add(rhs.0)
-                .expect("overflow in SegmentIndex + SegmentLength"),
+                .expect("overflow in QuayPosition + QuayLength"),
         )
     }
 }
 
-impl Sub<SegmentLength> for SegmentIndex {
-    type Output = SegmentIndex;
+impl Add<QuayPosition> for QuayLength {
+    type Output = QuayPosition;
 
-    /// Subtracts a `SegmentLength` from a `SegmentIndex`, returning a new `SegmentIndex`.
+    /// Adds a `QuayPosition` to a `QuayLength`, returning a new `QuayPosition`.
     ///
-    /// This method takes a `SegmentLength` and subtracts it from the current `SegmentIndex`,
-    /// returning a new `SegmentIndex` with the updated value.
+    /// This method takes a `QuayPosition` and adds it to the current `QuayLength`,
+    /// returning a new `QuayPosition` with the updated value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an overflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
+    ///
+    /// let length = QuayLength::new(3);
+    /// let seg_idx = QuayPosition::new(5);
+    /// let new_seg_idx = length + seg_idx;
+    /// assert_eq!(new_seg_idx.value(), 8);
+    /// ```
+    #[inline]
+    fn add(self, rhs: QuayPosition) -> Self::Output {
+        rhs + self
+    }
+}
+
+impl Sub<QuayLength> for QuayPosition {
+    type Output = QuayPosition;
+
+    /// Subtracts a `QuayLength` from a `QuayPosition`, returning a new `QuayPosition`.
+    ///
+    /// This method takes a `QuayLength` and subtracts it from the current `QuayPosition`,
+    /// returning a new `QuayPosition` with the updated value.
     ///
     /// # Panics
     ///
@@ -1112,30 +1167,30 @@ impl Sub<SegmentLength> for SegmentIndex {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{SegmentIndex, SegmentLength};
+    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
     ///
-    /// let seg_idx = SegmentIndex::new(5);
-    /// let length = SegmentLength::new(3);
+    /// let seg_idx = QuayPosition::new(5);
+    /// let length = QuayLength::new(3);
     /// let new_seg_idx = seg_idx - length;
     /// assert_eq!(new_seg_idx.value(), 2);
     /// ```
     #[inline]
-    fn sub(self, rhs: SegmentLength) -> Self::Output {
-        SegmentIndex(
+    fn sub(self, rhs: QuayLength) -> Self::Output {
+        QuayPosition(
             self.0
                 .checked_sub(rhs.0)
-                .expect("underflow in SegmentIndex - SegmentLength"),
+                .expect("underflow in QuayPosition - QuayLength"),
         )
     }
 }
 
-impl Sub<SegmentIndex> for SegmentIndex {
-    type Output = SegmentLength;
+impl Sub<QuayPosition> for QuayPosition {
+    type Output = QuayLength;
 
-    /// Subtracts one `SegmentIndex` from another, returning a `SegmentLength`.
+    /// Subtracts one `QuayPosition` from another, returning a `QuayLength`.
     ///
-    /// This method takes another `SegmentIndex` and subtracts it from the current instance,
-    /// returning a new `SegmentLength` that represents the difference between the two indices.
+    /// This method takes another `QuayPosition` and subtracts it from the current instance,
+    /// returning a new `QuayLength` that represents the difference between the two indices.
     ///
     /// # Panics
     ///
@@ -1144,27 +1199,27 @@ impl Sub<SegmentIndex> for SegmentIndex {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{SegmentIndex, SegmentLength};
+    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
     ///
-    /// let seg_idx1 = SegmentIndex::new(10);
-    /// let seg_idx2 = SegmentIndex::new(5);
+    /// let seg_idx1 = QuayPosition::new(10);
+    /// let seg_idx2 = QuayPosition::new(5);
     /// let length = seg_idx1 - seg_idx2;
     /// assert_eq!(length.value(), 5);
     /// ```
     #[inline]
-    fn sub(self, rhs: SegmentIndex) -> Self::Output {
-        SegmentLength(
+    fn sub(self, rhs: QuayPosition) -> Self::Output {
+        QuayLength(
             self.0
                 .checked_sub(rhs.0)
-                .expect("underflow in SegmentIndex - SegmentIndex"),
+                .expect("underflow in QuayPosition - QuayPosition"),
         )
     }
 }
 
-impl AddAssign<SegmentLength> for SegmentIndex {
-    /// Adds a `SegmentLength` to the current `SegmentIndex`, modifying it in place.
+impl AddAssign<QuayLength> for QuayPosition {
+    /// Adds a `QuayLength` to the current `QuayPosition`, modifying it in place.
     ///
-    /// This method takes a `SegmentLength` and adds it to the current `SegmentIndex`,
+    /// This method takes a `QuayLength` and adds it to the current `QuayPosition`,
     /// modifying the current instance to reflect the new value.
     ///
     /// # Panics
@@ -1174,26 +1229,26 @@ impl AddAssign<SegmentLength> for SegmentIndex {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{SegmentIndex, SegmentLength};
+    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
     ///
-    /// let mut seg_idx = SegmentIndex::new(5);
-    /// let length = SegmentLength::new(3);
+    /// let mut seg_idx = QuayPosition::new(5);
+    /// let length = QuayLength::new(3);
     /// seg_idx += length;
     /// assert_eq!(seg_idx.value(), 8);
     /// ```
     #[inline]
-    fn add_assign(&mut self, rhs: SegmentLength) {
+    fn add_assign(&mut self, rhs: QuayLength) {
         self.0 = self
             .0
             .checked_add(rhs.0)
-            .expect("overflow in SegIdx += SegLen");
+            .expect("overflow in QuayPosition += QuayLength");
     }
 }
 
-impl SubAssign<SegmentLength> for SegmentIndex {
-    /// Subtracts a `SegmentLength` from the current `SegmentIndex`, modifying it in place.
+impl SubAssign<QuayLength> for QuayPosition {
+    /// Subtracts a `QuayLength` from the current `QuayPosition`, modifying it in place.
     ///
-    /// This method takes a `SegmentLength` and subtracts it from the current `SegmentIndex`,
+    /// This method takes a `QuayLength` and subtracts it from the current `QuayPosition`,
     /// modifying the current instance to reflect the new value.
     ///
     /// # Panics
@@ -1203,110 +1258,110 @@ impl SubAssign<SegmentLength> for SegmentIndex {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{SegmentIndex, SegmentLength};
+    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
     ///
-    /// let mut seg_idx = SegmentIndex::new(5);
-    /// let length = SegmentLength::new(3);
+    /// let mut seg_idx = QuayPosition::new(5);
+    /// let length = QuayLength::new(3);
     /// seg_idx -= length;
     /// assert_eq!(seg_idx.value(), 2);
     /// ```
     #[inline]
-    fn sub_assign(&mut self, rhs: SegmentLength) {
+    fn sub_assign(&mut self, rhs: QuayLength) {
         self.0 = self
             .0
             .checked_sub(rhs.0)
-            .expect("underflow in SegIdx -= SegLen");
+            .expect("underflow in QuayPosition -= QuayLength");
     }
 }
 
 /// Represents the length of a segment along the quay.
 ///
-/// A `SegmentLength` is a wrapper around a primitive unsigned integer type
+/// A `QuayLength` is a wrapper around a primitive unsigned integer type
 /// that represents the length of a segment along the quay.
 ///
 /// # Examples
 ///
 /// ```
-/// use dock_alloc_core::domain::SegmentLength;
+/// use dock_alloc_core::domain::QuayLength;
 ///
-/// let seg_length = SegmentLength::new(10);
+/// let seg_length = QuayLength::new(10);
 /// assert_eq!(seg_length.value(), 10);
-/// assert_eq!(format!("{}", seg_length), "SegmentLength(10)");
+/// assert_eq!(format!("{}", seg_length), "QuayLength(10)");
 /// ```
 #[repr(transparent)]
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
-pub struct SegmentLength(pub usize);
+pub struct QuayLength(pub usize);
 
-impl Display for SegmentLength {
-    /// Formats the `SegmentLength` as `SegmentLength(value)`.
+impl Display for QuayLength {
+    /// Formats the `QuayLength` as `QuayLength(value)`.
     ///
-    /// Formats the `SegmentLength` instance as a string in the format `SegmentLength(value)`,
-    /// where `value` is the inner value of the `SegmentLength`.
+    /// Formats the `QuayLength` instance as a string in the format `QuayLength(value)`,
+    /// where `value` is the inner value of the `QuayLength`.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentLength;
+    /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length = SegmentLength::new(10);
-    /// assert_eq!(format!("{}", seg_length), "SegmentLength(10)");
+    /// let seg_length = QuayLength::new(10);
+    /// assert_eq!(format!("{}", seg_length), "QuayLength(10)");
     /// ```
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SegmentLength({})", self.0)
+        write!(f, "QuayLength({})", self.0)
     }
 }
 
-impl From<usize> for SegmentLength {
-    /// Converts a primitive unsigned integer type into a `SegmentLength`.
+impl From<usize> for QuayLength {
+    /// Converts a primitive unsigned integer type into a `QuayLength`.
     ///
     /// This implementation allows for easy conversion from a primitive unsigned integer type
-    /// to a `SegmentLength`, enabling the use of `SegmentLength`
+    /// to a `QuayLength`, enabling the use of `QuayLength`
     /// in contexts where a primitive unsigned integer is available.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentLength;
+    /// use dock_alloc_core::domain::QuayLength;
     ///
     /// let value: usize = 10;
-    /// let seg_length: SegmentLength = SegmentLength::from(value);
+    /// let seg_length: QuayLength = QuayLength::from(value);
     /// assert_eq!(seg_length.value(), 10);
     /// ```
     #[inline]
     fn from(v: usize) -> Self {
-        SegmentLength(v)
+        QuayLength(v)
     }
 }
 
-impl SegmentLength {
-    /// Creates a new `SegmentLength` with the given value.
+impl QuayLength {
+    /// Creates a new `QuayLength` with the given value.
     ///
-    /// Creates a new `SegmentLength` instance wrapping the provided value.
+    /// Creates a new `QuayLength` instance wrapping the provided value.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentLength;
+    /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length = SegmentLength::new(10);
+    /// let seg_length = QuayLength::new(10);
     /// assert_eq!(seg_length.value(), 10);
     /// ```
     #[inline]
     pub const fn new(v: usize) -> Self {
-        SegmentLength(v)
+        QuayLength(v)
     }
 
-    /// Returns the value of the `SegmentLength`.
+    /// Returns the value of the `QuayLength`.
     ///
-    /// Returns the inner value of the `SegmentLength` instance.
+    /// Returns the inner value of the `QuayLength` instance.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentLength;
+    /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length = SegmentLength::new(10);
+    /// let seg_length = QuayLength::new(10);
     /// assert_eq!(seg_length.value(), 10);
     /// ```
     #[inline]
@@ -1314,126 +1369,199 @@ impl SegmentLength {
         self.0
     }
 
-    /// Adds another `SegmentLength` to the current `SegmentLength`, returning a new `SegmentLength`.
+    /// Adds another `QuayLength` to the current `QuayLength`, returning a new `QuayLength`.
     ///
-    /// Adds another `SegmentLength` to the current instance,
-    /// returning a new `SegmentLength` with the updated value.
+    /// Adds another `QuayLength` to the current instance,
+    /// returning a new `QuayLength` with the updated value.
     /// If the addition would overflow, it returns `None`.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentLength;
+    /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length1 = SegmentLength::new(10);
-    /// let seg_length2 = SegmentLength::new(5);
+    /// let seg_length1 = QuayLength::new(10);
+    /// let seg_length2 = QuayLength::new(5);
     /// let new_seg_length = seg_length1.checked_add(seg_length2);
     /// assert_eq!(new_seg_length.unwrap().value(), 15);
     /// ```
     #[inline]
     pub fn checked_add(self, rhs: Self) -> Option<Self> {
-        self.0.checked_add(rhs.0).map(SegmentLength)
+        self.0.checked_add(rhs.0).map(QuayLength)
     }
 
-    /// Subtracts another `SegmentLength` from the current `SegmentLength`, returning a new `SegmentLength`.
+    /// Subtracts another `QuayLength` from the current `QuayLength`, returning a new `QuayLength`.
     ///
-    /// Subtracts another `SegmentLength` from the current instance,
-    /// returning a new `SegmentLength` with the updated value.
+    /// Subtracts another `QuayLength` from the current instance,
+    /// returning a new `QuayLength` with the updated value.
     /// If the subtraction would underflow, it returns `None`.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentLength;
+    /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length1 = SegmentLength::new(10);
-    /// let seg_length2 = SegmentLength::new(5);
+    /// let seg_length1 = QuayLength::new(10);
+    /// let seg_length2 = QuayLength::new(5);
     /// let new_seg_length = seg_length1.checked_sub(seg_length2);
     /// assert_eq!(new_seg_length.unwrap().value(), 5);
     /// ```
     #[inline]
     pub fn checked_sub(self, rhs: Self) -> Option<Self> {
-        self.0.checked_sub(rhs.0).map(SegmentLength)
+        self.0.checked_sub(rhs.0).map(QuayLength)
     }
 
-    /// Adds another `SegmentLength` to the current `SegmentLength`, returning a new `SegmentLength`.
+    /// Adds another `QuayLength` to the current `QuayLength`, returning a new `QuayLength`.
     ///
-    /// Adds another `SegmentLength` to the current instance,
-    /// returning a new `SegmentLength` with the updated value.
-    /// If the addition would overflow, it returns a `SegmentLength` with the maximum value.
+    /// Adds another `QuayLength` to the current instance,
+    /// returning a new `QuayLength` with the updated value.
+    /// If the addition would overflow, it returns a `QuayLength` with the maximum value.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentLength;
+    /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length1 = SegmentLength::new(10);
-    /// let seg_length2 = SegmentLength::new(5);
+    /// let seg_length1 = QuayLength::new(10);
+    /// let seg_length2 = QuayLength::new(5);
     /// let new_seg_length = seg_length1.saturating_add(seg_length2);
     /// assert_eq!(new_seg_length.value(), 15);
     /// ```
     #[inline]
     pub fn saturating_add(self, rhs: Self) -> Self {
-        SegmentLength(self.0.saturating_add(rhs.0))
+        QuayLength(self.0.saturating_add(rhs.0))
     }
 
-    /// Subtracts another `SegmentLength` from the current `SegmentLength`, returning a new `SegmentLength`.
+    /// Subtracts another `QuayLength` from the current `QuayLength`, returning a new `QuayLength`.
     ///
-    /// Subtracts another `SegmentLength` from the current instance,
-    /// returning a new `SegmentLength` with the updated value.
-    /// If the subtraction would underflow, it returns a `SegmentLength` with a value of zero.
+    /// Subtracts another `QuayLength` from the current instance,
+    /// returning a new `QuayLength` with the updated value.
+    /// If the subtraction would underflow, it returns a `QuayLength` with a value of zero.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentLength;
+    /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length1 = SegmentLength::new(10);
-    /// let seg_length2 = SegmentLength::new(5);
+    /// let seg_length1 = QuayLength::new(10);
+    /// let seg_length2 = QuayLength::new(5);
     /// let new_seg_length = seg_length1.saturating_sub(seg_length2);
     /// assert_eq!(new_seg_length.value(), 5);
     /// ```
     #[inline]
     pub fn saturating_sub(self, rhs: Self) -> Self {
-        SegmentLength(self.0.saturating_sub(rhs.0))
+        QuayLength(self.0.saturating_sub(rhs.0))
+    }
+
+    /// Creates a new `QuayLength` with a value of zero.
+    ///
+    /// Creates a new `QuayLength` instance with a value of zero.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::QuayLength;
+    ///
+    /// let seg_length = QuayLength::zero();
+    /// assert_eq!(seg_length.value(), 0);
+    /// ```
+    #[inline]
+    pub const fn zero() -> Self {
+        Self(0)
+    }
+
+    /// Returns the absolute value of the `QuayLength`.
+    ///
+    /// Since `QuayLength` is always non-negative,
+    /// this method simply returns the current instance.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::QuayLength;
+    ///
+    /// let seg_length = QuayLength::new(10);
+    /// assert_eq!(seg_length.abs().value(), 10);
+    /// ```
+    #[inline(always)]
+    pub const fn abs(self) -> Self {
+        self
+    }
+
+    /// Checks if the `QuayLength` is zero.
+    ///
+    /// Returns `true` if the inner value is zero, otherwise `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::QuayLength;
+    ///
+    /// let seg_length = QuayLength::new(0);
+    /// assert!(seg_length.is_zero());
+    /// let non_zero_seg_length = QuayLength::new(10);
+    /// assert!(!non_zero_seg_length.is_zero());
+    /// ```
+    #[inline(always)]
+    pub const fn is_zero(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Checks if the `QuayLength` is positive.
+    ///
+    /// Returns `true` if the inner value is greater than zero, otherwise `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::QuayLength;
+    ///
+    /// let seg_length = QuayLength::new(10);
+    /// assert!(seg_length.is_positive());
+    /// let zero_seg_length = QuayLength::new(0);
+    /// assert!(!zero_seg_length.is_positive());
+    /// ```
+    #[inline(always)]
+    pub const fn is_positive(self) -> bool {
+        self.0 != 0
     }
 }
 
-impl num_traits::Zero for SegmentLength {
-    /// Returns a `SegmentLength` with a value of zero.
+impl Zero for QuayLength {
+    /// Returns a `QuayLength` with a value of zero.
     ///
-    /// This implementation provides a `SegmentLength` with a value of zero,
-    /// which is useful when you need to initialize a `SegmentLength`
+    /// This implementation provides a `QuayLength` with a value of zero,
+    /// which is useful when you need to initialize a `QuayLength`
     /// without a specific value.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentLength;
+    /// use dock_alloc_core::domain::QuayLength;
     /// use num_traits::Zero;
     ///
-    /// let seg_length: SegmentLength = SegmentLength::zero();
+    /// let seg_length: QuayLength = QuayLength::zero();
     /// assert!(seg_length.is_zero());
     /// ```
     #[inline]
     fn zero() -> Self {
-        SegmentLength::new(0)
+        QuayLength::new(0)
     }
 
-    /// Checks if the `SegmentLength` is zero.
+    /// Checks if the `QuayLength` is zero.
     ///
-    /// This implementation checks if the inner value of the `SegmentLength` is zero,
-    /// which is useful for determining if a `SegmentLength` represents no length.
+    /// This implementation checks if the inner value of the `QuayLength` is zero,
+    /// which is useful for determining if a `QuayLength` represents no length.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentLength;
+    /// use dock_alloc_core::domain::QuayLength;
     /// use num_traits::identities::Zero;
     ///
-    /// let seg_length: SegmentLength = SegmentLength::zero();
+    /// let seg_length: QuayLength = QuayLength::zero();
     /// assert!(seg_length.is_zero());
-    /// let non_zero_seg_length: SegmentLength = SegmentLength::new(10);
+    /// let non_zero_seg_length: QuayLength = QuayLength::new(10);
     /// assert!(!non_zero_seg_length.is_zero());
     /// ```
     #[inline]
@@ -1442,13 +1570,13 @@ impl num_traits::Zero for SegmentLength {
     }
 }
 
-impl Add for SegmentLength {
-    type Output = SegmentLength;
+impl Add for QuayLength {
+    type Output = QuayLength;
 
-    /// Adds two `SegmentLength`s, returning a new `SegmentLength`.
+    /// Adds two `QuayLength`s, returning a new `QuayLength`.
     ///
-    /// This method takes another `SegmentLength` and adds it to the current instance,
-    /// returning a new `SegmentLength` with the updated value.
+    /// This method takes another `QuayLength` and adds it to the current instance,
+    /// returning a new `QuayLength` with the updated value.
     ///
     /// # Panics
     ///
@@ -1457,29 +1585,29 @@ impl Add for SegmentLength {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentLength;
+    /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length1 = SegmentLength::new(10);
-    /// let seg_length2 = SegmentLength::new(5);
+    /// let seg_length1 = QuayLength::new(10);
+    /// let seg_length2 = QuayLength::new(5);
     /// let result = seg_length1 + seg_length2;
     /// assert_eq!(result.value(), 15);
     /// ```
     #[inline]
     fn add(self, rhs: Self) -> Self::Output {
-        SegmentLength(
+        QuayLength(
             self.0
                 .checked_add(rhs.0)
-                .expect("overflow in SegmentLength + SegmentLength"),
+                .expect("overflow in QuayLength + QuayLength"),
         )
     }
 }
-impl Sub for SegmentLength {
-    type Output = SegmentLength;
+impl Sub for QuayLength {
+    type Output = QuayLength;
 
-    /// Subtracts one `SegmentLength` from another, returning a new `SegmentLength`.
+    /// Subtracts one `QuayLength` from another, returning a new `QuayLength`.
     ///
-    /// This method takes another `SegmentLength` and subtracts it from the current instance,
-    /// returning a new `SegmentLength` with the updated value.
+    /// This method takes another `QuayLength` and subtracts it from the current instance,
+    /// returning a new `QuayLength` with the updated value.
     ///
     /// # Panics
     ///
@@ -1488,26 +1616,26 @@ impl Sub for SegmentLength {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentLength;
+    /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length1 = SegmentLength::new(10);
-    /// let seg_length2 = SegmentLength::new(5);
+    /// let seg_length1 = QuayLength::new(10);
+    /// let seg_length2 = QuayLength::new(5);
     /// let result = seg_length1 - seg_length2;
     /// assert_eq!(result.value(), 5);
     /// ```
     #[inline]
     fn sub(self, rhs: Self) -> Self::Output {
-        SegmentLength(
+        QuayLength(
             self.0
                 .checked_sub(rhs.0)
-                .expect("underflow in SegmentLength - SegmentLength"),
+                .expect("underflow in QuayLength - QuayLength"),
         )
     }
 }
-impl AddAssign for SegmentLength {
-    /// Adds another `SegmentLength` to the current instance, modifying it in place.
+impl AddAssign for QuayLength {
+    /// Adds another `QuayLength` to the current instance, modifying it in place.
     ///
-    /// This method takes another `SegmentLength` and adds it to the current instance,
+    /// This method takes another `QuayLength` and adds it to the current instance,
     /// modifying the current instance to reflect the new value.
     ///
     /// # Panics
@@ -1517,10 +1645,10 @@ impl AddAssign for SegmentLength {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentLength;
+    /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let mut seg_length1 = SegmentLength::new(10);
-    /// let seg_length2 = SegmentLength::new(5);
+    /// let mut seg_length1 = QuayLength::new(10);
+    /// let seg_length2 = QuayLength::new(5);
     /// seg_length1 += seg_length2;
     /// assert_eq!(seg_length1.value(), 15);
     /// ```
@@ -1533,10 +1661,10 @@ impl AddAssign for SegmentLength {
     }
 }
 
-impl SubAssign for SegmentLength {
-    /// Subtracts another `SegmentLength` from the current instance, modifying it in place.
+impl SubAssign for QuayLength {
+    /// Subtracts another `QuayLength` from the current instance, modifying it in place.
     ///
-    /// This method takes another `SegmentLength` and subtracts it from the current instance,
+    /// This method takes another `QuayLength` and subtracts it from the current instance,
     /// modifying the current instance to reflect the new value.
     ///
     /// # Panics
@@ -1546,10 +1674,10 @@ impl SubAssign for SegmentLength {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::SegmentLength;
+    /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let mut seg_length1 = SegmentLength::new(10);
-    /// let seg_length2 = SegmentLength::new(5);
+    /// let mut seg_length1 = QuayLength::new(10);
+    /// let seg_length2 = QuayLength::new(5);
     /// seg_length1 -= seg_length2;
     /// assert_eq!(seg_length1.value(), 5);
     /// ```
@@ -1568,7 +1696,6 @@ pub type TimeDelta64 = TimeDelta<i64>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use num_traits::Zero;
 
     #[test]
     fn test_time_point_creation() {
@@ -1794,7 +1921,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "overflow in TimePoint - TimeDelta")]
+    #[should_panic(expected = "underflow in TimePoint - TimeDelta")]
     fn test_timepoint_sub_panic_on_underflow() {
         let tp = TimePoint::new(i32::MIN);
         let delta = TimeDelta::new(1);
@@ -1810,7 +1937,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "overflow in TimeDelta - TimeDelta")]
+    #[should_panic(expected = "underflow in TimeDelta - TimeDelta")]
     fn test_timedelta_sub_panic_on_underflow() {
         let d1 = TimeDelta::new(i32::MIN);
         let d2 = TimeDelta::new(1);
@@ -1818,7 +1945,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "overflow in -TimeDelta")]
+    #[should_panic(expected = "underflow in -TimeDelta")]
     fn test_timedelta_neg_panic_on_overflow() {
         let delta = TimeDelta::new(i32::MIN);
         let _ = -delta;
@@ -1840,198 +1967,208 @@ mod tests {
     }
 
     #[test]
-    fn test_segment_index_creation() {
-        let seg_idx = SegmentIndex::new(5);
+    fn test_quay_position_creation() {
+        let seg_idx = QuayPosition::new(5);
         assert_eq!(seg_idx.value(), 5);
     }
 
     #[test]
-    fn test_segment_index_zero() {
-        let seg_idx = SegmentIndex::zero();
+    fn test_quay_position_zero() {
+        let seg_idx = QuayPosition::zero();
         assert_eq!(seg_idx.value(), 0);
         assert!(seg_idx.is_zero());
     }
 
     #[test]
-    fn test_segment_index_display() {
-        let seg_idx = SegmentIndex::new(5);
-        assert_eq!(format!("{}", seg_idx), "SegmentIndex(5)");
+    fn test_quay_position_display() {
+        let seg_idx = QuayPosition::new(5);
+        assert_eq!(format!("{}", seg_idx), "QuayPosition(5)");
     }
 
     #[test]
-    fn test_segment_index_from() {
+    fn test_quay_position_from() {
         let value: usize = 5;
-        let seg_idx: SegmentIndex = value.into();
+        let seg_idx: QuayPosition = value.into();
         assert_eq!(seg_idx.value(), 5);
     }
 
     #[test]
-    fn test_segment_index_add_length() {
-        let seg_idx = SegmentIndex::new(5);
-        let length = SegmentLength::new(3);
+    fn test_quay_position_add_length() {
+        let seg_idx = QuayPosition::new(5);
+        let length = QuayLength::new(3);
         assert_eq!((seg_idx + length).value(), 8);
     }
 
     #[test]
-    fn test_segment_index_add_assign_length() {
-        let mut seg_idx = SegmentIndex::new(5);
-        seg_idx += SegmentLength::new(3);
+    fn test_quay_position_add_assign_length() {
+        let mut seg_idx = QuayPosition::new(5);
+        seg_idx += QuayLength::new(3);
         assert_eq!(seg_idx.value(), 8);
     }
 
     #[test]
-    fn test_segment_index_sub_length() {
-        let seg_idx = SegmentIndex::new(5);
-        let length = SegmentLength::new(3);
+    fn test_quay_position_sub_length() {
+        let seg_idx = QuayPosition::new(5);
+        let length = QuayLength::new(3);
         assert_eq!((seg_idx - length).value(), 2);
     }
 
     #[test]
-    fn test_segment_index_sub_assign_length() {
-        let mut seg_idx = SegmentIndex::new(5);
-        seg_idx -= SegmentLength::new(3);
+    fn test_quay_position_sub_assign_length() {
+        let mut seg_idx = QuayPosition::new(5);
+        seg_idx -= QuayLength::new(3);
         assert_eq!(seg_idx.value(), 2);
     }
 
     #[test]
-    fn test_segment_index_sub_index() {
-        let seg_idx1 = SegmentIndex::new(10);
-        let seg_idx2 = SegmentIndex::new(4);
+    fn test_quay_position_sub_index() {
+        let seg_idx1 = QuayPosition::new(10);
+        let seg_idx2 = QuayPosition::new(4);
         let length = seg_idx1 - seg_idx2;
         assert_eq!(length.value(), 6);
-        assert_eq!(length, SegmentLength::new(6));
+        assert_eq!(length, QuayLength::new(6));
     }
 
     #[test]
-    fn test_segment_index_checked_add_len() {
-        let seg_idx = SegmentIndex::new(usize::MAX - 1);
-        let length = SegmentLength::new(1);
+    fn test_quay_position_checked_add_len() {
+        let seg_idx = QuayPosition::new(usize::MAX - 1);
+        let length = QuayLength::new(1);
         assert_eq!(
             seg_idx.checked_add_len(length),
-            Some(SegmentIndex::new(usize::MAX))
+            Some(QuayPosition::new(usize::MAX))
         );
-        let length_overflow = SegmentLength::new(2);
+        let length_overflow = QuayLength::new(2);
         assert_eq!(seg_idx.checked_add_len(length_overflow), None);
     }
 
     #[test]
-    fn test_segment_index_checked_sub_len() {
-        let seg_idx = SegmentIndex::new(1);
-        let length = SegmentLength::new(1);
-        assert_eq!(seg_idx.checked_sub_len(length), Some(SegmentIndex::new(0)));
-        let length_underflow = SegmentLength::new(2);
+    fn test_quay_position_checked_sub_len() {
+        let seg_idx = QuayPosition::new(1);
+        let length = QuayLength::new(1);
+        assert_eq!(seg_idx.checked_sub_len(length), Some(QuayPosition::new(0)));
+        let length_underflow = QuayLength::new(2);
         assert_eq!(seg_idx.checked_sub_len(length_underflow), None);
     }
 
     #[test]
-    fn test_segment_index_saturating_add_len() {
-        let seg_idx = SegmentIndex::new(usize::MAX - 1);
-        let length = SegmentLength::new(5);
+    fn test_quay_position_saturating_add_len() {
+        let seg_idx = QuayPosition::new(usize::MAX - 1);
+        let length = QuayLength::new(5);
         assert_eq!(
             seg_idx.saturating_add_len(length),
-            SegmentIndex::new(usize::MAX)
+            QuayPosition::new(usize::MAX)
         );
     }
 
     #[test]
-    fn test_segment_index_saturating_sub_len() {
-        let seg_idx = SegmentIndex::new(5);
-        let length = SegmentLength::new(10);
-        assert_eq!(seg_idx.saturating_sub_len(length), SegmentIndex::new(0));
+    fn test_quay_position_saturating_sub_len() {
+        let seg_idx = QuayPosition::new(5);
+        let length = QuayLength::new(10);
+        assert_eq!(seg_idx.saturating_sub_len(length), QuayPosition::new(0));
     }
 
     #[test]
-    fn test_segment_index_span_of() {
-        let seg_idx = SegmentIndex::new(5);
-        let length = SegmentLength::new(10);
+    fn test_quay_position_span_of() {
+        let seg_idx = QuayPosition::new(5);
+        let length = QuayLength::new(10);
         let interval = seg_idx.span_of(length);
-        assert_eq!(interval.start(), SegmentIndex::new(5));
-        assert_eq!(interval.end(), SegmentIndex::new(15));
+        assert_eq!(interval.unwrap().start(), QuayPosition::new(5));
+        assert_eq!(interval.unwrap().end(), QuayPosition::new(15));
     }
 
     #[test]
-    #[should_panic(expected = "overflow in SegmentIndex + SegmentLength")]
-    fn test_segment_index_add_panic_on_overflow() {
-        let seg_idx = SegmentIndex::new(usize::MAX);
-        let length = SegmentLength::new(1);
+    #[should_panic(expected = "overflow in QuayPosition + QuayLength")]
+    fn test_quay_position_add_panic_on_overflow() {
+        let seg_idx = QuayPosition::new(usize::MAX);
+        let length = QuayLength::new(1);
         let _ = seg_idx + length;
     }
 
     #[test]
-    #[should_panic(expected = "underflow in SegmentIndex - SegmentLength")]
-    fn test_segment_index_sub_panic_on_underflow() {
-        let seg_idx = SegmentIndex::new(0);
-        let length = SegmentLength::new(1);
+    #[should_panic(expected = "underflow in QuayPosition - QuayLength")]
+    fn test_quay_position_sub_panic_on_underflow() {
+        let seg_idx = QuayPosition::new(0);
+        let length = QuayLength::new(1);
         let _ = seg_idx - length;
     }
 
     #[test]
-    fn test_segment_length_creation() {
-        let seg_len = SegmentLength::new(10);
+    fn test_quay_length_creation() {
+        let seg_len = QuayLength::new(10);
         assert_eq!(seg_len.value(), 10);
     }
 
     #[test]
-    fn test_segment_length_zero() {
-        let seg_len: SegmentLength = num_traits::Zero::zero();
+    fn test_quay_length_zero() {
+        let seg_len: QuayLength = num_traits::Zero::zero();
         assert_eq!(seg_len.value(), 0);
         assert!(seg_len.is_zero());
     }
 
     #[test]
-    fn test_segment_length_display() {
-        let seg_len = SegmentLength::new(10);
-        assert_eq!(format!("{}", seg_len), "SegmentLength(10)");
+    fn test_quay_length_display() {
+        let seg_len = QuayLength::new(10);
+        assert_eq!(format!("{}", seg_len), "QuayLength(10)");
     }
 
     #[test]
-    fn test_segment_length_from() {
+    fn test_quay_length_from() {
         let value: usize = 10;
-        let seg_len: SegmentLength = value.into();
+        let seg_len: QuayLength = value.into();
         assert_eq!(seg_len.value(), 10);
     }
 
     #[test]
-    fn test_segment_length_add_length() {
-        let len1 = SegmentLength::new(10);
-        let len2 = SegmentLength::new(5);
+    fn test_quay_length_add_length() {
+        let len1 = QuayLength::new(10);
+        let len2 = QuayLength::new(5);
         assert_eq!((len1 + len2).value(), 15);
     }
 
     #[test]
-    fn test_segment_length_add_assign_length() {
-        let mut len1 = SegmentLength::new(10);
-        len1 += SegmentLength::new(5);
+    fn test_quay_length_add_assign_length() {
+        let mut len1 = QuayLength::new(10);
+        len1 += QuayLength::new(5);
         assert_eq!(len1.value(), 15);
     }
 
     #[test]
-    fn test_segment_length_sub_length() {
-        let len1 = SegmentLength::new(10);
-        let len2 = SegmentLength::new(5);
+    fn test_quay_length_sub_length() {
+        let len1 = QuayLength::new(10);
+        let len2 = QuayLength::new(5);
         assert_eq!((len1 - len2).value(), 5);
     }
 
     #[test]
-    fn test_segment_length_sub_assign_length() {
-        let mut len1 = SegmentLength::new(10);
-        len1 -= SegmentLength::new(5);
+    fn test_quay_length_sub_assign_length() {
+        let mut len1 = QuayLength::new(10);
+        len1 -= QuayLength::new(5);
         assert_eq!(len1.value(), 5);
     }
 
     #[test]
-    #[should_panic(expected = "overflow in SegmentLength + SegmentLength")]
-    fn test_segment_length_add_panic_on_overflow() {
-        let len1 = SegmentLength::new(usize::MAX);
-        let len2 = SegmentLength::new(1);
+    #[should_panic(expected = "overflow in QuayLength + QuayLength")]
+    fn test_quay_length_add_panic_on_overflow() {
+        let len1 = QuayLength::new(usize::MAX);
+        let len2 = QuayLength::new(1);
         let _ = len1 + len2;
     }
 
     #[test]
-    #[should_panic(expected = "underflow in SegmentLength - SegmentLength")]
-    fn test_segment_length_sub_panic_on_underflow() {
-        let len1 = SegmentLength::new(0);
-        let len2 = SegmentLength::new(1);
+    #[should_panic(expected = "underflow in QuayLength - QuayLength")]
+    fn test_quay_length_sub_panic_on_underflow() {
+        let len1 = QuayLength::new(0);
+        let len2 = QuayLength::new(1);
         let _ = len1 - len2;
+    }
+
+    #[test]
+    fn test_timepoint_span_of() {
+        let tp = TimePoint::new(10);
+        let len = TimeDelta::new(5);
+        let i = tp.span_of(len).unwrap();
+        assert_eq!(i.start(), TimePoint::new(10));
+        assert_eq!(i.end(), TimePoint::new(15));
+        assert!(tp.span_of(TimeDelta::new(-1)).is_none());
     }
 }
