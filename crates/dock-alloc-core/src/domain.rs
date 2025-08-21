@@ -21,65 +21,9 @@
 //
 // //! Core data types for the Berth Allocation Problem (BAP).
 
-//! This module defines the fundamental units of **time** and **space** that form
-//! the domain model for the berth allocation solver. The primary goal is to
-//! leverage Rust's type system to provide strong compile-time guarantees,
-//! preventing common logical errors like mixing temporal and spatial units.
-//!
-//! All types are designed as **zero-cost abstractions**, compiling down to
-//! primitive integers for maximum performance.
-//!
-//! # Time
-//!
-//! The temporal dimension is modeled with two main types:
-//!
-//! - [`TimePoint<T>`]: Represents a specific, absolute instant in time. It is
-//!   typically instantiated as [`TimePoint64`] (wrapping an `i64`).
-//! - [`TimeDelta<T>`]: Represents a duration or the difference between two
-//!   `TimePoint`s. It is a signed value, typically [`TimeDelta64`] (wrapping an `i64`).
-//!
-//! The type system enforces correct arithmetic. For example, subtracting two
-//! `TimePoint`s yields a `TimeDelta`, and adding a `TimeDelta` to a `TimePoint`
-//! yields a new `TimePoint`.
-//!
-//! # Space
-//!
-//! The spatial dimension, representing the quay, is modeled with:
-//!
-//! - [`Segment<T>`]: A discrete, non-negative index representing a location
-//!   along the quay. It is an alias for an unsigned integer, typically
-//!   [`Segment64`] (`u64`).
-//! - [`SegmentInterval<T>`]: A contiguous, half-open `[start, end)` span of
-//!   segments, representing a section of the quay.
-//!
-//! # Example Usage
-//!
-//! ```
-//! use dock_alloc_core::domain::{TimePoint64, TimeDelta64, Segment64, SegmentInterval64, TimeInterval};
-//! use dock_alloc_core::primitives::Interval;
-//!
-//! // A vessel is scheduled to arrive at time 100 and stay for 50 time units.
-//! let arrival_time = TimePoint64::new(100);
-//! let handling_duration = TimeDelta64::new(50);
-//! let departure_time = arrival_time + handling_duration;
-//!
-//! let time_window: TimeInterval<i64> = Interval::new(arrival_time, departure_time);
-//!
-//! // It will occupy segments 5 through 9 (a length of 5 segments).
-//! let berth_span: SegmentInterval64 = Interval::new(5 as Segment64, 10 as Segment64);
-//!
-//! println!(
-//!     "Vessel berthed at segments [{}, {}) from time {} to {}.",
-//!     berth_span.start(),
-//!     berth_span.end(),
-//!     time_window.start().value(),
-//!     time_window.end().value()
-//! );
-//! ```
-
 #[allow(dead_code)]
 use crate::primitives::Interval;
-use num_traits::{PrimInt, Signed, Unsigned};
+use num_traits::{PrimInt, Signed};
 use std::{
     fmt::Display,
     ops::{Add, AddAssign, Neg, Sub, SubAssign},
@@ -868,65 +812,763 @@ impl<T: PrimInt + Signed> Default for TimeDelta<T> {
     }
 }
 
-/// Represents a **discrete, non-negative index** on a spatial axis.
+/// Represents a segment index along the quay.
 ///
-/// A `Segment<T>` is the integer **position** (grid cell index) along an axis.
-/// It is intentionally just an alias to an unsigned integer so it compiles down
-/// to a plain integer with **zero overhead** and integrates seamlessly with
-/// standard Rust indexing, ranges, and bitsets (which all use `usize`).
+/// A `SegmentIndex` is a wrapper around a primitive unsigned integer type
+/// that represents a specific segment along the quay.
 ///
 /// # Examples
-/// ```
-/// use dock_alloc_core::domain::Segment;
 ///
-/// let s0: Segment<usize> = 5;
-/// let s1: Segment<usize> = 12;
-/// // You will typically use `s0..s1` to denote a span on the quay.
-/// assert!(s0 < s1);
 /// ```
-#[allow(type_alias_bounds)]
-pub type Segment<T: PrimInt + Unsigned> = T;
+/// use dock_alloc_core::domain::SegmentIndex;
+///
+/// let seg_idx = SegmentIndex::new(5);
+/// assert_eq!(seg_idx.value(), 5);
+/// assert_eq!(format!("{}", seg_idx), "SegmentIndex(5)");
+/// ```
+#[repr(transparent)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
+pub struct SegmentIndex(usize);
 
-/// A half-open **spatial interval** `[start, end)` over quay segments.
+/// Represents a segment index along the quay with a length.
 ///
-/// `SegmentInterval<T>` represents a **contiguous span of segments** on
-/// an axis. It is backed by the generic [`Interval`] type but specialized
-/// to use [`Segment<T>`] as endpoints. The interval is **half-open**:
-/// it includes `start` and excludes `end`, so its length is `end - start`
-/// (and it is **empty** when `start == end`).
+/// A `SegmentInterval` is a half-open interval defined by a start and end `SegmentIndex`.
+/// It represents a contiguous section of the quay, where the start index is inclusive
+/// and the end index is exclusive.
 ///
 /// # Examples
 ///
 /// ```
-/// use dock_alloc_core::domain::{Segment, SegmentInterval};
-/// use dock_alloc_core::primitives::Interval;
+/// use dock_alloc_core::domain::{SegmentIndex, SegmentInterval, SegmentLength};
 ///
-/// let a: Segment<u32> = 5;
-/// let b: Segment<u32> = 12;
-/// let span: SegmentInterval<u32> = Interval::new(a, b); // [5,12)
+/// let start = SegmentIndex::new(5);
+/// let length = SegmentLength::new(10);
 ///
-/// assert_eq!(span.start(), 5);
-/// assert_eq!(span.end(), 12);
-/// // Convert to a standard Rust range when needed:
-/// let as_range = span.start()..span.end();
-/// assert_eq!(as_range, 5..12);
-///
-/// // Empty span:
-/// let empty: SegmentInterval<u32> = Interval::new(7, 7);
-/// assert!(empty.start() == empty.end());
+/// let span: SegmentInterval = start.span_of(length);
+/// assert_eq!(span.start().value(), 5);
+/// assert_eq!(span.end().value(), 15);
 /// ```
-#[allow(type_alias_bounds)]
-pub type SegmentInterval<T: PrimInt + Unsigned> = Interval<Segment<T>>;
+pub type SegmentInterval = Interval<SegmentIndex>;
+
+impl Display for SegmentIndex {
+    /// Formats the `SegmentIndex` as `SegmentIndex(value)`.
+    ///
+    /// Formats the `SegmentIndex` instance as a string in the format `SegmentIndex(value)`,
+    /// where `value` is the inner value of the `SegmentIndex`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentIndex;
+    ///
+    /// let seg_idx = SegmentIndex::new(5);
+    /// assert_eq!(format!("{}", seg_idx), "SegmentIndex(5)");
+    /// ```
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SegmentIndex({})", self.0)
+    }
+}
+
+impl From<usize> for SegmentIndex {
+    /// Converts a primitive unsigned integer type into a `SegmentIndex`.
+    ///
+    /// This implementation allows for easy conversion from a primitive unsigned integer type
+    /// to a `SegmentIndex`, enabling the use of `SegmentIndex`
+    /// in contexts where a primitive unsigned integer is available.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentIndex;
+    ///
+    /// let value: usize = 5;
+    /// let seg_idx: SegmentIndex = SegmentIndex::from(value);
+    /// assert_eq!(seg_idx.value(), 5);
+    /// ```
+    #[inline]
+    fn from(v: usize) -> Self {
+        SegmentIndex(v)
+    }
+}
+
+impl SegmentIndex {
+    /// Creates a new `SegmentIndex` with the given value.
+    ///
+    /// Creates a new `SegmentIndex` instance wrapping the provided value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentIndex;
+    ///
+    /// let seg_idx = SegmentIndex::new(5);
+    /// assert_eq!(seg_idx.value(), 5);
+    /// ```
+    #[inline]
+    pub const fn new(v: usize) -> Self {
+        SegmentIndex(v)
+    }
+
+    /// Creates a new `SegmentIndex` with a value of zero.
+    ///
+    /// Creates a new `SegmentIndex` instance with a value of zero.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentIndex;
+    ///
+    /// let seg_idx = SegmentIndex::zero();
+    /// assert_eq!(seg_idx.value(), 0);
+    /// ```
+    #[inline]
+    pub const fn zero() -> Self {
+        SegmentIndex::new(0)
+    }
+
+    /// Returns the value of the `SegmentIndex`.
+    ///
+    /// Returns the inner value of the `SegmentIndex` instance.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentIndex;
+    ///
+    /// let seg_idx = SegmentIndex::new(5);
+    /// assert_eq!(seg_idx.value(), 5);
+    /// ```
+    #[inline]
+    pub const fn value(self) -> usize {
+        self.0
+    }
+
+    /// Checks if the `SegmentIndex` is zero.
+    ///
+    /// Returns `true` if the inner value is zero, otherwise `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentIndex;
+    ///
+    /// let seg_idx = SegmentIndex::new(0);
+    /// assert!(seg_idx.is_zero());
+    /// let non_zero_seg_idx = SegmentIndex::new(5);
+    /// assert!(!non_zero_seg_idx.is_zero());
+    /// ```
+    pub fn is_zero(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Adds a `SegmentLength` to the `SegmentIndex`, returning a new `SegmentIndex`.
+    ///
+    /// Adds a `SegmentLength` to the current `SegmentIndex`, returning a new `SegmentIndex`.
+    /// If the addition would overflow, it returns `None`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{SegmentIndex, SegmentLength};
+    ///
+    /// let seg_idx = SegmentIndex::new(5);
+    /// let length = SegmentLength::new(3);
+    /// let new_seg_idx = seg_idx.checked_add_len(length);
+    /// assert_eq!(new_seg_idx.unwrap().value(), 8);
+    /// ```
+    #[inline]
+    pub fn checked_add_len(self, d: SegmentLength) -> Option<Self> {
+        self.0.checked_add(d.0).map(SegmentIndex)
+    }
+
+    /// Subtracts a `SegmentLength` from the `SegmentIndex`, returning a new `SegmentIndex`.
+    ///
+    /// Subtracts a `SegmentLength` from the current `SegmentIndex`,
+    /// returning a new `SegmentIndex`.
+    /// If the subtraction would underflow, it returns `None`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{SegmentIndex, SegmentLength};
+    ///
+    /// let seg_idx = SegmentIndex::new(5);
+    /// let length = SegmentLength::new(3);
+    /// let new_seg_idx = seg_idx.checked_sub_len(length);
+    /// assert_eq!(new_seg_idx.unwrap().value(), 2);
+    /// ```
+    #[inline]
+    pub fn checked_sub_len(self, d: SegmentLength) -> Option<Self> {
+        self.0.checked_sub(d.0).map(SegmentIndex)
+    }
+
+    /// Adds a `SegmentLength` to the `SegmentIndex`, returning a new `SegmentIndex`.
+    ///
+    /// Adds a `SegmentLength` to the current `SegmentIndex`, returning a new `SegmentIndex`.
+    /// If the addition would overflow, it returns a `SegmentIndex` with the maximum value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{SegmentIndex, SegmentLength};
+    ///
+    /// let seg_idx = SegmentIndex::new(5);
+    /// let length = SegmentLength::new(3);
+    /// let new_seg_idx = seg_idx.saturating_add_len(length);
+    /// assert_eq!(new_seg_idx.value(), 8);
+    /// ```
+    #[inline]
+    pub fn saturating_add_len(self, d: SegmentLength) -> Self {
+        SegmentIndex(self.0.saturating_add(d.0))
+    }
+
+    /// Subtracts a `SegmentLength` from the `SegmentIndex`, returning a new `SegmentIndex`.
+    ///
+    /// Subtracts a `SegmentLength` from the current `SegmentIndex`, returning a new `SegmentIndex`.
+    /// If the subtraction would underflow, it returns a `SegmentIndex` with a value of zero.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{SegmentIndex, SegmentLength};
+    ///
+    /// let seg_idx = SegmentIndex::new(5);
+    /// let length = SegmentLength::new(3);
+    /// let new_seg_idx = seg_idx.saturating_sub_len(length);
+    /// assert_eq!(new_seg_idx.value(), 2);
+    /// ```
+    #[inline]
+    pub fn saturating_sub_len(self, d: SegmentLength) -> Self {
+        SegmentIndex(self.0.saturating_sub(d.0))
+    }
+
+    /// Creates a `SegmentInterval` starting from the current `SegmentIndex` with the specified length.
+    ///
+    /// Creates a `SegmentInterval` that represents a half-open interval starting from the current `SegmentIndex`
+    /// and extending by the specified `SegmentLength`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{SegmentIndex, SegmentInterval, SegmentLength}; // Add SegmentLength here
+    ///
+    /// let start = SegmentIndex::new(5);
+    /// let length = SegmentLength::new(10);
+    /// let span: SegmentInterval = start.span_of(length);
+    /// assert_eq!(span.start().value(), 5);
+    /// assert_eq!(span.end().value(), 15);
+    /// ```
+    #[inline]
+    pub fn span_of(self, len: SegmentLength) -> SegmentInterval {
+        Interval::new(self, self + len)
+    }
+}
+
+impl Add<SegmentLength> for SegmentIndex {
+    type Output = SegmentIndex;
+
+    /// Adds a `SegmentLength` to a `SegmentIndex`, returning a new `SegmentIndex`.
+    ///
+    /// This method takes a `SegmentLength` and adds it to the current `SegmentIndex`,
+    /// returning a new `SegmentIndex` with the updated value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an overflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{SegmentIndex, SegmentLength};
+    ///
+    /// let seg_idx = SegmentIndex::new(5);
+    /// let length = SegmentLength::new(3);
+    /// let new_seg_idx = seg_idx + length;
+    /// assert_eq!(new_seg_idx.value(), 8);
+    /// ```
+    #[inline]
+    fn add(self, rhs: SegmentLength) -> Self::Output {
+        SegmentIndex(
+            self.0
+                .checked_add(rhs.0)
+                .expect("overflow in SegmentIndex + SegmentLength"),
+        )
+    }
+}
+
+impl Sub<SegmentLength> for SegmentIndex {
+    type Output = SegmentIndex;
+
+    /// Subtracts a `SegmentLength` from a `SegmentIndex`, returning a new `SegmentIndex`.
+    ///
+    /// This method takes a `SegmentLength` and subtracts it from the current `SegmentIndex`,
+    /// returning a new `SegmentIndex` with the updated value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an underflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{SegmentIndex, SegmentLength};
+    ///
+    /// let seg_idx = SegmentIndex::new(5);
+    /// let length = SegmentLength::new(3);
+    /// let new_seg_idx = seg_idx - length;
+    /// assert_eq!(new_seg_idx.value(), 2);
+    /// ```
+    #[inline]
+    fn sub(self, rhs: SegmentLength) -> Self::Output {
+        SegmentIndex(
+            self.0
+                .checked_sub(rhs.0)
+                .expect("underflow in SegmentIndex - SegmentLength"),
+        )
+    }
+}
+
+impl Sub<SegmentIndex> for SegmentIndex {
+    type Output = SegmentLength;
+
+    /// Subtracts one `SegmentIndex` from another, returning a `SegmentLength`.
+    ///
+    /// This method takes another `SegmentIndex` and subtracts it from the current instance,
+    /// returning a new `SegmentLength` that represents the difference between the two indices.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an underflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{SegmentIndex, SegmentLength};
+    ///
+    /// let seg_idx1 = SegmentIndex::new(10);
+    /// let seg_idx2 = SegmentIndex::new(5);
+    /// let length = seg_idx1 - seg_idx2;
+    /// assert_eq!(length.value(), 5);
+    /// ```
+    #[inline]
+    fn sub(self, rhs: SegmentIndex) -> Self::Output {
+        SegmentLength(
+            self.0
+                .checked_sub(rhs.0)
+                .expect("underflow in SegmentIndex - SegmentIndex"),
+        )
+    }
+}
+
+impl AddAssign<SegmentLength> for SegmentIndex {
+    /// Adds a `SegmentLength` to the current `SegmentIndex`, modifying it in place.
+    ///
+    /// This method takes a `SegmentLength` and adds it to the current `SegmentIndex`,
+    /// modifying the current instance to reflect the new value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an overflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{SegmentIndex, SegmentLength};
+    ///
+    /// let mut seg_idx = SegmentIndex::new(5);
+    /// let length = SegmentLength::new(3);
+    /// seg_idx += length;
+    /// assert_eq!(seg_idx.value(), 8);
+    /// ```
+    #[inline]
+    fn add_assign(&mut self, rhs: SegmentLength) {
+        self.0 = self
+            .0
+            .checked_add(rhs.0)
+            .expect("overflow in SegIdx += SegLen");
+    }
+}
+
+impl SubAssign<SegmentLength> for SegmentIndex {
+    /// Subtracts a `SegmentLength` from the current `SegmentIndex`, modifying it in place.
+    ///
+    /// This method takes a `SegmentLength` and subtracts it from the current `SegmentIndex`,
+    /// modifying the current instance to reflect the new value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an underflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{SegmentIndex, SegmentLength};
+    ///
+    /// let mut seg_idx = SegmentIndex::new(5);
+    /// let length = SegmentLength::new(3);
+    /// seg_idx -= length;
+    /// assert_eq!(seg_idx.value(), 2);
+    /// ```
+    #[inline]
+    fn sub_assign(&mut self, rhs: SegmentLength) {
+        self.0 = self
+            .0
+            .checked_sub(rhs.0)
+            .expect("underflow in SegIdx -= SegLen");
+    }
+}
+
+/// Represents the length of a segment along the quay.
+///
+/// A `SegmentLength` is a wrapper around a primitive unsigned integer type
+/// that represents the length of a segment along the quay.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_core::domain::SegmentLength;
+///
+/// let seg_length = SegmentLength::new(10);
+/// assert_eq!(seg_length.value(), 10);
+/// assert_eq!(format!("{}", seg_length), "SegmentLength(10)");
+/// ```
+#[repr(transparent)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
+pub struct SegmentLength(pub usize);
+
+impl Display for SegmentLength {
+    /// Formats the `SegmentLength` as `SegmentLength(value)`.
+    ///
+    /// Formats the `SegmentLength` instance as a string in the format `SegmentLength(value)`,
+    /// where `value` is the inner value of the `SegmentLength`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentLength;
+    ///
+    /// let seg_length = SegmentLength::new(10);
+    /// assert_eq!(format!("{}", seg_length), "SegmentLength(10)");
+    /// ```
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SegmentLength({})", self.0)
+    }
+}
+
+impl From<usize> for SegmentLength {
+    /// Converts a primitive unsigned integer type into a `SegmentLength`.
+    ///
+    /// This implementation allows for easy conversion from a primitive unsigned integer type
+    /// to a `SegmentLength`, enabling the use of `SegmentLength`
+    /// in contexts where a primitive unsigned integer is available.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentLength;
+    ///
+    /// let value: usize = 10;
+    /// let seg_length: SegmentLength = SegmentLength::from(value);
+    /// assert_eq!(seg_length.value(), 10);
+    /// ```
+    #[inline]
+    fn from(v: usize) -> Self {
+        SegmentLength(v)
+    }
+}
+
+impl SegmentLength {
+    /// Creates a new `SegmentLength` with the given value.
+    ///
+    /// Creates a new `SegmentLength` instance wrapping the provided value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentLength;
+    ///
+    /// let seg_length = SegmentLength::new(10);
+    /// assert_eq!(seg_length.value(), 10);
+    /// ```
+    #[inline]
+    pub const fn new(v: usize) -> Self {
+        SegmentLength(v)
+    }
+
+    /// Returns the value of the `SegmentLength`.
+    ///
+    /// Returns the inner value of the `SegmentLength` instance.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentLength;
+    ///
+    /// let seg_length = SegmentLength::new(10);
+    /// assert_eq!(seg_length.value(), 10);
+    /// ```
+    #[inline]
+    pub const fn value(self) -> usize {
+        self.0
+    }
+
+    /// Adds another `SegmentLength` to the current `SegmentLength`, returning a new `SegmentLength`.
+    ///
+    /// Adds another `SegmentLength` to the current instance,
+    /// returning a new `SegmentLength` with the updated value.
+    /// If the addition would overflow, it returns `None`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentLength;
+    ///
+    /// let seg_length1 = SegmentLength::new(10);
+    /// let seg_length2 = SegmentLength::new(5);
+    /// let new_seg_length = seg_length1.checked_add(seg_length2);
+    /// assert_eq!(new_seg_length.unwrap().value(), 15);
+    /// ```
+    #[inline]
+    pub fn checked_add(self, rhs: Self) -> Option<Self> {
+        self.0.checked_add(rhs.0).map(SegmentLength)
+    }
+
+    /// Subtracts another `SegmentLength` from the current `SegmentLength`, returning a new `SegmentLength`.
+    ///
+    /// Subtracts another `SegmentLength` from the current instance,
+    /// returning a new `SegmentLength` with the updated value.
+    /// If the subtraction would underflow, it returns `None`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentLength;
+    ///
+    /// let seg_length1 = SegmentLength::new(10);
+    /// let seg_length2 = SegmentLength::new(5);
+    /// let new_seg_length = seg_length1.checked_sub(seg_length2);
+    /// assert_eq!(new_seg_length.unwrap().value(), 5);
+    /// ```
+    #[inline]
+    pub fn checked_sub(self, rhs: Self) -> Option<Self> {
+        self.0.checked_sub(rhs.0).map(SegmentLength)
+    }
+
+    /// Adds another `SegmentLength` to the current `SegmentLength`, returning a new `SegmentLength`.
+    ///
+    /// Adds another `SegmentLength` to the current instance,
+    /// returning a new `SegmentLength` with the updated value.
+    /// If the addition would overflow, it returns a `SegmentLength` with the maximum value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentLength;
+    ///
+    /// let seg_length1 = SegmentLength::new(10);
+    /// let seg_length2 = SegmentLength::new(5);
+    /// let new_seg_length = seg_length1.saturating_add(seg_length2);
+    /// assert_eq!(new_seg_length.value(), 15);
+    /// ```
+    #[inline]
+    pub fn saturating_add(self, rhs: Self) -> Self {
+        SegmentLength(self.0.saturating_add(rhs.0))
+    }
+
+    /// Subtracts another `SegmentLength` from the current `SegmentLength`, returning a new `SegmentLength`.
+    ///
+    /// Subtracts another `SegmentLength` from the current instance,
+    /// returning a new `SegmentLength` with the updated value.
+    /// If the subtraction would underflow, it returns a `SegmentLength` with a value of zero.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentLength;
+    ///
+    /// let seg_length1 = SegmentLength::new(10);
+    /// let seg_length2 = SegmentLength::new(5);
+    /// let new_seg_length = seg_length1.saturating_sub(seg_length2);
+    /// assert_eq!(new_seg_length.value(), 5);
+    /// ```
+    #[inline]
+    pub fn saturating_sub(self, rhs: Self) -> Self {
+        SegmentLength(self.0.saturating_sub(rhs.0))
+    }
+}
+
+impl num_traits::Zero for SegmentLength {
+    /// Returns a `SegmentLength` with a value of zero.
+    ///
+    /// This implementation provides a `SegmentLength` with a value of zero,
+    /// which is useful when you need to initialize a `SegmentLength`
+    /// without a specific value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentLength;
+    /// use num_traits::Zero;
+    ///
+    /// let seg_length: SegmentLength = SegmentLength::zero();
+    /// assert!(seg_length.is_zero());
+    /// ```
+    #[inline]
+    fn zero() -> Self {
+        SegmentLength::new(0)
+    }
+
+    /// Checks if the `SegmentLength` is zero.
+    ///
+    /// This implementation checks if the inner value of the `SegmentLength` is zero,
+    /// which is useful for determining if a `SegmentLength` represents no length.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentLength;
+    /// use num_traits::identities::Zero;
+    ///
+    /// let seg_length: SegmentLength = SegmentLength::zero();
+    /// assert!(seg_length.is_zero());
+    /// let non_zero_seg_length: SegmentLength = SegmentLength::new(10);
+    /// assert!(!non_zero_seg_length.is_zero());
+    /// ```
+    #[inline]
+    fn is_zero(&self) -> bool {
+        self.0.is_zero()
+    }
+}
+
+impl Add for SegmentLength {
+    type Output = SegmentLength;
+
+    /// Adds two `SegmentLength`s, returning a new `SegmentLength`.
+    ///
+    /// This method takes another `SegmentLength` and adds it to the current instance,
+    /// returning a new `SegmentLength` with the updated value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an overflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentLength;
+    ///
+    /// let seg_length1 = SegmentLength::new(10);
+    /// let seg_length2 = SegmentLength::new(5);
+    /// let result = seg_length1 + seg_length2;
+    /// assert_eq!(result.value(), 15);
+    /// ```
+    #[inline]
+    fn add(self, rhs: Self) -> Self::Output {
+        SegmentLength(
+            self.0
+                .checked_add(rhs.0)
+                .expect("overflow in SegmentLength + SegmentLength"),
+        )
+    }
+}
+impl Sub for SegmentLength {
+    type Output = SegmentLength;
+
+    /// Subtracts one `SegmentLength` from another, returning a new `SegmentLength`.
+    ///
+    /// This method takes another `SegmentLength` and subtracts it from the current instance,
+    /// returning a new `SegmentLength` with the updated value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an underflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentLength;
+    ///
+    /// let seg_length1 = SegmentLength::new(10);
+    /// let seg_length2 = SegmentLength::new(5);
+    /// let result = seg_length1 - seg_length2;
+    /// assert_eq!(result.value(), 5);
+    /// ```
+    #[inline]
+    fn sub(self, rhs: Self) -> Self::Output {
+        SegmentLength(
+            self.0
+                .checked_sub(rhs.0)
+                .expect("underflow in SegmentLength - SegmentLength"),
+        )
+    }
+}
+impl AddAssign for SegmentLength {
+    /// Adds another `SegmentLength` to the current instance, modifying it in place.
+    ///
+    /// This method takes another `SegmentLength` and adds it to the current instance,
+    /// modifying the current instance to reflect the new value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an overflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentLength;
+    ///
+    /// let mut seg_length1 = SegmentLength::new(10);
+    /// let seg_length2 = SegmentLength::new(5);
+    /// seg_length1 += seg_length2;
+    /// assert_eq!(seg_length1.value(), 15);
+    /// ```
+    #[inline]
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 = self
+            .0
+            .checked_add(rhs.0)
+            .expect("overflow in SegLen += SegLen");
+    }
+}
+
+impl SubAssign for SegmentLength {
+    /// Subtracts another `SegmentLength` from the current instance, modifying it in place.
+    ///
+    /// This method takes another `SegmentLength` and subtracts it from the current instance,
+    /// modifying the current instance to reflect the new value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an underflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SegmentLength;
+    ///
+    /// let mut seg_length1 = SegmentLength::new(10);
+    /// let seg_length2 = SegmentLength::new(5);
+    /// seg_length1 -= seg_length2;
+    /// assert_eq!(seg_length1.value(), 5);
+    /// ```
+    #[inline]
+    fn sub_assign(&mut self, rhs: Self) {
+        self.0 = self
+            .0
+            .checked_sub(rhs.0)
+            .expect("underflow in SegLen -= SegLen");
+    }
+}
 
 pub type TimePoint64 = TimePoint<i64>;
 pub type TimeDelta64 = TimeDelta<i64>;
 
-pub type Segment64 = Segment<u64>;
-pub type SegmentInterval64 = SegmentInterval<u64>;
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use num_traits::Zero;
 
     #[test]
     fn test_time_point_creation() {
@@ -1195,5 +1837,201 @@ mod tests {
         let b = TimePoint64::new(12);
         let dt: TimeDelta64 = b - a;
         assert_eq!(dt.value(), 7);
+    }
+
+    #[test]
+    fn test_segment_index_creation() {
+        let seg_idx = SegmentIndex::new(5);
+        assert_eq!(seg_idx.value(), 5);
+    }
+
+    #[test]
+    fn test_segment_index_zero() {
+        let seg_idx = SegmentIndex::zero();
+        assert_eq!(seg_idx.value(), 0);
+        assert!(seg_idx.is_zero());
+    }
+
+    #[test]
+    fn test_segment_index_display() {
+        let seg_idx = SegmentIndex::new(5);
+        assert_eq!(format!("{}", seg_idx), "SegmentIndex(5)");
+    }
+
+    #[test]
+    fn test_segment_index_from() {
+        let value: usize = 5;
+        let seg_idx: SegmentIndex = value.into();
+        assert_eq!(seg_idx.value(), 5);
+    }
+
+    #[test]
+    fn test_segment_index_add_length() {
+        let seg_idx = SegmentIndex::new(5);
+        let length = SegmentLength::new(3);
+        assert_eq!((seg_idx + length).value(), 8);
+    }
+
+    #[test]
+    fn test_segment_index_add_assign_length() {
+        let mut seg_idx = SegmentIndex::new(5);
+        seg_idx += SegmentLength::new(3);
+        assert_eq!(seg_idx.value(), 8);
+    }
+
+    #[test]
+    fn test_segment_index_sub_length() {
+        let seg_idx = SegmentIndex::new(5);
+        let length = SegmentLength::new(3);
+        assert_eq!((seg_idx - length).value(), 2);
+    }
+
+    #[test]
+    fn test_segment_index_sub_assign_length() {
+        let mut seg_idx = SegmentIndex::new(5);
+        seg_idx -= SegmentLength::new(3);
+        assert_eq!(seg_idx.value(), 2);
+    }
+
+    #[test]
+    fn test_segment_index_sub_index() {
+        let seg_idx1 = SegmentIndex::new(10);
+        let seg_idx2 = SegmentIndex::new(4);
+        let length = seg_idx1 - seg_idx2;
+        assert_eq!(length.value(), 6);
+        assert_eq!(length, SegmentLength::new(6));
+    }
+
+    #[test]
+    fn test_segment_index_checked_add_len() {
+        let seg_idx = SegmentIndex::new(usize::MAX - 1);
+        let length = SegmentLength::new(1);
+        assert_eq!(
+            seg_idx.checked_add_len(length),
+            Some(SegmentIndex::new(usize::MAX))
+        );
+        let length_overflow = SegmentLength::new(2);
+        assert_eq!(seg_idx.checked_add_len(length_overflow), None);
+    }
+
+    #[test]
+    fn test_segment_index_checked_sub_len() {
+        let seg_idx = SegmentIndex::new(1);
+        let length = SegmentLength::new(1);
+        assert_eq!(seg_idx.checked_sub_len(length), Some(SegmentIndex::new(0)));
+        let length_underflow = SegmentLength::new(2);
+        assert_eq!(seg_idx.checked_sub_len(length_underflow), None);
+    }
+
+    #[test]
+    fn test_segment_index_saturating_add_len() {
+        let seg_idx = SegmentIndex::new(usize::MAX - 1);
+        let length = SegmentLength::new(5);
+        assert_eq!(
+            seg_idx.saturating_add_len(length),
+            SegmentIndex::new(usize::MAX)
+        );
+    }
+
+    #[test]
+    fn test_segment_index_saturating_sub_len() {
+        let seg_idx = SegmentIndex::new(5);
+        let length = SegmentLength::new(10);
+        assert_eq!(seg_idx.saturating_sub_len(length), SegmentIndex::new(0));
+    }
+
+    #[test]
+    fn test_segment_index_span_of() {
+        let seg_idx = SegmentIndex::new(5);
+        let length = SegmentLength::new(10);
+        let interval = seg_idx.span_of(length);
+        assert_eq!(interval.start(), SegmentIndex::new(5));
+        assert_eq!(interval.end(), SegmentIndex::new(15));
+    }
+
+    #[test]
+    #[should_panic(expected = "overflow in SegmentIndex + SegmentLength")]
+    fn test_segment_index_add_panic_on_overflow() {
+        let seg_idx = SegmentIndex::new(usize::MAX);
+        let length = SegmentLength::new(1);
+        let _ = seg_idx + length;
+    }
+
+    #[test]
+    #[should_panic(expected = "underflow in SegmentIndex - SegmentLength")]
+    fn test_segment_index_sub_panic_on_underflow() {
+        let seg_idx = SegmentIndex::new(0);
+        let length = SegmentLength::new(1);
+        let _ = seg_idx - length;
+    }
+
+    #[test]
+    fn test_segment_length_creation() {
+        let seg_len = SegmentLength::new(10);
+        assert_eq!(seg_len.value(), 10);
+    }
+
+    #[test]
+    fn test_segment_length_zero() {
+        let seg_len: SegmentLength = num_traits::Zero::zero();
+        assert_eq!(seg_len.value(), 0);
+        assert!(seg_len.is_zero());
+    }
+
+    #[test]
+    fn test_segment_length_display() {
+        let seg_len = SegmentLength::new(10);
+        assert_eq!(format!("{}", seg_len), "SegmentLength(10)");
+    }
+
+    #[test]
+    fn test_segment_length_from() {
+        let value: usize = 10;
+        let seg_len: SegmentLength = value.into();
+        assert_eq!(seg_len.value(), 10);
+    }
+
+    #[test]
+    fn test_segment_length_add_length() {
+        let len1 = SegmentLength::new(10);
+        let len2 = SegmentLength::new(5);
+        assert_eq!((len1 + len2).value(), 15);
+    }
+
+    #[test]
+    fn test_segment_length_add_assign_length() {
+        let mut len1 = SegmentLength::new(10);
+        len1 += SegmentLength::new(5);
+        assert_eq!(len1.value(), 15);
+    }
+
+    #[test]
+    fn test_segment_length_sub_length() {
+        let len1 = SegmentLength::new(10);
+        let len2 = SegmentLength::new(5);
+        assert_eq!((len1 - len2).value(), 5);
+    }
+
+    #[test]
+    fn test_segment_length_sub_assign_length() {
+        let mut len1 = SegmentLength::new(10);
+        len1 -= SegmentLength::new(5);
+        assert_eq!(len1.value(), 5);
+    }
+
+    #[test]
+    #[should_panic(expected = "overflow in SegmentLength + SegmentLength")]
+    fn test_segment_length_add_panic_on_overflow() {
+        let len1 = SegmentLength::new(usize::MAX);
+        let len2 = SegmentLength::new(1);
+        let _ = len1 + len2;
+    }
+
+    #[test]
+    #[should_panic(expected = "underflow in SegmentLength - SegmentLength")]
+    fn test_segment_length_sub_panic_on_underflow() {
+        let len1 = SegmentLength::new(0);
+        let len2 = SegmentLength::new(1);
+        let _ = len1 - len2;
     }
 }
