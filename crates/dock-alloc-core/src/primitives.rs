@@ -515,7 +515,7 @@ impl<'a, T: Copy + PartialOrd + Zero> IntervalIter<'a, T> {
     ///
     /// # Panics
     ///
-    /// If `step` is zero or negative, this method will panic.
+    /// This method will panic immediately if `step` is zero or negative.
     fn new(interval: &'a Interval<T>, step: T) -> Self {
         assert!(step > T::zero(), "Interval::iter: step must be > 0");
 
