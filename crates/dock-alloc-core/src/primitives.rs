@@ -408,7 +408,7 @@ impl<T> Interval<T> {
     ///
     /// # Panics
     ///
-    /// If `step` is zero or negative, this method will panic.
+    /// This method will panic immediately if `step` is zero or negative.
     ///
     /// # Examples
     ///
