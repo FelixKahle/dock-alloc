@@ -406,6 +406,10 @@ impl<T> Interval<T> {
     /// starting from `start_inclusive` and incrementing by `step`
     /// until it reaches or exceeds `end_exclusive`.
     ///
+    /// # Panics
+    ///
+    /// This method will panic immediately if `step` is zero or negative.
+    ///
     /// # Examples
     ///
     /// ```
@@ -508,6 +512,10 @@ impl<'a, T: Copy + PartialOrd + Zero> IntervalIter<'a, T> {
     ///
     /// This method initializes the iterator with the starting point as `start_inclusive`
     /// and sets the step size for each iteration.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic immediately if `step` is zero or negative.
     fn new(interval: &'a Interval<T>, step: T) -> Self {
         assert!(step > T::zero(), "Interval::iter: step must be > 0");
 
