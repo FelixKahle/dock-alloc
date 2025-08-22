@@ -19,5 +19,22 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+//! # Berth Allocation Core Library
+//!
+//! `dock_alloc_core` provides the foundational data structures and primitives
+//! for solving the Berth Allocation Problem (BAP). It offers a type-safe and
+//! robust API for representing the core concepts of time and quay space.
+//!
+//! This crate is the bedrock of the Dock Allocation project, designed to prevent
+//! common logical errors at compile time by using strong types for domain-specific
+//! concepts.
+//!
+//! ## Core Modules
+//!
+//! - **`domain`**: Contains the primary data types specific to BAP, such as
+//!   `TimePoint`, `TimeDelta`, `QuayPosition`, and `QuayLength`.
+//! - **`primitives`**: Provides generic, reusable structures like `Interval`, which
+//!   are used to build the more complex domain types.
+
 pub mod domain;
 pub mod primitives;

@@ -19,13 +19,35 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-//! Core data types for the Berth Allocation Problem (BAP).
+//! # Domain-Specific Core Data Types
+//!
+//! This module provides the fundamental data types for modeling the Berth Allocation Problem (BAP).
+//! It establishes a strong, type-safe foundation for representing the two primary domains
+//! of the problem: **time** and **quay space**.
+//!
+//! ## Key Concepts
+//!
+//! - **Time**:
+//!   - `TimePoint<T>`: Represents a specific point in time.
+//!   - `TimeDelta<T>`: Represents a duration or the difference between two time points.
+//!   - `TimeInterval<T>`: A half-open interval `[start, end)` composed of two `TimePoint`s.
+//!
+//! - **Quay Space**:
+//!   - `QuayPosition`: Represents a discrete position along the quay.
+//!   - `QuayLength`: Represents a length or size, such as that of a vessel.
+//!   - `QuayInterval`: A half-open interval `[start, end)` representing a contiguous section of the quay.
+//!
+//! The use of distinct newtypes enforces correctness at compile time—for example,
+//! preventing the addition of two `TimePoint`s.
+//! All types implement standard arithmetic traits with checked operations
+//! to prevent overflow and underflow, ensuring robust calculations.
 
 #[allow(dead_code)]
 use crate::primitives::Interval;
-use num_traits::{PrimInt, Signed, Zero};
+use num_traits::{PrimInt, SaturatingMul, Signed, Zero};
 use std::{
     fmt::Display,
+    iter::Sum,
     ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign},
 };
 
@@ -49,41 +71,7 @@ use std::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TimePoint<T: PrimInt>(T);
 
-impl<T: PrimInt> TimePoint<T> {
-    /// Creates a new `TimePoint` with the given value.
-    ///
-    /// Creates a new `TimePoint` instance wrapping the provided value.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_core::domain::TimePoint;
-    ///
-    /// let tp = TimePoint::new(42);
-    /// assert_eq!(tp.value(), 42);
-    /// ```
-    pub fn new(value: T) -> Self {
-        TimePoint(value)
-    }
-
-    /// Returns the value of the `TimePoint`.
-    ///
-    /// Returns the inner value of the `TimePoint` instance.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_core::domain::TimePoint;
-    ///
-    /// let tp = TimePoint::new(42);
-    /// assert_eq!(tp.value(), 42);
-    /// ```
-    pub fn value(&self) -> T {
-        self.0
-    }
-}
-
-impl<T: PrimInt + Display> Display for TimePoint<T> {
+impl<T: PrimInt + Signed + Display> Display for TimePoint<T> {
     /// Formats the `TimePoint` as `TimePoint(value)`.
     ///
     /// # Examples
@@ -180,9 +168,8 @@ impl<T: PrimInt + Signed> TimeDelta<T> {
         Self(value)
     }
 
-    /// Creates a new `TimeDelta` with the value zero.
+    /// Creates a new `TimeDelta` with a value of zero.
     ///
-    /// Creates a new `TimeDelta` instance with a value of zero.
     /// This is useful for representing a zero duration or no change in time.
     ///
     /// # Examples
@@ -198,9 +185,9 @@ impl<T: PrimInt + Signed> TimeDelta<T> {
         Self(T::zero())
     }
 
-    /// Returns the value of the `TimeDelta`.
+    /// Returns the inner value of the `TimeDelta`.
     ///
-    /// Returns the inner value of the `TimeDelta` instance.
+    /// Extracts the primitive integer value from the `TimeDelta` wrapper.
     ///
     /// # Examples
     ///
@@ -234,17 +221,15 @@ impl<T: PrimInt + Signed> TimeDelta<T> {
 
     /// Checks if the `TimeDelta` is negative.
     ///
-    /// Returns `true` if the inner value is negative, otherwise `false`.
+    /// Returns `true` if the inner value is less than zero.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::TimeDelta;
     ///
-    /// let positive_delta = TimeDelta::new(42);
-    /// let negative_delta = TimeDelta::new(-42);
-    /// assert!(!positive_delta.is_negative());
-    /// assert!(negative_delta.is_negative());
+    /// assert!(TimeDelta::new(-1).is_negative());
+    /// assert!(!TimeDelta::new(0).is_negative());
     /// ```
     #[inline(always)]
     pub fn is_negative(self) -> bool {
@@ -253,18 +238,15 @@ impl<T: PrimInt + Signed> TimeDelta<T> {
 
     /// Checks if the `TimeDelta` is positive.
     ///
-    /// Returns `true` if the inner value is positive, otherwise `false`.
+    /// Returns `true` if the inner value is greater than zero.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::TimeDelta;
     ///
-    /// let positive_delta = TimeDelta::new(42);
-    /// let negative_delta = TimeDelta::new(-42);
-    ///
-    /// assert!(positive_delta.is_positive());
-    /// assert!(!negative_delta.is_positive());
+    /// assert!(TimeDelta::new(1).is_positive());
+    /// assert!(!TimeDelta::new(0).is_positive());
     /// ```
     #[inline(always)]
     pub fn is_positive(self) -> bool {
@@ -273,123 +255,277 @@ impl<T: PrimInt + Signed> TimeDelta<T> {
 
     /// Checks if the `TimeDelta` is zero.
     ///
-    /// Returns `true` if the inner value is zero, otherwise `false`.
+    /// Returns `true` if the inner value is zero.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::TimeDelta;
     ///
-    /// let zero_delta: TimeDelta<i32> = TimeDelta::zero();
-    /// assert!(zero_delta.is_zero());
-    /// let non_zero_delta: TimeDelta<i32> = TimeDelta::new(42);
-    /// assert!(!non_zero_delta.is_zero());
+    /// assert!(TimeDelta::new(0).is_zero());
+    /// assert!(!TimeDelta::new(1).is_zero());
     /// ```
     #[inline(always)]
     pub fn is_zero(self) -> bool {
         self.0.is_zero()
     }
-}
 
-impl<T: PrimInt + Signed> TimePoint<T> {
-    /// Adds a `TimeDelta` to the `TimePoint`, returning a new `TimePoint`.
+    /// Computes `self + rhs`, returning `None` if overflow occurred.
     ///
-    /// This method takes a `TimeDelta` and adds it to the current `TimePoint`,
-    /// returning a new `TimePoint` with the updated value. However,
-    /// if the addition would overflow, it returns `None`.
+    /// Performs an addition that returns `None` instead of panicking if the result overflows.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{TimePoint, TimeDelta};
+    /// use dock_alloc_core::domain::TimeDelta;
     ///
-    /// let tp = TimePoint::new(10);
-    /// let delta = TimeDelta::new(5);
-    /// let new_tp = tp.checked_add(delta);
-    /// assert_eq!(new_tp.unwrap().value(), 15);
+    /// let max_delta = TimeDelta::new(i32::MAX);
+    /// assert!(max_delta.checked_add(TimeDelta::new(1)).is_none());
     /// ```
     #[inline]
     pub fn checked_add(self, rhs: TimeDelta<T>) -> Option<Self> {
-        self.0.checked_add(&rhs.0).map(TimePoint)
+        self.0.checked_add(&rhs.0).map(TimeDelta)
     }
 
-    /// Subtracts a `TimeDelta` from the `TimePoint`, returning a new `TimePoint`.
+    /// Computes `self - rhs`, returning `None` if underflow occurred.
     ///
-    /// This method takes a `TimeDelta` and subtracts it from the current `TimePoint`,
-    /// returning a new `TimePoint` with the updated value. However,
-    /// if the subtraction would overflow, it returns `None`.
+    /// Performs a subtraction that returns `None` instead of panicking if the result underflows.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{TimePoint, TimeDelta};
+    /// use dock_alloc_core::domain::TimeDelta;
     ///
-    /// let tp = TimePoint::new(20);
-    /// let delta = TimeDelta::new(5);
-    /// let new_tp = tp.checked_sub(delta);
-    /// assert_eq!(new_tp.unwrap().value(), 15);
+    /// let min_delta = TimeDelta::new(i32::MIN);
+    /// assert!(min_delta.checked_sub(TimeDelta::new(1)).is_none());
     /// ```
     #[inline]
     pub fn checked_sub(self, rhs: TimeDelta<T>) -> Option<Self> {
-        self.0.checked_sub(&rhs.0).map(TimePoint)
+        self.0.checked_sub(&rhs.0).map(TimeDelta)
     }
 
-    /// Adds a `TimeDelta` to the `TimePoint`, returning a new `TimePoint`.
+    /// Saturating addition. Computes `self + rhs`, saturating at the numeric bounds.
     ///
-    /// This method takes a `TimeDelta` and adds it to the current `TimePoint`,
-    /// returning a new `TimePoint` with the updated value.
+    /// Performs an addition that returns the maximum or minimum value of the type
+    /// if the result would otherwise overflow.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{TimePoint, TimeDelta};
+    /// use dock_alloc_core::domain::TimeDelta;
     ///
-    /// let tp = TimePoint::new(10);
-    /// let delta = TimeDelta::new(5);
-    /// let new_tp = tp.saturating_add(delta);
-    /// assert_eq!(new_tp.value(), 15);
+    /// let delta = TimeDelta::new(i32::MAX - 2);
+    /// let result = delta.saturating_add(TimeDelta::new(5));
+    /// assert_eq!(result.value(), i32::MAX);
     /// ```
     #[inline]
     pub fn saturating_add(self, rhs: TimeDelta<T>) -> Self {
-        TimePoint(self.0.saturating_add(rhs.0))
+        TimeDelta(self.0.saturating_add(rhs.0))
     }
 
-    /// Subtracts a `TimeDelta` from the `TimePoint`, returning a new `TimePoint`.
+    /// Saturating subtraction. Computes `self - rhs`, saturating at the numeric bounds.
     ///
-    /// This method takes a `TimeDelta` and subtracts it from the current `TimePoint`,
-    /// returning a new `TimePoint` with the updated value.
+    /// Performs a subtraction that returns the maximum or minimum value of the type
+    /// if the result would otherwise overflow.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimeDelta;
+    ///
+    /// let delta = TimeDelta::new(i32::MIN + 2);
+    /// let result = delta.saturating_sub(TimeDelta::new(5));
+    /// assert_eq!(result.value(), i32::MIN);
+    /// ```
+    #[inline]
+    pub fn saturating_sub(self, rhs: TimeDelta<T>) -> Self {
+        TimeDelta(self.0.saturating_sub(rhs.0))
+    }
+
+    /// Computes `self * rhs`, returning `None` if overflow occurred.
+    ///
+    /// Performs a multiplication that returns `None` instead of panicking if the result overflows.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimeDelta;
+    ///
+    /// let delta = TimeDelta::new(i32::MAX);
+    /// assert!(delta.checked_mul(2).is_none());
+    /// ```
+    #[inline]
+    pub fn checked_mul(self, rhs: T) -> Option<Self> {
+        self.0.checked_mul(&rhs).map(TimeDelta)
+    }
+
+    /// Saturating multiplication. Computes `self * rhs`, saturating at the numeric bounds.
+    ///
+    /// Performs a multiplication that returns the maximum or minimum value of the type
+    /// if the result would otherwise overflow.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimeDelta;
+    ///
+    /// let delta = TimeDelta::new(i32::MAX / 2);
+    /// let result = delta.saturating_mul(3);
+    /// assert_eq!(result.value(), i32::MAX);
+    /// ```
+    #[inline]
+    pub fn saturating_mul(self, rhs: T) -> Self
+    where
+        T: SaturatingMul,
+    {
+        TimeDelta(self.0.saturating_mul(&rhs))
+    }
+
+    /// Computes `self / rhs`, returning `None` if `rhs` is zero or the division overflows.
+    ///
+    /// Performs a division that returns `None` if the divisor is zero or if the division
+    /// would overflow (which can happen with `MIN / -1`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimeDelta;
+    ///
+    /// let delta = TimeDelta::new(10_i32);
+    /// assert!(delta.checked_div(0).is_none());
+    /// let min_delta = TimeDelta::new(i32::MIN);
+    /// assert!(min_delta.checked_div(-1).is_none());
+    /// ```
+    #[inline]
+    pub fn checked_div(self, rhs: T) -> Option<Self> {
+        self.0.checked_div(&rhs).map(TimeDelta)
+    }
+}
+
+impl<T: PrimInt + Signed> TimePoint<T> {
+    /// Creates a new `TimePoint` with the given value.
+    ///
+    /// Creates a new `TimePoint` instance wrapping the provided value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimePoint;
+    ///
+    /// let tp = TimePoint::new(42_i32);
+    /// assert_eq!(tp.value(), 42);
+    /// ```
+    #[inline(always)]
+    pub const fn new(value: T) -> Self {
+        TimePoint(value)
+    }
+
+    /// Returns the inner value of the `TimePoint`.
+    ///
+    /// Extracts the primitive integer value from the `TimePoint` wrapper.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimePoint;
+    ///
+    /// let tp = TimePoint::new(42_i32);
+    /// assert_eq!(tp.value(), 42);
+    /// ```
+    #[inline(always)]
+    pub const fn value(&self) -> T {
+        self.0
+    }
+
+    /// Computes `self + delta`, returning `None` if overflow occurred.
+    ///
+    /// Performs an addition that returns `None` instead of panicking if the result overflows.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::{TimePoint, TimeDelta};
     ///
-    /// let tp = TimePoint::new(20);
-    /// let delta = TimeDelta::new(5);
-    /// let new_tp = tp.saturating_sub(delta);
-    /// assert_eq!(new_tp.value(), 15);
+    /// let tp = TimePoint::new(i32::MAX);
+    /// assert!(tp.checked_add(TimeDelta::new(1)).is_none());
     /// ```
     #[inline]
-    pub fn saturating_sub(self, rhs: TimeDelta<T>) -> Self {
-        TimePoint(self.0.saturating_sub(rhs.0))
+    pub fn checked_add(self, delta: TimeDelta<T>) -> Option<Self> {
+        self.0.checked_add(&delta.0).map(TimePoint)
+    }
+
+    /// Computes `self - delta`, returning `None` if underflow occurred.
+    ///
+    /// Performs a subtraction that returns `None` instead of panicking if the result underflows.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{TimePoint, TimeDelta};
+    ///
+    /// let tp = TimePoint::new(i32::MIN);
+    /// assert!(tp.checked_sub(TimeDelta::new(1)).is_none());
+    /// ```
+    #[inline]
+    pub fn checked_sub(self, delta: TimeDelta<T>) -> Option<Self> {
+        self.0.checked_sub(&delta.0).map(TimePoint)
+    }
+
+    /// Saturating addition. Computes `self + delta`, saturating at the numeric bounds.
+    ///
+    /// Performs an addition that returns `TimePoint(T::MAX)` if the result would overflow.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{TimePoint, TimeDelta};
+    ///
+    /// let tp = TimePoint::new(i32::MAX - 2);
+    /// let result = tp.saturating_add(TimeDelta::new(5));
+    /// assert_eq!(result.value(), i32::MAX);
+    /// ```
+    #[inline]
+    pub fn saturating_add(self, delta: TimeDelta<T>) -> Self {
+        TimePoint(self.0.saturating_add(delta.0))
+    }
+
+    /// Saturating subtraction. Computes `self - delta`, saturating at the numeric bounds.
+    ///
+    /// Performs a subtraction that returns `TimePoint(T::MIN)` if the result would underflow.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{TimePoint, TimeDelta};
+    ///
+    /// let tp = TimePoint::new(i32::MIN + 2);
+    /// let result = tp.saturating_sub(TimeDelta::new(5));
+    /// assert_eq!(result.value(), i32::MIN);
+    /// ```
+    #[inline]
+    pub fn saturating_sub(self, delta: TimeDelta<T>) -> Self {
+        TimePoint(self.0.saturating_sub(delta.0))
     }
 
     /// Creates a half-open interval `[self, self + len)`.
     ///
-    /// Returns `None` if `len` is negative. Zero-length is allowed.
-    /// If addition would overflow, it returns `None`.
+    /// This method returns `None` if the provided `len` is negative or if
+    /// adding the length would cause an arithmetic overflow.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::{TimePoint, TimeDelta, TimeInterval};
     ///
-    /// let tp = TimePoint::new(10);
-    /// let len = TimeDelta::new(5);
-    /// let interval = tp.span_of(len).unwrap();
-    /// assert_eq!(interval.start().value(), 10);
-    /// assert_eq!(interval.end().value(), 15);
-    /// assert!(tp.span_of(TimeDelta::new(-1)).is_none());
+    /// let start = TimePoint::new(10_i32);
+    /// let length = TimeDelta::new(20);
+    /// let interval = start.span_of(length).unwrap();
+    ///
+    /// assert_eq!(interval.start(), start);
+    /// assert_eq!(interval.end(), TimePoint::new(30));
+    ///
+    /// // A negative length returns None
+    /// assert!(start.span_of(TimeDelta::new(-1)).is_none());
     /// ```
     #[inline]
     pub fn span_of(self, len: TimeDelta<T>) -> Option<TimeInterval<T>> {
@@ -429,7 +565,7 @@ impl<T: PrimInt + Signed> Add<TimeDelta<T>> for TimePoint<T> {
     ///
     /// # Panics
     ///
-    /// This method will panic if a overflow occurs during the operation.
+    /// This method will panic if an overflow occurs during the operation.
     ///
     /// # Examples
     ///
@@ -461,7 +597,7 @@ impl<T: PrimInt + Signed> Add<TimePoint<T>> for TimeDelta<T> {
     ///
     /// # Panics
     ///
-    /// This method will panic if a overflow occurs during the operation.
+    /// This method will panic if an overflow occurs during the operation.
     ///
     /// # Examples
     ///
@@ -492,7 +628,7 @@ impl<T: PrimInt + Signed> AddAssign<TimeDelta<T>> for TimePoint<T> {
     ///
     /// # Panics
     ///
-    /// This method will panic if a overflow occurs during the operation.
+    /// This method will panic if an overflow occurs during the operation.
     ///
     /// # Examples
     ///
@@ -522,7 +658,7 @@ impl<T: PrimInt + Signed> Sub<TimeDelta<T>> for TimePoint<T> {
     ///
     /// # Panics
     ///
-    /// This method will panic if a overflow occurs during the operation.
+    /// This method will panic if an overflow occurs during the operation.
     ///
     /// # Examples
     ///
@@ -550,7 +686,7 @@ impl<T: PrimInt + Signed> SubAssign<TimeDelta<T>> for TimePoint<T> {
     ///
     /// # Panics
     ///
-    /// This method will panic if a underflow occurs during the operation.
+    /// This method will panic if an underflow occurs during the operation.
     ///
     /// # Examples
     ///
@@ -580,7 +716,7 @@ impl<T: PrimInt + Signed> Sub<TimePoint<T>> for TimePoint<T> {
     ///
     /// # Panics
     ///
-    /// This method will panic if a underflow occurs during the operation.
+    /// This method will panic if an underflow occurs during the operation.
     ///
     /// # Examples
     ///
@@ -612,7 +748,7 @@ impl<T: PrimInt + Signed> Add for TimeDelta<T> {
     ///
     /// # Panics
     ///
-    /// This method will panic if a overflow occurs during the operation.
+    /// This method will panic if an overflow occurs during the operation.
     ///
     /// # Examples
     ///
@@ -643,7 +779,7 @@ impl<T: PrimInt + Signed> Sub for TimeDelta<T> {
     ///
     /// # Panics
     ///
-    /// This method will panic if a underflow occurs during the operation.
+    /// This method will panic if an underflow occurs during the operation.
     ///
     /// # Examples
     ///
@@ -699,7 +835,7 @@ impl<T: PrimInt + Signed> SubAssign for TimeDelta<T> {
     ///
     /// # Panics
     ///
-    /// This method will panic if a underflow occurs during the operation.
+    /// This method will panic if an underflow occurs during the operation.
     ///
     /// # Examples
     ///
@@ -729,7 +865,7 @@ impl<T: PrimInt + Signed> Neg for TimeDelta<T> {
     ///
     /// # Panics
     ///
-    /// This method will panic if a underflow occurs during the operation.
+    /// This method will panic if an underflow occurs during the operation.
     ///
     /// # Examples
     ///
@@ -759,7 +895,7 @@ impl<T: PrimInt + Signed> Mul<T> for TimeDelta<T> {
     ///
     /// # Panics
     ///
-    /// This method will panic if a overflow occurs during the operation.
+    /// This method will panic if an overflow occurs during the operation.
     ///
     /// # Examples
     ///
@@ -789,7 +925,7 @@ impl<T: PrimInt + Signed> Div<T> for TimeDelta<T> {
     ///
     /// # Panics
     ///
-    /// This method will panic if a division by zero occurs.
+    /// Panics on division by zero or if the division overflows (e.g., MIN / -1).
     ///
     /// # Examples
     ///
@@ -804,7 +940,7 @@ impl<T: PrimInt + Signed> Div<T> for TimeDelta<T> {
         TimeDelta::new(
             self.0
                 .checked_div(&rhs)
-                .expect("division by zero in TimeDelta / primitive integer"),
+                .expect("overflow or division by zero in TimeDelta / primitive integer"),
         )
     }
 }
@@ -897,10 +1033,50 @@ impl<T: PrimInt + Signed> Default for TimeDelta<T> {
     }
 }
 
-/// Represents a segment index along the quay.
+impl<T: PrimInt + Signed> Sum for TimeDelta<T> {
+    /// Sums up a collection of `TimeDelta` instances, returning a new `TimeDelta`.
+    ///
+    /// This implementation allows for summing multiple `TimeDelta` instances
+    /// using an iterator, returning a new `TimeDelta` that represents the total duration.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimeDelta;
+    ///
+    /// let deltas = vec![TimeDelta::new(10), TimeDelta::new(20), TimeDelta::new(30)];
+    /// let total: TimeDelta<i32> = deltas.into_iter().sum();
+    /// assert_eq!(total.value(), 60);
+    /// ```
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::zero(), |acc, x| acc + x)
+    }
+}
+
+impl<'a, T: PrimInt + Signed> Sum<&'a TimeDelta<T>> for TimeDelta<T> {
+    /// Sums up a collection of references to `TimeDelta` instances, returning a new `TimeDelta`.
+    ///
+    /// This implementation allows for summing multiple references to `TimeDelta` instances
+    /// using an iterator, returning a new `TimeDelta` that represents the total duration.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{TimeDelta, TimePoint};
+    ///
+    /// let deltas = vec![TimeDelta::new(10), TimeDelta::new(20), TimeDelta::new(30)];
+    /// let total: TimeDelta<i32> = deltas.iter().sum();
+    /// assert_eq!(total.value(), 60);
+    /// ```
+    fn sum<I: Iterator<Item = &'a Self>>(iter: I) -> Self {
+        iter.fold(Self::zero(), |acc, x| acc + *x)
+    }
+}
+
+/// Represents a position along a quay.
 ///
 /// A `QuayPosition` is a wrapper around a primitive unsigned integer type
-/// that represents a specific segment along the quay.
+/// that represents a position along a quay.
 ///
 /// # Examples
 ///
@@ -915,7 +1091,7 @@ impl<T: PrimInt + Signed> Default for TimeDelta<T> {
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
 pub struct QuayPosition(usize);
 
-/// Represents a segment index along the quay with a length.
+/// Represents an interval along a quay.
 ///
 /// A `QuayInterval` is a half-open interval defined by a start and end `QuayPosition`.
 /// It represents a contiguous section of the quay, where the start index is inclusive
@@ -980,174 +1156,161 @@ impl From<usize> for QuayPosition {
 impl QuayPosition {
     /// Creates a new `QuayPosition` with the given value.
     ///
-    /// Creates a new `QuayPosition` instance wrapping the provided value.
+    /// Creates a new `QuayPosition` instance wrapping the provided `usize` value.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::QuayPosition;
     ///
-    /// let seg_idx = QuayPosition::new(5);
-    /// assert_eq!(seg_idx.value(), 5);
+    /// let pos = QuayPosition::new(5);
+    /// assert_eq!(pos.value(), 5);
     /// ```
-    #[inline]
+    #[inline(always)]
     pub const fn new(v: usize) -> Self {
         QuayPosition(v)
     }
 
     /// Creates a new `QuayPosition` with a value of zero.
     ///
-    /// Creates a new `QuayPosition` instance with a value of zero.
+    /// This is a convenient way to get a `QuayPosition` representing the start of the quay.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::QuayPosition;
     ///
-    /// let seg_idx = QuayPosition::zero();
-    /// assert_eq!(seg_idx.value(), 0);
+    /// let pos = QuayPosition::zero();
+    /// assert_eq!(pos.value(), 0);
     /// ```
-    #[inline]
+    #[inline(always)]
     pub const fn zero() -> Self {
-        QuayPosition::new(0)
+        QuayPosition(0)
     }
 
-    /// Returns the value of the `QuayPosition`.
+    /// Returns the inner value of the `QuayPosition`.
     ///
-    /// Returns the inner value of the `QuayPosition` instance.
+    /// Extracts the primitive `usize` value from the `QuayPosition` wrapper.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::QuayPosition;
     ///
-    /// let seg_idx = QuayPosition::new(5);
-    /// assert_eq!(seg_idx.value(), 5);
+    /// let pos = QuayPosition::new(5);
+    /// assert_eq!(pos.value(), 5);
     /// ```
-    #[inline]
+    #[inline(always)]
     pub const fn value(self) -> usize {
         self.0
     }
 
     /// Checks if the `QuayPosition` is zero.
     ///
-    /// Returns `true` if the inner value is zero, otherwise `false`.
+    /// Returns `true` if the position is at the start of the quay (value is 0).
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::QuayPosition;
     ///
-    /// let seg_idx = QuayPosition::new(0);
-    /// assert!(seg_idx.is_zero());
-    /// let non_zero_seg_idx = QuayPosition::new(5);
-    /// assert!(!non_zero_seg_idx.is_zero());
+    /// assert!(QuayPosition::zero().is_zero());
+    /// assert!(!QuayPosition::new(1).is_zero());
     /// ```
+    #[inline(always)]
     pub const fn is_zero(self) -> bool {
         self.0 == 0
     }
 
-    /// Adds a `QuayLength` to the `QuayPosition`, returning a new `QuayPosition`.
+    /// Computes `self + len`, returning `None` if overflow occurred.
     ///
-    /// Adds a `QuayLength` to the current `QuayPosition`, returning a new `QuayPosition`.
-    /// If the addition would overflow, it returns `None`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
-    ///
-    /// let seg_idx = QuayPosition::new(5);
-    /// let length = QuayLength::new(3);
-    /// let new_seg_idx = seg_idx.checked_add_len(length);
-    /// assert_eq!(new_seg_idx.unwrap().value(), 8);
-    /// ```
-    #[inline]
-    pub fn checked_add_len(self, d: QuayLength) -> Option<Self> {
-        self.0.checked_add(d.0).map(QuayPosition)
-    }
-
-    /// Subtracts a `QuayLength` from the `QuayPosition`, returning a new `QuayPosition`.
-    ///
-    /// Subtracts a `QuayLength` from the current `QuayPosition`,
-    /// returning a new `QuayPosition`.
-    /// If the subtraction would underflow, it returns `None`.
+    /// Performs an addition that returns `None` instead of panicking if the result overflows.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
     ///
-    /// let seg_idx = QuayPosition::new(5);
-    /// let length = QuayLength::new(3);
-    /// let new_seg_idx = seg_idx.checked_sub_len(length);
-    /// assert_eq!(new_seg_idx.unwrap().value(), 2);
+    /// let pos = QuayPosition::new(usize::MAX);
+    /// assert!(pos.checked_add(QuayLength::new(1)).is_none());
     /// ```
     #[inline]
-    pub fn checked_sub_len(self, d: QuayLength) -> Option<Self> {
-        self.0.checked_sub(d.0).map(QuayPosition)
+    pub fn checked_add(self, len: QuayLength) -> Option<Self> {
+        self.0.checked_add(len.0).map(QuayPosition)
     }
 
-    /// Adds a `QuayLength` to the `QuayPosition`, returning a new `QuayPosition`.
+    /// Computes `self - len`, returning `None` if underflow occurred.
     ///
-    /// Adds a `QuayLength` to the current `QuayPosition`, returning a new `QuayPosition`.
-    /// If the addition would overflow, it returns a `QuayPosition` with the maximum value.
+    /// Performs a subtraction that returns `None` instead of panicking if the result is negative.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
     ///
-    /// let seg_idx = QuayPosition::new(5);
-    /// let length = QuayLength::new(3);
-    /// let new_seg_idx = seg_idx.saturating_add_len(length);
-    /// assert_eq!(new_seg_idx.value(), 8);
+    /// let pos = QuayPosition::new(5);
+    /// assert!(pos.checked_sub(QuayLength::new(10)).is_none());
     /// ```
     #[inline]
-    pub fn saturating_add_len(self, d: QuayLength) -> Self {
-        QuayPosition(self.0.saturating_add(d.0))
+    pub fn checked_sub(self, len: QuayLength) -> Option<Self> {
+        self.0.checked_sub(len.0).map(QuayPosition)
     }
 
-    /// Subtracts a `QuayLength` from the `QuayPosition`, returning a new `QuayPosition`.
+    /// Saturating addition. Computes `self + len`, saturating at the numeric bounds.
     ///
-    /// Subtracts a `QuayLength` from the current `QuayPosition`, returning a new `QuayPosition`.
-    /// If the subtraction would underflow, it returns a `QuayPosition` with a value of zero.
+    /// Performs an addition that returns `QuayPosition(usize::MAX)` if the result would overflow.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
     ///
-    /// let seg_idx = QuayPosition::new(5);
-    /// let length = QuayLength::new(3);
-    /// let new_seg_idx = seg_idx.saturating_sub_len(length);
-    /// assert_eq!(new_seg_idx.value(), 2);
+    /// let pos = QuayPosition::new(usize::MAX - 2);
+    /// let result = pos.saturating_add(QuayLength::new(5));
+    /// assert_eq!(result.value(), usize::MAX);
     /// ```
     #[inline]
-    pub fn saturating_sub_len(self, d: QuayLength) -> Self {
-        QuayPosition(self.0.saturating_sub(d.0))
+    pub fn saturating_add(self, len: QuayLength) -> Self {
+        QuayPosition(self.0.saturating_add(len.0))
     }
 
-    /// Creates a `QuayInterval` starting from the current `QuayPosition` with the specified length.
+    /// Saturating subtraction. Computes `self - len`, saturating at zero.
     ///
-    /// Creates a `QuayInterval` that represents a half-open interval starting from the current `QuayPosition`
-    /// and extending by the specified `QuayLength`.
-    /// If addition of the length would overflow, it returns `None`.
+    /// Performs a subtraction that returns `QuayPosition(0)` if the result would be negative.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{QuayPosition, QuayInterval, QuayLength}; // Add QuayLength here
+    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
     ///
-    /// let start = QuayPosition::new(5);
-    /// let length = QuayLength::new(10);
-    /// let span = start.span_of(length);
-    /// assert_eq!(span.unwrap().start().value(), 5);
-    /// assert_eq!(span.unwrap().end().value(), 15);
+    /// let pos = QuayPosition::new(5);
+    /// let result = pos.saturating_sub(QuayLength::new(10));
+    /// assert_eq!(result.value(), 0);
+    /// ```
+    #[inline]
+    pub fn saturating_sub(self, len: QuayLength) -> Self {
+        QuayPosition(self.0.saturating_sub(len.0))
+    }
+
+    /// Creates a half-open interval `[self, self + len)`.
+    ///
+    /// Returns `None` if adding the length would cause an overflow.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{QuayPosition, QuayLength, QuayInterval};
+    ///
+    /// let start = QuayPosition::new(10);
+    /// let length = QuayLength::new(20);
+    /// let interval = start.span_of(length).unwrap();
+    ///
+    /// assert_eq!(interval.start(), start);
+    /// assert_eq!(interval.end(), QuayPosition::new(30));
     /// ```
     #[inline]
     pub fn span_of(self, len: QuayLength) -> Option<QuayInterval> {
-        self.checked_add_len(len)
+        self.checked_add(len)
             .map(|end| QuayInterval::new(self, end))
     }
 }
@@ -1334,7 +1497,7 @@ impl SubAssign<QuayLength> for QuayPosition {
     }
 }
 
-/// Represents the length of a segment along the quay.
+/// Represents the length of a segment along a quay.
 ///
 /// A `QuayLength` is a wrapper around a primitive unsigned integer type
 /// that represents the length of a segment along the quay.
@@ -1397,151 +1560,188 @@ impl From<usize> for QuayLength {
 impl QuayLength {
     /// Creates a new `QuayLength` with the given value.
     ///
-    /// Creates a new `QuayLength` instance wrapping the provided value.
+    /// Creates a new `QuayLength` instance wrapping the provided `usize` value.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length = QuayLength::new(10);
-    /// assert_eq!(seg_length.value(), 10);
+    /// let len = QuayLength::new(10);
+    /// assert_eq!(len.value(), 10);
     /// ```
-    #[inline]
+    #[inline(always)]
     pub const fn new(v: usize) -> Self {
         QuayLength(v)
     }
 
-    /// Returns the value of the `QuayLength`.
+    /// Returns the inner value of the `QuayLength`.
     ///
-    /// Returns the inner value of the `QuayLength` instance.
+    /// Extracts the primitive `usize` value from the `QuayLength` wrapper.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length = QuayLength::new(10);
-    /// assert_eq!(seg_length.value(), 10);
+    /// let len = QuayLength::new(10);
+    /// assert_eq!(len.value(), 10);
     /// ```
-    #[inline]
+    #[inline(always)]
     pub const fn value(self) -> usize {
         self.0
     }
 
-    /// Adds another `QuayLength` to the current `QuayLength`, returning a new `QuayLength`.
+    /// Computes `self + rhs`, returning `None` if overflow occurred.
     ///
-    /// Adds another `QuayLength` to the current instance,
-    /// returning a new `QuayLength` with the updated value.
-    /// If the addition would overflow, it returns `None`.
+    /// Performs an addition that returns `None` instead of panicking if the result overflows.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length1 = QuayLength::new(10);
-    /// let seg_length2 = QuayLength::new(5);
-    /// let new_seg_length = seg_length1.checked_add(seg_length2);
-    /// assert_eq!(new_seg_length.unwrap().value(), 15);
+    /// let len = QuayLength::new(usize::MAX);
+    /// assert!(len.checked_add(QuayLength::new(1)).is_none());
     /// ```
     #[inline]
     pub fn checked_add(self, rhs: Self) -> Option<Self> {
         self.0.checked_add(rhs.0).map(QuayLength)
     }
 
-    /// Subtracts another `QuayLength` from the current `QuayLength`, returning a new `QuayLength`.
+    /// Computes `self - rhs`, returning `None` if underflow occurred.
     ///
-    /// Subtracts another `QuayLength` from the current instance,
-    /// returning a new `QuayLength` with the updated value.
-    /// If the subtraction would underflow, it returns `None`.
+    /// Performs a subtraction that returns `None` instead of panicking if the result is negative.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length1 = QuayLength::new(10);
-    /// let seg_length2 = QuayLength::new(5);
-    /// let new_seg_length = seg_length1.checked_sub(seg_length2);
-    /// assert_eq!(new_seg_length.unwrap().value(), 5);
+    /// let len = QuayLength::new(5);
+    /// assert!(len.checked_sub(QuayLength::new(10)).is_none());
     /// ```
     #[inline]
     pub fn checked_sub(self, rhs: Self) -> Option<Self> {
         self.0.checked_sub(rhs.0).map(QuayLength)
     }
 
-    /// Adds another `QuayLength` to the current `QuayLength`, returning a new `QuayLength`.
+    /// Saturating addition. Computes `self + rhs`, saturating at the numeric bounds.
     ///
-    /// Adds another `QuayLength` to the current instance,
-    /// returning a new `QuayLength` with the updated value.
-    /// If the addition would overflow, it returns a `QuayLength` with the maximum value.
+    /// Performs an addition that returns `QuayLength(usize::MAX)` if the result would overflow.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length1 = QuayLength::new(10);
-    /// let seg_length2 = QuayLength::new(5);
-    /// let new_seg_length = seg_length1.saturating_add(seg_length2);
-    /// assert_eq!(new_seg_length.value(), 15);
+    /// let len = QuayLength::new(usize::MAX - 2);
+    /// let result = len.saturating_add(QuayLength::new(5));
+    /// assert_eq!(result.value(), usize::MAX);
     /// ```
     #[inline]
     pub fn saturating_add(self, rhs: Self) -> Self {
         QuayLength(self.0.saturating_add(rhs.0))
     }
 
-    /// Subtracts another `QuayLength` from the current `QuayLength`, returning a new `QuayLength`.
+    /// Saturating subtraction. Computes `self - rhs`, saturating at zero.
     ///
-    /// Subtracts another `QuayLength` from the current instance,
-    /// returning a new `QuayLength` with the updated value.
-    /// If the subtraction would underflow, it returns a `QuayLength` with a value of zero.
+    /// Performs a subtraction that returns `QuayLength(0)` if the result would be negative.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length1 = QuayLength::new(10);
-    /// let seg_length2 = QuayLength::new(5);
-    /// let new_seg_length = seg_length1.saturating_sub(seg_length2);
-    /// assert_eq!(new_seg_length.value(), 5);
+    /// let len = QuayLength::new(5);
+    /// let result = len.saturating_sub(QuayLength::new(10));
+    /// assert_eq!(result.value(), 0);
     /// ```
     #[inline]
     pub fn saturating_sub(self, rhs: Self) -> Self {
         QuayLength(self.0.saturating_sub(rhs.0))
     }
 
-    /// Creates a new `QuayLength` with a value of zero.
+    /// Computes `self * rhs`, returning `None` if overflow occurred.
     ///
-    /// Creates a new `QuayLength` instance with a value of zero.
+    /// Performs a multiplication that returns `None` instead of panicking if the result overflows.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length = QuayLength::zero();
-    /// assert_eq!(seg_length.value(), 0);
+    /// let len = QuayLength::new(usize::MAX);
+    /// assert!(len.checked_mul(2).is_none());
     /// ```
     #[inline]
+    pub fn checked_mul(self, rhs: usize) -> Option<Self> {
+        self.0.checked_mul(rhs).map(QuayLength)
+    }
+
+    /// Computes `self / rhs`, returning `None` if `rhs` is zero.
+    ///
+    /// Performs a division that returns `None` if the divisor is zero.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::QuayLength;
+    ///
+    /// let len = QuayLength::new(10);
+    /// assert!(len.checked_div(0).is_none());
+    /// ```
+    #[inline]
+    pub fn checked_div(self, rhs: usize) -> Option<Self> {
+        self.0.checked_div(rhs).map(QuayLength)
+    }
+
+    /// Saturating multiplication. Computes `self * rhs`, saturating at the numeric bounds.
+    ///
+    /// Performs a multiplication that returns `QuayLength(usize::MAX)` if the result would overflow.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::QuayLength;
+    ///
+    /// let len = QuayLength::new(usize::MAX / 2);
+    /// let result = len.saturating_mul(3);
+    /// assert_eq!(result.value(), usize::MAX);
+    /// ```
+    #[inline]
+    pub fn saturating_mul(self, rhs: usize) -> Self {
+        Self(self.0.saturating_mul(rhs))
+    }
+
+    /// Creates a new `QuayLength` with a value of zero.
+    ///
+    /// This is useful for representing a zero-length segment.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::QuayLength;
+    ///
+    /// let len = QuayLength::zero();
+    /// assert!(len.is_zero());
+    /// ```
+    #[inline(always)]
     pub const fn zero() -> Self {
         Self(0)
     }
 
     /// Returns the absolute value of the `QuayLength`.
     ///
-    /// Since `QuayLength` is always non-negative,
-    /// this method simply returns the current instance.
+    /// Since `QuayLength` is always non-negative, this method simply returns a copy.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length = QuayLength::new(10);
-    /// assert_eq!(seg_length.abs().value(), 10);
+    /// let len = QuayLength::new(10);
+    /// assert_eq!(len.abs(), len);
     /// ```
     #[inline(always)]
     pub const fn abs(self) -> Self {
@@ -1550,17 +1750,15 @@ impl QuayLength {
 
     /// Checks if the `QuayLength` is zero.
     ///
-    /// Returns `true` if the inner value is zero, otherwise `false`.
+    /// Returns `true` if the length is zero.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length = QuayLength::new(0);
-    /// assert!(seg_length.is_zero());
-    /// let non_zero_seg_length = QuayLength::new(10);
-    /// assert!(!non_zero_seg_length.is_zero());
+    /// assert!(QuayLength::new(0).is_zero());
+    /// assert!(!QuayLength::new(1).is_zero());
     /// ```
     #[inline(always)]
     pub const fn is_zero(self) -> bool {
@@ -1569,17 +1767,15 @@ impl QuayLength {
 
     /// Checks if the `QuayLength` is positive.
     ///
-    /// Returns `true` if the inner value is greater than zero, otherwise `false`.
+    /// Returns `true` if the length is greater than zero.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::QuayLength;
     ///
-    /// let seg_length = QuayLength::new(10);
-    /// assert!(seg_length.is_positive());
-    /// let zero_seg_length = QuayLength::new(0);
-    /// assert!(!zero_seg_length.is_positive());
+    /// assert!(QuayLength::new(1).is_positive());
+    /// assert!(!QuayLength::new(0).is_positive());
     /// ```
     #[inline(always)]
     pub const fn is_positive(self) -> bool {
@@ -1753,9 +1949,9 @@ impl SubAssign for QuayLength {
 impl Mul<usize> for QuayLength {
     type Output = QuayLength;
 
-    /// Multiplies two `QuayLength`s, returning a new `QuayLength`.
+    /// Multiplies a `QuayLength` by a primitive unsigned integer type, returning a new `QuayLength`.
     ///
-    /// This method takes another `QuayLength` and multiplies it with the current instance,
+    /// This method takes a primitive unsigned integer type and multiplies it with the current `QuayLength`,
     /// returning a new `QuayLength` with the updated value.
     ///
     /// # Panics
@@ -1784,14 +1980,14 @@ impl Mul<usize> for QuayLength {
 impl Div<usize> for QuayLength {
     type Output = QuayLength;
 
-    /// Divides one `QuayLength` by another, returning a new `QuayLength`.
+    /// Divides one `QuayLength` by a usize, returning a new `QuayLength`.
     ///
-    /// This method takes another `QuayLength` and divides the current instance by it,
+    /// This method takes a usize and divides the current `QuayLength` by it,
     /// returning a new `QuayLength` with the updated value.
     ///
     /// # Panics
     ///
-    /// This method will panic if an underflow occurs during the operation.
+    /// This method will panic if a division by zero or an overflow occurs during the operation.
     ///
     /// # Examples
     ///
@@ -1809,6 +2005,46 @@ impl Div<usize> for QuayLength {
                 .checked_div(rhs)
                 .expect("division by zero in QuayLength / usize"),
         )
+    }
+}
+
+impl Sum for QuayLength {
+    /// Sums up a collection of `QuayLength` instances, returning a new `QuayLength`.
+    ///
+    /// This method takes an iterator of `QuayLength` instances and sums them up,
+    /// returning a new `QuayLength` that represents the total length.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::QuayLength;
+    ///
+    /// let lengths = vec![QuayLength::new(10), QuayLength::new(5)];
+    /// let total_length: QuayLength = lengths.into_iter().sum();
+    /// assert_eq!(total_length.value(), 15);
+    /// ```
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::zero(), |acc, x| acc + x)
+    }
+}
+
+impl<'a> Sum<&'a QuayLength> for QuayLength {
+    /// Sums up a collection of references to `QuayLength` instances, returning a new `QuayLength`.
+    ///
+    /// This method takes an iterator of references to `QuayLength` instances and sums them up,
+    /// returning a new `QuayLength` that represents the total length.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::QuayLength;
+    ///
+    /// let lengths = vec![QuayLength::new(10), QuayLength::new(5)];
+    /// let total_length: QuayLength = lengths.iter().sum();
+    /// assert_eq!(total_length.value(), 15);
+    /// ```
+    fn sum<I: Iterator<Item = &'a Self>>(iter: I) -> Self {
+        iter.fold(Self::zero(), |acc, x| acc + *x)
     }
 }
 
@@ -2152,41 +2388,41 @@ mod tests {
     }
 
     #[test]
-    fn test_quay_position_checked_add_len() {
+    fn test_quay_position_checked_add() {
         let seg_idx = QuayPosition::new(usize::MAX - 1);
         let length = QuayLength::new(1);
         assert_eq!(
-            seg_idx.checked_add_len(length),
+            seg_idx.checked_add(length),
             Some(QuayPosition::new(usize::MAX))
         );
         let length_overflow = QuayLength::new(2);
-        assert_eq!(seg_idx.checked_add_len(length_overflow), None);
+        assert_eq!(seg_idx.checked_add(length_overflow), None);
     }
 
     #[test]
     fn test_quay_position_checked_sub_len() {
         let seg_idx = QuayPosition::new(1);
         let length = QuayLength::new(1);
-        assert_eq!(seg_idx.checked_sub_len(length), Some(QuayPosition::new(0)));
+        assert_eq!(seg_idx.checked_sub(length), Some(QuayPosition::new(0)));
         let length_underflow = QuayLength::new(2);
-        assert_eq!(seg_idx.checked_sub_len(length_underflow), None);
+        assert_eq!(seg_idx.checked_sub(length_underflow), None);
     }
 
     #[test]
-    fn test_quay_position_saturating_add_len() {
+    fn test_quay_position_saturating_add() {
         let seg_idx = QuayPosition::new(usize::MAX - 1);
         let length = QuayLength::new(5);
         assert_eq!(
-            seg_idx.saturating_add_len(length),
+            seg_idx.saturating_add(length),
             QuayPosition::new(usize::MAX)
         );
     }
 
     #[test]
-    fn test_quay_position_saturating_sub_len() {
+    fn test_quay_position_saturating_sub() {
         let seg_idx = QuayPosition::new(5);
         let length = QuayLength::new(10);
-        assert_eq!(seg_idx.saturating_sub_len(length), QuayPosition::new(0));
+        assert_eq!(seg_idx.saturating_sub(length), QuayPosition::new(0));
     }
 
     #[test]
@@ -2310,7 +2546,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "division by zero")]
+    #[should_panic(expected = "overflow or division by zero in TimeDelta / primitive integer")]
     fn test_timedelta_div_by_zero_panic() {
         let delta = TimeDelta::new(20_i32);
         let _ = delta / 0;
@@ -2334,5 +2570,38 @@ mod tests {
     fn test_quay_length_div_by_zero_panic() {
         let length = QuayLength::new(30);
         let _ = length / 0;
+    }
+
+    #[test]
+    #[should_panic(expected = "overflow in TimeDelta * primitive integer")]
+    fn test_timedelta_mul_panic_on_overflow() {
+        let delta = TimeDelta::new(i32::MAX);
+        let _ = delta * 2;
+    }
+
+    #[test]
+    #[should_panic(expected = "overflow or division by zero")]
+    fn test_timedelta_div_panic_on_overflow() {
+        let delta = TimeDelta::new(i32::MIN);
+        let _ = delta / -1;
+    }
+
+    #[test]
+    fn test_timedelta_div_truncation() {
+        let delta = TimeDelta::new(10_i32);
+        assert_eq!(delta / 3, TimeDelta::new(3));
+    }
+
+    #[test]
+    #[should_panic(expected = "overflow in QuayLength * usize")]
+    fn test_quay_length_mul_panic_on_overflow() {
+        let length = QuayLength::new(usize::MAX);
+        let _ = length * 2;
+    }
+
+    #[test]
+    fn test_quay_length_div_truncation() {
+        let length = QuayLength::new(17);
+        assert_eq!(length / 4, QuayLength::new(4));
     }
 }
