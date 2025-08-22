@@ -37,6 +37,9 @@
 //!   - `SpaceLength`: Represents a length or size, such as that of a vessel.
 //!   - `SpaceInterval`: A half-open interval `[start, end)` representing a contiguous section of the quay.
 //!
+//! - **Cost**:
+//!   - `Cost`: Represents a cost associated with a specific operation or allocation.
+//!
 //! The use of distinct newtypes enforces correctness at compile time—for example,
 //! preventing the addition of two `TimePoint`s.
 //! All types implement standard arithmetic traits with checked operations
@@ -44,11 +47,14 @@
 
 #[allow(dead_code)]
 use crate::primitives::Interval;
-use num_traits::{PrimInt, SaturatingMul, Signed, Zero};
+use num_traits::{
+    CheckedAdd, CheckedDiv, CheckedMul, CheckedSub, PrimInt, SaturatingAdd, SaturatingMul,
+    SaturatingSub, Signed, Zero,
+};
 use std::{
     fmt::Display,
     iter::Sum,
-    ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign},
+    ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
 /// Represents a point in time.
@@ -433,7 +439,7 @@ impl<T: PrimInt + Signed> TimePoint<T> {
     /// assert_eq!(tp.value(), 42);
     /// ```
     #[inline(always)]
-    pub const fn value(&self) -> T {
+    pub const fn value(self) -> T {
         self.0
     }
 
@@ -769,6 +775,49 @@ impl<T: PrimInt + Signed> Add for TimeDelta<T> {
     }
 }
 
+impl<T: PrimInt + Signed> CheckedAdd for TimeDelta<T> {
+    /// Checks if adding another `TimeDelta` results in overflow.
+    ///
+    /// Returns `None` if the addition would overflow, otherwise returns `Some(TimeDelta)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimeDelta;
+    ///
+    /// let delta1 = TimeDelta::new(10);
+    /// let delta2 = TimeDelta::new(5);
+    /// assert_eq!(delta1.checked_add(delta2), Some(TimeDelta::new(15)));
+    ///
+    /// let max_delta = TimeDelta::new(i32::MAX);
+    /// assert!(max_delta.checked_add(TimeDelta::new(1)).is_none());
+    /// ```
+    fn checked_add(&self, rhs: &Self) -> Option<Self> {
+        self.0.checked_add(&rhs.0).map(TimeDelta)
+    }
+}
+
+impl<T: PrimInt + Signed> SaturatingAdd for TimeDelta<T> {
+    /// Adds another `TimeDelta` and saturates at the numeric bounds.
+    ///
+    /// Returns a new `TimeDelta` that is the result of the addition,
+    /// saturating at the maximum or minimum value if overflow occurs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimeDelta;
+    ///
+    /// let delta1 = TimeDelta::new(i32::MAX - 1);
+    /// let delta2 = TimeDelta::new(5);
+    /// let result = delta1.saturating_add(delta2);
+    /// assert_eq!(result.value(), i32::MAX);
+    /// ```
+    fn saturating_add(&self, rhs: &Self) -> Self {
+        TimeDelta(self.0.saturating_add(rhs.0))
+    }
+}
+
 impl<T: PrimInt + Signed> Sub for TimeDelta<T> {
     type Output = TimeDelta<T>;
 
@@ -797,6 +846,49 @@ impl<T: PrimInt + Signed> Sub for TimeDelta<T> {
                 .checked_sub(&rhs.0)
                 .expect("underflow in TimeDelta - TimeDelta"),
         )
+    }
+}
+
+impl<T: PrimInt + Signed> CheckedSub for TimeDelta<T> {
+    /// Checks if subtracting another `TimeDelta` results in underflow.
+    ///
+    /// Returns `None` if the subtraction would underflow, otherwise returns `Some(TimeDelta)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimeDelta;
+    ///
+    /// let delta1 = TimeDelta::new(10);
+    /// let delta2 = TimeDelta::new(5);
+    /// assert_eq!(delta1.checked_sub(delta2), Some(TimeDelta::new(5)));
+    ///
+    /// let min_delta = TimeDelta::new(i32::MIN);
+    /// assert!(min_delta.checked_sub(TimeDelta::new(1)).is_none());
+    /// ```
+    fn checked_sub(&self, rhs: &Self) -> Option<Self> {
+        self.0.checked_sub(&rhs.0).map(TimeDelta)
+    }
+}
+
+impl<T: PrimInt + Signed> SaturatingSub for TimeDelta<T> {
+    /// Subtracts another `TimeDelta` and saturates at the numeric bounds.
+    ///
+    /// Returns a new `TimeDelta` that is the result of the subtraction,
+    /// saturating at the maximum or minimum value if underflow occurs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimeDelta;
+    ///
+    /// let delta1 = TimeDelta::new(i32::MIN + 1);
+    /// let delta2 = TimeDelta::new(5);
+    /// let result = delta1.saturating_sub(delta2);
+    /// assert_eq!(result.value(), i32::MIN);
+    /// ```
+    fn saturating_sub(&self, rhs: &Self) -> Self {
+        TimeDelta(self.0.saturating_sub(rhs.0))
     }
 }
 
@@ -915,6 +1007,33 @@ impl<T: PrimInt + Signed> Mul<T> for TimeDelta<T> {
     }
 }
 
+impl<T: PrimInt + Signed> MulAssign<T> for TimeDelta<T> {
+    /// Multiplies the `TimeDelta` by a primitive integer, modifying it in place.
+    ///
+    /// This method takes a primitive integer and multiplies it with the current `TimeDelta`,
+    /// modifying the current instance to reflect the new value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an overflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimeDelta;
+    ///
+    /// let mut delta = TimeDelta::new(10);
+    /// delta *= 2;
+    /// assert_eq!(delta.value(), 20);
+    /// ```
+    fn mul_assign(&mut self, rhs: T) {
+        self.0 = self
+            .0
+            .checked_mul(&rhs)
+            .expect("overflow in TimeDelta *= primitive integer");
+    }
+}
+
 impl<T: PrimInt + Signed> Div<T> for TimeDelta<T> {
     type Output = TimeDelta<T>;
 
@@ -942,6 +1061,33 @@ impl<T: PrimInt + Signed> Div<T> for TimeDelta<T> {
                 .checked_div(&rhs)
                 .expect("overflow or division by zero in TimeDelta / primitive integer"),
         )
+    }
+}
+
+impl<T: PrimInt + Signed> DivAssign<T> for TimeDelta<T> {
+    /// Divides the `TimeDelta` by a primitive integer, modifying it in place.
+    ///
+    /// This method takes a primitive integer and divides the current `TimeDelta` by it,
+    /// modifying the current instance to reflect the new value.
+    ///
+    /// # Panics
+    ///
+    /// Panics on division by zero or if the division overflows (e.g., MIN / -1).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimeDelta;
+    ///
+    /// let mut delta = TimeDelta::new(20);
+    /// delta /= 2;
+    /// assert_eq!(delta.value(), 10);
+    /// ```
+    fn div_assign(&mut self, rhs: T) {
+        self.0 = self
+            .0
+            .checked_div(&rhs)
+            .expect("overflow or division by zero in TimeDelta /= primitive integer");
     }
 }
 
@@ -1856,6 +2002,53 @@ impl Add for SpaceLength {
         )
     }
 }
+
+impl CheckedAdd for SpaceLength {
+    /// Adds another `SpaceLength` to the current instance, returning `None` if overflow occurs.
+    ///
+    /// This method takes another `SpaceLength` and attempts to add it to the current instance,
+    /// returning `None` if the addition would overflow.
+    ///
+    /// # Examples
+    /// ```
+    /// use dock_alloc_core::domain::SpaceLength;
+    /// use num_traits::CheckedAdd;
+    ///
+    /// let seg_length1 = SpaceLength::new(10);
+    /// let seg_length2 = SpaceLength::new(5);
+    ///
+    /// // Call the trait method explicitly to avoid clashing with the inherent method
+    /// let result = <SpaceLength as CheckedAdd>::checked_add(&seg_length1, &seg_length2);
+    /// assert_eq!(result, Some(SpaceLength::new(15)));
+    /// ```
+    #[inline]
+    fn checked_add(&self, rhs: &Self) -> Option<Self> {
+        self.0.checked_add(rhs.0).map(SpaceLength)
+    }
+}
+
+impl SaturatingAdd for SpaceLength {
+    /// Adds another `SpaceLength` to the current instance, saturating at the numeric bounds.
+    ///
+    /// This method takes another `SpaceLength` and adds it to the current instance,
+    /// returning a new `SpaceLength` that saturates at `usize::MAX` if the addition would overflow.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SpaceLength;
+    ///
+    /// let seg_length1 = SpaceLength::new(usize::MAX - 1);
+    /// let seg_length2 = SpaceLength::new(2);
+    /// let result = seg_length1.saturating_add(seg_length2);
+    /// assert_eq!(result.value(), usize::MAX);
+    /// ```
+    #[inline]
+    fn saturating_add(&self, rhs: &Self) -> Self {
+        SpaceLength(self.0.saturating_add(rhs.0))
+    }
+}
+
 impl Sub for SpaceLength {
     type Output = SpaceLength;
 
@@ -1887,6 +2080,53 @@ impl Sub for SpaceLength {
         )
     }
 }
+
+impl CheckedSub for SpaceLength {
+    /// Subtracts another `SpaceLength` from the current instance, returning `None` if underflow occurs.
+    ///
+    /// This method takes another `SpaceLength` and attempts to subtract it from the current instance,
+    /// returning `None` if the subtraction would underflow.
+    ///
+    /// # Examples
+    /// ```
+    /// use dock_alloc_core::domain::SpaceLength;
+    /// use num_traits::CheckedSub;
+    ///
+    /// let seg_length1 = SpaceLength::new(10);
+    /// let seg_length2 = SpaceLength::new(5);
+    ///
+    /// // Call the trait method explicitly to avoid clashing with the inherent method
+    /// let result = <SpaceLength as CheckedSub>::checked_sub(&seg_length1, &seg_length2);
+    /// assert_eq!(result, Some(SpaceLength::new(5)));
+    /// ```
+    #[inline]
+    fn checked_sub(&self, rhs: &Self) -> Option<Self> {
+        self.0.checked_sub(rhs.0).map(SpaceLength)
+    }
+}
+
+impl SaturatingSub for SpaceLength {
+    /// Subtracts another `SpaceLength` from the current instance, saturating at zero.
+    ///
+    /// This method takes another `SpaceLength` and subtracts it from the current instance,
+    /// returning a new `SpaceLength` that saturates at zero if the subtraction would result in a negative value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SpaceLength;
+    ///
+    /// let seg_length1 = SpaceLength::new(5);
+    /// let seg_length2 = SpaceLength::new(10);
+    /// let result = seg_length1.saturating_sub(seg_length2);
+    /// assert_eq!(result.value(), 0);
+    /// ```
+    #[inline]
+    fn saturating_sub(&self, rhs: &Self) -> Self {
+        SpaceLength(self.0.saturating_sub(rhs.0))
+    }
+}
+
 impl AddAssign for SpaceLength {
     /// Adds another `SpaceLength` to the current instance, modifying it in place.
     ///
@@ -1976,6 +2216,34 @@ impl Mul<usize> for SpaceLength {
     }
 }
 
+impl MulAssign<usize> for SpaceLength {
+    /// Multiplies the current `SpaceLength` by a primitive unsigned integer type, modifying it in place.
+    ///
+    /// This method takes a primitive unsigned integer type and multiplies it with the current `SpaceLength`,
+    /// modifying the current instance to reflect the new value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an overflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SpaceLength;
+    ///
+    /// let mut seg_length1 = SpaceLength::new(10);
+    /// seg_length1 *= 2;
+    /// assert_eq!(seg_length1.value(), 20);
+    /// ```
+    #[inline]
+    fn mul_assign(&mut self, rhs: usize) {
+        self.0 = self
+            .0
+            .checked_mul(rhs)
+            .expect("overflow in SpaceLength *= usize");
+    }
+}
+
 impl Div<usize> for SpaceLength {
     type Output = SpaceLength;
 
@@ -2004,6 +2272,34 @@ impl Div<usize> for SpaceLength {
                 .checked_div(rhs)
                 .expect("division by zero in SpaceLength / usize"),
         )
+    }
+}
+
+impl DivAssign<usize> for SpaceLength {
+    /// Divides the current `SpaceLength` by a usize, modifying it in place.
+    ///
+    /// This method takes a usize and divides the current `SpaceLength` by it,
+    /// modifying the current instance to reflect the new value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if a division by zero occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SpaceLength;
+    ///
+    /// let mut seg_length1 = SpaceLength::new(10);
+    /// seg_length1 /= 2;
+    /// assert_eq!(seg_length1.value(), 5);
+    /// ```
+    #[inline]
+    fn div_assign(&mut self, rhs: usize) {
+        self.0 = self
+            .0
+            .checked_div(rhs)
+            .expect("division by zero in SpaceLength /= usize");
     }
 }
 
@@ -2089,6 +2385,586 @@ impl Interval<SpacePosition> {
     #[inline]
     pub fn extent(&self) -> SpaceLength {
         self.end() - self.start()
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub struct Cost<T>(T);
+
+impl<T: Copy> Cost<T> {
+    /// Creates a new `Cost` instance with the given value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    ///
+    /// let cost = Cost::new(42);
+    /// assert_eq!(cost.value(), 42);
+    /// ```
+    #[inline]
+    pub const fn new(value: T) -> Self {
+        Cost(value)
+    }
+
+    /// Returns the inner value of the `Cost`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    ///
+    /// let cost = Cost::new(42);
+    /// assert_eq!(cost.value(), 42);
+    /// ```
+    #[inline]
+    pub const fn value(self) -> T {
+        self.0
+    }
+
+    /// Computes `self + other`, returning `None` if overflow occurred.
+    ///
+    /// Performs an addition that returns `None` instead of panicking if an overflow occurs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    ///
+    /// let cost1 = Cost::new(10);
+    /// let cost2 = Cost::new(5);
+    /// let result = cost1.checked_add(cost2);
+    /// assert_eq!(result.unwrap().value(), 15);
+    /// ```
+    #[inline]
+    pub fn checked_add(self, other: Cost<T>) -> Option<Self>
+    where
+        T: CheckedAdd<Output = T> + Copy,
+    {
+        self.0.checked_add(&other.0).map(Cost)
+    }
+
+    /// Computes `self - other`, returning `None` if underflow occurred.
+    ///
+    /// Performs a subtraction that returns `None` instead of panicking if an underflow occurs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    ///
+    /// let cost1 = Cost::new(10);
+    /// let cost2 = Cost::new(5);
+    /// let result = cost1.checked_sub(cost2);
+    /// assert_eq!(result.unwrap().value(), 5);
+    /// ```
+    #[inline]
+    pub fn checked_sub(self, other: Cost<T>) -> Option<Self>
+    where
+        T: CheckedSub<Output = T> + Copy,
+    {
+        self.0.checked_sub(&other.0).map(Cost)
+    }
+
+    /// Saturating addition. Computes `self + other`, saturating at the numeric bounds.
+    ///
+    /// Performs an addition that returns `Cost(T::MAX)` if the result would overflow.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    /// let cost1 = Cost::new(usize::MAX - 2);
+    /// let cost2 = Cost::new(5);
+    /// let result = cost1.saturating_add(cost2);
+    /// assert_eq!(result.value(), usize::MAX);
+    /// ```
+    #[inline]
+    pub fn saturating_add(self, other: Cost<T>) -> Self
+    where
+        T: SaturatingAdd<Output = T> + Copy,
+    {
+        Cost(self.0.saturating_add(&other.0))
+    }
+
+    /// Saturating subtraction. Computes `self - other`, saturatring at bounds.
+    ///
+    /// Performs a subtraction that returns `Cost(0)` if the result would overflow.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    ///
+    /// let cost1 = Cost::new(5);
+    /// let cost2 = Cost::new(10);
+    /// let result = cost1.saturating_sub(cost2);
+    /// assert_eq!(result.value(), -5);
+    /// ```
+    #[inline]
+    pub fn saturating_sub(self, other: Cost<T>) -> Self
+    where
+        T: SaturatingSub<Output = T> + Copy,
+    {
+        Cost(self.0.saturating_sub(&other.0))
+    }
+}
+
+impl<T: Copy + Display> Display for Cost<T> {
+    /// Formats the `Cost` as `Cost(value)`.
+    ///
+    /// Formats the `Cost` instance as a string in the format `Cost(value)`,
+    /// where `value` is the inner value of the `Cost`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    ///
+    /// let cost = Cost::new(42);
+    /// assert_eq!(format!("{}", cost), "Cost(42)");
+    /// ```
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Cost({})", self.0)
+    }
+}
+
+impl<T> Add for Cost<T>
+where
+    T: Copy + CheckedAdd<Output = T>,
+{
+    type Output = Cost<T>;
+
+    /// Adds two `Cost` instances, returning a new `Cost`.
+    ///
+    /// This method takes another `Cost` and adds it to the current instance,
+    /// returning a new `Cost` with the updated value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an overflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    ///
+    /// let cost1 = Cost::new(10);
+    /// let cost2 = Cost::new(5);
+    /// let result = cost1 + cost2;
+    /// assert_eq!(result.value(), 15);
+    /// ```
+    #[inline]
+    fn add(self, rhs: Self) -> Self::Output {
+        Cost(self.0.checked_add(&rhs.0).expect("overflow in Cost + Cost"))
+    }
+}
+
+impl<T> AddAssign for Cost<T>
+where
+    T: Copy + CheckedAdd<Output = T>,
+{
+    /// Adds another `Cost` to the current instance, modifying it in place.
+    ///
+    /// This method takes another `Cost` and adds it to the current instance,
+    /// modifying the current instance to reflect the new value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an overflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    ///
+    /// let mut cost1 = Cost::new(10);
+    /// let cost2 = Cost::new(5);
+    /// cost1 += cost2;
+    /// assert_eq!(cost1.value(), 15);
+    /// ```
+    #[inline]
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 = self
+            .0
+            .checked_add(&rhs.0)
+            .expect("overflow in Cost += Cost");
+    }
+}
+
+impl<T: Copy + CheckedAdd<Output = T>> CheckedAdd for Cost<T> {
+    /// Adds another `Cost` to the current instance, returning `None` if overflow occurs.
+    ///
+    /// This method takes another `Cost` and attempts to add it to the current instance,
+    /// returning `None` if the addition would overflow.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    /// use num_traits::CheckedAdd;
+    ///
+    /// let cost1 = Cost::new(10);
+    /// let cost2 = Cost::new(5);
+    ///
+    /// // Call the trait method explicitly to avoid clashing with the inherent method
+    /// let result = <Cost<i32> as CheckedAdd>::checked_add(&cost1, &cost2);
+    /// assert_eq!(result, Some(Cost::new(15)));
+    /// ```
+    #[inline]
+    fn checked_add(&self, rhs: &Self) -> Option<Self> {
+        self.0.checked_add(&rhs.0).map(Cost)
+    }
+}
+
+impl<T> SaturatingAdd for Cost<T>
+where
+    T: Copy + CheckedAdd + SaturatingAdd<Output = T>,
+{
+    /// Adds another `Cost` to the current instance, saturating at the numeric bounds.
+    ///
+    /// This method takes another `Cost` and adds it to the current instance,
+    /// returning a new `Cost` that saturates at `T::MAX` if the addition would overflow.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    ///
+    /// let cost1 = Cost::new(usize::MAX - 1);
+    /// let cost2 = Cost::new(2);
+    /// let result = cost1.saturating_add(cost2);
+    /// assert_eq!(result.value(), usize::MAX);
+    /// ```
+    #[inline]
+    fn saturating_add(&self, rhs: &Self) -> Self {
+        Cost(self.0.saturating_add(&rhs.0))
+    }
+}
+
+impl<T> Sub for Cost<T>
+where
+    T: Copy + CheckedSub<Output = T>,
+{
+    type Output = Cost<T>;
+
+    /// Subtracts one `Cost` from another, returning a new `Cost`.
+    ///
+    /// This method takes another `Cost` and subtracts it from the current instance,
+    /// returning a new `Cost` with the updated value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an underflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    ///
+    /// let cost1 = Cost::new(10);
+    /// let cost2 = Cost::new(5);
+    /// let result = cost1 - cost2;
+    /// assert_eq!(result.value(), 5);
+    /// ```
+    #[inline]
+    fn sub(self, rhs: Self) -> Self::Output {
+        Cost(
+            self.0
+                .checked_sub(&rhs.0)
+                .expect("underflow in Cost - Cost"),
+        )
+    }
+}
+
+impl<T> SubAssign for Cost<T>
+where
+    T: Copy + CheckedSub<Output = T>,
+{
+    /// Subtracts another `Cost` from the current instance, modifying it in place.
+    ///
+    /// This method takes another `Cost` and subtracts it from the current instance,
+    /// modifying the current instance to reflect the new value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an underflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    ///
+    /// let mut cost1 = Cost::new(10);
+    /// let cost2 = Cost::new(5);
+    /// cost1 -= cost2;
+    /// assert_eq!(cost1.value(), 5);
+    /// ```
+    #[inline]
+    fn sub_assign(&mut self, rhs: Self) {
+        self.0 = self
+            .0
+            .checked_sub(&rhs.0)
+            .expect("underflow in Cost -= Cost");
+    }
+}
+
+impl<T: Copy + CheckedSub<Output = T>> CheckedSub for Cost<T> {
+    /// Subtracts another `Cost` from the current instance, returning `None` if underflow occurs.
+    ///
+    /// This method takes another `Cost` and attempts to subtract it from the current instance,
+    /// returning `None` if the subtraction would underflow.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    /// use num_traits::CheckedSub;
+    ///
+    /// let cost1 = Cost::new(10);
+    /// let cost2 = Cost::new(5);
+    ///
+    /// // Call the trait method explicitly to avoid clashing with the inherent method
+    /// let result = <Cost<i32> as CheckedSub>::checked_sub(&cost1, &cost2);
+    /// assert_eq!(result, Some(Cost::new(5)));
+    /// ```
+    #[inline]
+    fn checked_sub(&self, rhs: &Self) -> Option<Self> {
+        self.0.checked_sub(&rhs.0).map(Cost)
+    }
+}
+
+impl<T> SaturatingSub for Cost<T>
+where
+    T: Copy + CheckedSub<Output = T> + SaturatingSub<Output = T>,
+{
+    /// Subtracts another `Cost` from the current instance, saturating at zero.
+    ///
+    /// This method takes another `Cost` and subtracts it from the current instance,
+    /// returning a new `Cost` that saturates at zero if the subtraction would result in a negative value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    ///
+    /// let cost1 = Cost::new(5);
+    /// let cost2 = Cost::new(10);
+    /// let result = cost1.saturating_sub(cost2);
+    /// assert_eq!(result.value(), -5);
+    /// ```
+    #[inline]
+    fn saturating_sub(&self, rhs: &Self) -> Self {
+        Cost(self.0.saturating_sub(&rhs.0))
+    }
+}
+
+impl<T> Mul<T> for Cost<T>
+where
+    T: Copy + CheckedMul<Output = T>,
+{
+    type Output = Cost<T>;
+
+    /// Multiplies a `Cost` by a primitive value, returning a new `Cost`.
+    ///
+    /// This method takes a primitive value and multiplies it with the current `Cost`,
+    /// returning a new `Cost` with the updated value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an overflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    ///
+    /// let cost = Cost::new(10);
+    /// let result = cost * 2;
+    /// assert_eq!(result.value(), 20);
+    /// ```
+    #[inline]
+    fn mul(self, rhs: T) -> Self::Output {
+        Cost(self.0.checked_mul(&rhs).expect("overflow in Cost * T"))
+    }
+}
+
+impl<T> MulAssign<T> for Cost<T>
+where
+    T: Copy + CheckedMul<Output = T>,
+{
+    /// Multiplies the current `Cost` by a primitive value, modifying it in place.
+    ///
+    /// This method takes a primitive value and multiplies it with the current `Cost`,
+    /// modifying the current instance to reflect the new value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an overflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    ///
+    /// let mut cost = Cost::new(10);
+    /// cost *= 2;
+    /// assert_eq!(cost.value(), 20);
+    /// ```
+    #[inline]
+    fn mul_assign(&mut self, rhs: T) {
+        self.0 = self.0.checked_mul(&rhs).expect("overflow in Cost *= T");
+    }
+}
+
+impl<T> Div<T> for Cost<T>
+where
+    T: Copy + CheckedDiv<Output = T>,
+{
+    type Output = Cost<T>;
+
+    /// Divides a `Cost` by a primitive value, returning a new `Cost`.
+    ///
+    /// This method takes a primitive value and divides the current `Cost` by it,
+    /// returning a new `Cost` with the updated value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if a division by zero occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    ///
+    /// let cost = Cost::new(10);
+    /// let result = cost / 2;
+    /// assert_eq!(result.value(), 5);
+    /// ```
+    #[inline]
+    fn div(self, rhs: T) -> Self::Output {
+        Cost(
+            self.0
+                .checked_div(&rhs)
+                .expect("division by zero in Cost / T"),
+        )
+    }
+}
+
+impl<T> DivAssign<T> for Cost<T>
+where
+    T: Copy + CheckedDiv<Output = T>,
+{
+    /// Divides the current `Cost` by a primitive value, modifying it in place.
+    ///
+    /// This method takes a primitive value and divides the current `Cost` by it,
+    /// modifying the current instance to reflect the new value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if a division by zero occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    ///
+    /// let mut cost = Cost::new(10);
+    /// cost /= 2;
+    /// assert_eq!(cost.value(), 5);
+    /// ```
+    #[inline]
+    fn div_assign(&mut self, rhs: T) {
+        self.0 = self
+            .0
+            .checked_div(&rhs)
+            .expect("division by zero in Cost /= T");
+    }
+}
+
+impl<T> Sum for Cost<T>
+where
+    T: Copy + CheckedAdd<Output = T> + Zero,
+{
+    /// Sums up a collection of `Cost` instances, returning a new `Cost`.
+    ///
+    /// This method takes an iterator of `Cost` instances and sums them up,
+    /// returning a new `Cost` that represents the total cost.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    ///
+    /// let costs = vec![Cost::new(10), Cost::new(5)];
+    /// let total_cost: Cost<i32> = costs.into_iter().sum();
+    /// assert_eq!(total_cost.value(), 15);
+    /// ```
+    #[inline]
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Cost::new(T::zero()), |a, b| a + b)
+    }
+}
+
+impl<'a, T> Sum<&'a Cost<T>> for Cost<T>
+where
+    T: Copy + CheckedAdd<Output = T> + Zero,
+{
+    /// Sums up a collection of references to `Cost` instances, returning a new `Cost`.
+    ///
+    /// This method takes an iterator of references to `Cost` instances and sums them up,
+    /// returning a new `Cost` that represents the total cost.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    ///
+    /// let costs = vec![Cost::new(10), Cost::new(5)];
+    /// let total_cost: Cost<i32> = costs.iter().sum();
+    /// assert_eq!(total_cost.value(), 15);
+    /// ```
+    #[inline]
+    fn sum<I: Iterator<Item = &'a Self>>(iter: I) -> Self {
+        iter.fold(Cost::new(T::zero()), |a, b| a + *b)
+    }
+}
+
+impl<T: Copy + Zero + CheckedAdd> Zero for Cost<T> {
+    /// Creates a new `Cost` instance with a value of zero.
+    ///
+    /// This method returns a new `Cost` with the inner value set to zero.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    /// use num_traits::identities::Zero;
+    ///
+    /// let cost: Cost<i32> = Cost::zero();
+    /// assert_eq!(cost.value(), 0);
+    /// ```
+    fn zero() -> Self {
+        Cost(T::zero())
+    }
+
+    /// Checks if the `Cost` is zero.
+    ///
+    /// This method returns `true` if the inner value of the `Cost` is zero, otherwise it returns `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::Cost;
+    /// use num_traits::identities::Zero;
+    ///
+    /// let cost = Cost::new(0);
+    /// assert!(cost.is_zero());
+    /// let non_zero_cost = Cost::new(5);
+    /// assert!(!non_zero_cost.is_zero());
+    /// ```
+    fn is_zero(&self) -> bool {
+        self.0.is_zero()
     }
 }
 
@@ -2641,5 +3517,111 @@ mod tests {
     fn test_space_length_div_truncation() {
         let length = SpaceLength::new(17);
         assert_eq!(length / 4, SpaceLength::new(4));
+    }
+
+    #[test]
+    fn test_timedelta_sum() {
+        let deltas = vec![TimeDelta::new(10), TimeDelta::new(20), TimeDelta::new(-5)];
+        let total_owned: TimeDelta<i32> = deltas.clone().into_iter().sum();
+        assert_eq!(total_owned, TimeDelta::new(25));
+        let total_borrowed: TimeDelta<i32> = deltas.iter().sum();
+        assert_eq!(total_borrowed, TimeDelta::new(25));
+    }
+
+    #[test]
+    fn test_space_length_sum() {
+        let lengths = vec![
+            SpaceLength::new(5),
+            SpaceLength::new(8),
+            SpaceLength::new(2),
+        ];
+        let total_owned: SpaceLength = lengths.clone().into_iter().sum();
+        assert_eq!(total_owned, SpaceLength::new(15));
+        let total_borrowed: SpaceLength = lengths.iter().sum();
+        assert_eq!(total_borrowed, SpaceLength::new(15));
+    }
+
+    #[test]
+    fn test_assign_ops() {
+        let mut delta = TimeDelta::new(20_i32);
+        delta *= 2;
+        assert_eq!(delta, TimeDelta::new(40));
+        delta /= 4;
+        assert_eq!(delta, TimeDelta::new(10));
+
+        let mut length = SpaceLength::new(20);
+        length *= 2;
+        assert_eq!(length, SpaceLength::new(40));
+        length /= 4;
+        assert_eq!(length, SpaceLength::new(10));
+    }
+
+    #[test]
+    fn test_cost_creation_and_value() {
+        let cost = Cost::new(100);
+        assert_eq!(cost.value(), 100);
+    }
+
+    #[test]
+    fn test_cost_display() {
+        let cost = Cost::new(100);
+        assert_eq!(format!("{}", cost), "Cost(100)");
+    }
+
+    #[test]
+    fn test_cost_arithmetic() {
+        let cost1 = Cost::new(100);
+        let cost2 = Cost::new(50);
+        assert_eq!((cost1 + cost2).value(), 150);
+        assert_eq!((cost1 - cost2).value(), 50);
+    }
+
+    #[test]
+    fn test_cost_scalar_arithmetic() {
+        let cost = Cost::new(100);
+        assert_eq!((cost * 2).value(), 200);
+        assert_eq!((cost / 4).value(), 25);
+    }
+
+    #[test]
+    fn test_cost_assign_ops() {
+        let mut cost = Cost::new(100);
+        cost += Cost::new(50);
+        assert_eq!(cost.value(), 150);
+        cost -= Cost::new(25);
+        assert_eq!(cost.value(), 125);
+        cost *= 2;
+        assert_eq!(cost.value(), 250);
+        cost /= 5;
+        assert_eq!(cost.value(), 50);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_cost_add_overflow_panics() {
+        let cost = Cost::new(u32::MAX);
+        let _ = cost + Cost::new(1);
+    }
+
+    #[test]
+    fn test_cost_checked_ops() {
+        let cost1 = Cost::new(100_u32);
+        let cost2 = Cost::new(50);
+        assert_eq!(cost1.checked_add(cost2).unwrap().value(), 150);
+        assert_eq!(cost1.checked_sub(cost2).unwrap().value(), 50);
+
+        let max_cost = Cost::new(u32::MAX);
+        assert!(max_cost.checked_add(Cost::new(1)).is_none());
+    }
+
+    #[test]
+    fn test_cost_saturating_ops() {
+        let cost1 = Cost::new(u32::MAX - 10);
+        let cost2 = Cost::new(20);
+        assert_eq!(cost1.saturating_add(cost2).value(), u32::MAX);
+
+        let cost3 = Cost::new(10_u32);
+        let cost4 = Cost::new(20);
+        assert_eq!(cost3.saturating_sub(cost4).value(), 0);
     }
 }
