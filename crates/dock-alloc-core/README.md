@@ -22,6 +22,10 @@ The library's design revolves around the newtype pattern to create distinct, non
 * **`SpaceLength`**: Represents a length or size, such as that of a vessel or a quay segment.
 * **`SpaceInterval`**: A half-open interval `[start, end)` representing a contiguous section of space.
 
+### Cost Domain
+
+* **`Cost<T>`**: Represents a cost associated with an allocation, such as the time or space used by a ship.
+
 ---
 
 ## Features
