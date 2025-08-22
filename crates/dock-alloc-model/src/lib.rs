@@ -141,6 +141,37 @@ where
     TimeType: PrimInt + Signed,
     CostType: PrimInt + Signed,
 {
+    /// Compares two `Vessel` instances for equality based on their unique identifiers.
+    ///
+    /// This implementation checks if the `id` of one vessel is equal to the `id` of another vessel.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Vessel, VesselId};
+    /// use dock_alloc_core::domain::{Cost, SpaceLength, SpacePosition, TimeDelta, TimePoint};
+    ///
+    /// let vessel1 = Vessel::new(
+    ///     VesselId::new(1),
+    ///     SpaceLength::new(100),
+    ///     TimePoint::new(1622547800), // Example timestamp
+    ///     TimeDelta::new(3600), // Example duration in seconds
+    ///     SpacePosition::new(50),
+    ///     Cost::new(10), // Example cost per waiting time
+    ///     Cost::new(5), // Example cost per target berthing deviation
+    /// );
+    /// let vessel2 = Vessel::new(
+    ///     VesselId::new(1),
+    ///     SpaceLength::new(200),
+    ///     TimePoint::new(3), // Example timestamp
+    ///     TimeDelta::new(2), // Example duration in seconds
+    ///     SpacePosition::new(1),
+    ///     Cost::new(300), // Example cost per waiting time
+    ///     Cost::new(500), // Example cost per target berthing deviation
+    /// );
+    /// assert!(vessel1 == vessel2);
+    /// ```
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
@@ -158,6 +189,45 @@ where
     TimeType: PrimInt + Signed,
     CostType: PrimInt + Signed,
 {
+    /// Computes the hash of the `Vessel` based on its unique identifier.
+    ///
+    /// This implementation hashes the `id` of the vessel, allowing it to be used in hash-based collections.
+    ///
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::hash::{Hash, Hasher};
+    /// use std::collections::hash_map::DefaultHasher;
+    /// use std::collections::HashSet;
+    /// use dock_alloc_model::{Vessel, VesselId};
+    /// use dock_alloc_core::domain::{Cost, SpaceLength, SpacePosition, TimeDelta, TimePoint};
+    ///
+    /// let vessel1 = Vessel::new(
+    ///     VesselId::new(1),
+    ///     SpaceLength::new(100),
+    ///     TimePoint::new(1622547800), // Example timestamp
+    ///     TimeDelta::new(3600), // Example duration in seconds
+    ///     SpacePosition::new(50),
+    ///     Cost::new(10), // Example cost per waiting time
+    ///     Cost::new(5), // Example cost per target berthing deviation
+    /// );
+    /// let vessel2 = Vessel::new(
+    ///     VesselId::new(1),
+    ///     SpaceLength::new(200),
+    ///     TimePoint::new(3), // Example timestamp
+    ///     TimeDelta::new(2), // Example duration in seconds
+    ///     SpacePosition::new(1),
+    ///     Cost::new(300), // Example cost per waiting time
+    ///     Cost::new(500), // Example cost per target berthing deviation
+    /// );
+    /// let mut h1 = DefaultHasher::new();
+    /// vessel1.hash(&mut h1);
+    /// let mut h2 = DefaultHasher::new();
+    /// vessel2.hash(&mut h2);
+    /// assert_eq!(h1.finish(), h2.finish());
+    /// ```
+    #[inline]
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
@@ -168,6 +238,43 @@ where
     TimeType: PrimInt + Signed,
     CostType: PrimInt + Signed,
 {
+    /// Compares two `Vessel` instances for ordering based on their unique identifiers.
+    ///
+    /// This implementation allows for partial ordering of vessels, primarily based on their `id`.
+    ///
+    /// # Note
+    ///
+    /// You might expect ordering based on the arrival time or other attributes,
+    /// but this implementation only considers the `id` for simplicity. You need
+    /// to implement additional logic if you want to compare vessels based on other attributes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Vessel, VesselId};
+    /// use dock_alloc_core::domain::{Cost, SpaceLength, SpacePosition, TimeDelta, TimePoint};
+    ///
+    /// let vessel1 = Vessel::new(
+    ///     VesselId::new(1),
+    ///     SpaceLength::new(100),
+    ///     TimePoint::new(1622547800), // Example timestamp
+    ///     TimeDelta::new(3600), // Example duration in seconds
+    ///     SpacePosition::new(50),
+    ///     Cost::new(10), // Example cost per waiting time
+    ///     Cost::new(5), // Example cost per target berthing deviation
+    /// );
+    /// let vessel2 = Vessel::new(
+    ///     VesselId::new(2),
+    ///     SpaceLength::new(200),
+    ///     TimePoint::new(3), // Example timestamp
+    ///     TimeDelta::new(2), // Example duration in seconds
+    ///     SpacePosition::new(1),
+    ///     Cost::new(300), // Example cost per waiting time
+    ///     Cost::new(500), // Example cost per target berthing deviation
+    /// );
+    /// assert!(vessel1 < vessel2);
+    /// ```
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
@@ -178,6 +285,43 @@ where
     TimeType: PrimInt + Signed,
     CostType: PrimInt + Signed,
 {
+    /// Compares two `Vessel` instances for total ordering based on their unique identifiers.
+    ///
+    /// This implementation allows for total ordering of vessels, primarily based on their `id`.
+    ///
+    /// # Note
+    ///
+    /// You might expect ordering based on the arrival time or other attributes,
+    /// but this implementation only considers the `id` for simplicity. You need
+    /// to implement additional logic if you want to compare vessels based on other attributes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Vessel, VesselId};
+    /// use dock_alloc_core::domain::{Cost, SpaceLength, SpacePosition, TimeDelta, TimePoint};
+    ///
+    /// let vessel1 = Vessel::new(
+    ///     VesselId::new(1),
+    ///     SpaceLength::new(100),
+    ///     TimePoint::new(1622547800), // Example timestamp
+    ///     TimeDelta::new(3600), // Example duration in seconds
+    ///     SpacePosition::new(50),
+    ///     Cost::new(10), // Example cost per waiting time
+    ///     Cost::new(5), // Example cost per target berthing deviation
+    /// );
+    /// let vessel2 = Vessel::new(
+    ///     VesselId::new(2),
+    ///     SpaceLength::new(200),
+    ///     TimePoint::new(3), // Example timestamp
+    ///     TimeDelta::new(2), // Example duration in seconds
+    ///     SpacePosition::new(1),
+    ///     Cost::new(300), // Example cost per waiting time
+    ///     Cost::new(500), // Example cost per target berthing deviation
+    /// );
+    /// assert!(vessel1 < vessel2);
+    /// ```
+    #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.id.cmp(&other.id)
     }
@@ -216,6 +360,7 @@ where
     /// assert_eq!(vessel.cost_per_waiting_time(), Cost::new(10));
     /// assert_eq!(vessel.cost_per_target_berthing_deviation(), Cost::new(5));
     /// ```
+    #[inline]
     pub fn new(
         id: VesselId,
         length: SpaceLength,
@@ -309,6 +454,7 @@ where
     /// );
     /// assert_eq!(vessel.arrival_time(), TimePoint::new(1622547800));
     /// ```
+    #[inline]
     pub fn arrival_time(&self) -> TimePoint<TimeType> {
         self.arrival_time
     }
@@ -334,6 +480,7 @@ where
     /// );
     /// assert_eq!(vessel.processing_duration(), TimeDelta::new(3600));
     /// ```
+    #[inline]
     pub fn processing_duration(&self) -> TimeDelta<TimeType> {
         self.processing_duration
     }
@@ -359,6 +506,7 @@ where
     /// );
     /// assert_eq!(vessel.target_berthing_position(), SpacePosition::new(50));
     /// ```
+    #[inline]
     pub fn target_berthing_position(&self) -> SpacePosition {
         self.target_berthing_position
     }
@@ -384,6 +532,7 @@ where
     /// );
     /// assert_eq!(vessel.cost_per_waiting_time().value(), 10);
     /// ```
+    #[inline]
     pub fn cost_per_waiting_time(&self) -> Cost<CostType> {
         self.cost_per_waiting_time
     }
@@ -409,8 +558,96 @@ where
     /// );
     /// assert_eq!(vessel.cost_per_target_berthing_deviation().value(), 5);
     /// ```
+    #[inline]
     pub fn cost_per_target_berthing_deviation(&self) -> Cost<CostType> {
         self.cost_per_target_berthing_deviation
+    }
+}
+
+impl<TimeType, CostType> Vessel<TimeType, CostType>
+where
+    TimeType: PrimInt + Signed,
+    CostType: PrimInt + Signed + TryFrom<TimeType>,
+{
+    /// Calculates the cost incurred by the vessel for waiting time.
+    ///
+    /// This function computes the cost based on the waiting time provided as a `TimeDelta`.
+    /// It multiplies the waiting time by the cost per waiting time to determine the total cost.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the waiting time does not fit into the `CostType` and a conversion
+    /// would result in an overflow or underflow.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Vessel, VesselId};
+    /// use dock_alloc_core::domain::{Cost, SpaceLength, SpacePosition, TimeDelta, TimePoint};
+    ///
+    /// let vessel = Vessel::new(
+    ///     VesselId::new(1),
+    ///     SpaceLength::new(100),
+    ///     TimePoint::new(1622547800), // Example timestamp
+    ///     TimeDelta::new(3600), // Example duration in seconds
+    ///     SpacePosition::new(50),
+    ///     Cost::new(10), // Example cost per waiting time
+    ///     Cost::new(5), // Example cost per target berthing deviation
+    /// );
+    /// let waiting_time = TimeDelta::new(2); // Example waiting time in seconds
+    /// let cost = vessel.waiting_cost(waiting_time);
+    /// assert_eq!(cost.value(), 20); // 10 * 2
+    /// ```
+    #[inline]
+    pub fn waiting_cost(&self, waiting_time: TimeDelta<TimeType>) -> Cost<CostType> {
+        let scalar: CostType = CostType::try_from(waiting_time.value())
+            .ok()
+            .expect("waiting time does not fit in CostType");
+        self.cost_per_waiting_time * scalar
+    }
+}
+
+impl<TimeType, CostType> Vessel<TimeType, CostType>
+where
+    TimeType: PrimInt + Signed,
+    CostType: PrimInt + Signed + TryFrom<usize>,
+{
+    /// Calculates the cost incurred by the vessel for deviations from the target berthing position.
+    ///
+    /// This function computes the cost based on the deviation from the target berthing position
+    /// provided as a `SpaceLength`. It multiplies the deviation by the cost per target berthing deviation
+    /// to determine the total cost.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the deviation does not fit into the `CostType` and a conversion
+    /// would result in an overflow or underflow.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Vessel, VesselId};
+    /// use dock_alloc_core::domain::{Cost, SpaceLength, SpacePosition, TimeDelta, TimePoint};
+    ///
+    /// let vessel = Vessel::new(
+    ///     VesselId::new(1),
+    ///     SpaceLength::new(100),
+    ///     TimePoint::new(1622547800), // Example timestamp
+    ///     TimeDelta::new(3600), // Example duration in seconds
+    ///     SpacePosition::new(50),
+    ///     Cost::new(10), // Example cost per waiting time
+    ///     Cost::new(5), // Example cost per target berthing deviation
+    /// );
+    /// let deviation = SpaceLength::new(3); // Example deviation in length
+    /// let cost = vessel.target_berthing_deviation_cost(deviation);
+    /// assert_eq!(cost.value(), 15); // 5 * 3
+    /// ```
+    #[inline]
+    pub fn target_berthing_deviation_cost(&self, deviation: SpaceLength) -> Cost<CostType> {
+        let scalar: CostType = CostType::try_from(deviation.value())
+            .ok()
+            .expect("deviation does not fit in CostType");
+        self.cost_per_target_berthing_deviation * scalar
     }
 }
 
@@ -623,7 +860,7 @@ mod tests {
     }
 
     #[test]
-    fn vessels_are_unique_by_id() {
+    fn test_vessels_are_unique_by_id() {
         let mut set = std::collections::HashSet::new();
         let v1 = Vessel::new(
             VesselId::new(1),
@@ -647,5 +884,37 @@ mod tests {
         set.insert(v1);
         set.insert(v2);
         assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn test_waiting_cost() {
+        let vessel = Vessel::new(
+            VesselId::new(1),
+            SpaceLength::new(100),
+            TimePoint::new(1622547800),
+            TimeDelta::new(3600),
+            SpacePosition::new(50),
+            Cost::new(10),
+            Cost::new(5),
+        );
+        let waiting_time = TimeDelta::new(2);
+        let cost = vessel.waiting_cost(waiting_time);
+        assert_eq!(cost.value(), 20); // 10 * 2
+    }
+
+    #[test]
+    fn test_target_berthing_deviation_cost() {
+        let vessel = Vessel::new(
+            VesselId::new(1),
+            SpaceLength::new(100),
+            TimePoint::new(1622547800),
+            TimeDelta::new(3600),
+            SpacePosition::new(50),
+            Cost::new(10),
+            Cost::new(5),
+        );
+        let deviation = SpaceLength::new(3);
+        let cost = vessel.target_berthing_deviation_cost(deviation);
+        assert_eq!(cost.value(), 15); // 5 * 3
     }
 }
