@@ -77,7 +77,7 @@ use std::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TimePoint<T: PrimInt>(T);
 
-impl<T: PrimInt + Signed + Display> Display for TimePoint<T> {
+impl<T: PrimInt + Display> Display for TimePoint<T> {
     /// Formats the `TimePoint` as `TimePoint(value)`.
     ///
     /// # Examples
@@ -169,7 +169,7 @@ impl<T: PrimInt + Signed> TimeDelta<T> {
     /// let delta = TimeDelta::new(42);
     /// assert_eq!(delta.value(), 42);
     /// ```
-    #[inline(always)]
+    #[inline]
     pub const fn new(value: T) -> Self {
         Self(value)
     }
@@ -186,7 +186,7 @@ impl<T: PrimInt + Signed> TimeDelta<T> {
     /// let delta: TimeDelta<i32> = TimeDelta::zero();
     /// assert!(delta.is_zero());
     /// ```
-    #[inline(always)]
+    #[inline]
     pub fn zero() -> Self {
         Self(T::zero())
     }
@@ -203,7 +203,7 @@ impl<T: PrimInt + Signed> TimeDelta<T> {
     /// let delta = TimeDelta::new(42);
     /// assert_eq!(delta.value(), 42);
     /// ```
-    #[inline(always)]
+    #[inline]
     pub const fn value(self) -> T {
         self.0
     }
@@ -220,7 +220,7 @@ impl<T: PrimInt + Signed> TimeDelta<T> {
     /// let delta = TimeDelta::new(-42);
     /// assert_eq!(delta.abs().value(), 42);
     /// ```
-    #[inline(always)]
+    #[inline]
     pub fn abs(self) -> Self {
         Self(self.0.abs())
     }
@@ -237,7 +237,7 @@ impl<T: PrimInt + Signed> TimeDelta<T> {
     /// assert!(TimeDelta::new(-1).is_negative());
     /// assert!(!TimeDelta::new(0).is_negative());
     /// ```
-    #[inline(always)]
+    #[inline]
     pub fn is_negative(self) -> bool {
         self.0.is_negative()
     }
@@ -254,7 +254,7 @@ impl<T: PrimInt + Signed> TimeDelta<T> {
     /// assert!(TimeDelta::new(1).is_positive());
     /// assert!(!TimeDelta::new(0).is_positive());
     /// ```
-    #[inline(always)]
+    #[inline]
     pub fn is_positive(self) -> bool {
         self.0.is_positive()
     }
@@ -271,7 +271,7 @@ impl<T: PrimInt + Signed> TimeDelta<T> {
     /// assert!(TimeDelta::new(0).is_zero());
     /// assert!(!TimeDelta::new(1).is_zero());
     /// ```
-    #[inline(always)]
+    #[inline]
     pub fn is_zero(self) -> bool {
         self.0.is_zero()
     }
@@ -408,7 +408,7 @@ impl<T: PrimInt + Signed> TimeDelta<T> {
     }
 }
 
-impl<T: PrimInt + Signed> TimePoint<T> {
+impl<T: PrimInt> TimePoint<T> {
     /// Creates a new `TimePoint` with the given value.
     ///
     /// Creates a new `TimePoint` instance wrapping the provided value.
@@ -421,7 +421,7 @@ impl<T: PrimInt + Signed> TimePoint<T> {
     /// let tp = TimePoint::new(42_i32);
     /// assert_eq!(tp.value(), 42);
     /// ```
-    #[inline(always)]
+    #[inline]
     pub const fn new(value: T) -> Self {
         TimePoint(value)
     }
@@ -438,11 +438,13 @@ impl<T: PrimInt + Signed> TimePoint<T> {
     /// let tp = TimePoint::new(42_i32);
     /// assert_eq!(tp.value(), 42);
     /// ```
-    #[inline(always)]
+    #[inline]
     pub const fn value(self) -> T {
         self.0
     }
+}
 
+impl<T: PrimInt + Signed> TimePoint<T> {
     /// Computes `self + delta`, returning `None` if overflow occurred.
     ///
     /// Performs an addition that returns `None` instead of panicking if the result overflows.
@@ -1002,7 +1004,7 @@ impl<T: PrimInt + Signed> Mul<T> for TimeDelta<T> {
         TimeDelta::new(
             self.0
                 .checked_mul(&rhs)
-                .expect("overflow in TimeDelta * primitive integer"),
+                .expect("overflow in TimeDelta * scalar"),
         )
     }
 }
@@ -1030,7 +1032,7 @@ impl<T: PrimInt + Signed> MulAssign<T> for TimeDelta<T> {
         self.0 = self
             .0
             .checked_mul(&rhs)
-            .expect("overflow in TimeDelta *= primitive integer");
+            .expect("overflow in TimeDelta *= scalar");
     }
 }
 
@@ -1041,6 +1043,10 @@ impl<T: PrimInt + Signed> Div<T> for TimeDelta<T> {
     ///
     /// This method takes a primitive integer and divides the current `TimeDelta` by it,
     /// returning a new `TimeDelta` with the updated value.
+    ///
+    /// # Note
+    /// For signed `T`, division truncates toward zero (Rust semantics):
+    /// `10 / -3 == -3`, not `-4`. Panics on division by zero or `MIN / -1`.
     ///
     /// # Panics
     ///
@@ -1059,7 +1065,7 @@ impl<T: PrimInt + Signed> Div<T> for TimeDelta<T> {
         TimeDelta::new(
             self.0
                 .checked_div(&rhs)
-                .expect("overflow or division by zero in TimeDelta / primitive integer"),
+                .expect("div-by-zero or overflow in TimeDelta / scalar"),
         )
     }
 }
@@ -1087,7 +1093,7 @@ impl<T: PrimInt + Signed> DivAssign<T> for TimeDelta<T> {
         self.0 = self
             .0
             .checked_div(&rhs)
-            .expect("overflow or division by zero in TimeDelta /= primitive integer");
+            .expect("div-by-zero or overflow in TimeDelta /= scalar");
     }
 }
 
@@ -1311,7 +1317,7 @@ impl SpacePosition {
     /// let pos = SpacePosition::new(5);
     /// assert_eq!(pos.value(), 5);
     /// ```
-    #[inline(always)]
+    #[inline]
     pub const fn new(v: usize) -> Self {
         SpacePosition(v)
     }
@@ -1328,7 +1334,7 @@ impl SpacePosition {
     /// let pos = SpacePosition::zero();
     /// assert_eq!(pos.value(), 0);
     /// ```
-    #[inline(always)]
+    #[inline]
     pub const fn zero() -> Self {
         SpacePosition(0)
     }
@@ -1345,7 +1351,7 @@ impl SpacePosition {
     /// let pos = SpacePosition::new(5);
     /// assert_eq!(pos.value(), 5);
     /// ```
-    #[inline(always)]
+    #[inline]
     pub const fn value(self) -> usize {
         self.0
     }
@@ -1362,7 +1368,7 @@ impl SpacePosition {
     /// assert!(SpacePosition::zero().is_zero());
     /// assert!(!SpacePosition::new(1).is_zero());
     /// ```
-    #[inline(always)]
+    #[inline]
     pub const fn is_zero(self) -> bool {
         self.0 == 0
     }
@@ -1715,7 +1721,7 @@ impl SpaceLength {
     /// let len = SpaceLength::new(10);
     /// assert_eq!(len.value(), 10);
     /// ```
-    #[inline(always)]
+    #[inline]
     pub const fn new(v: usize) -> Self {
         SpaceLength(v)
     }
@@ -1732,7 +1738,7 @@ impl SpaceLength {
     /// let len = SpaceLength::new(10);
     /// assert_eq!(len.value(), 10);
     /// ```
-    #[inline(always)]
+    #[inline]
     pub const fn value(self) -> usize {
         self.0
     }
@@ -1871,7 +1877,7 @@ impl SpaceLength {
     /// let len = SpaceLength::zero();
     /// assert!(len.is_zero());
     /// ```
-    #[inline(always)]
+    #[inline]
     pub const fn zero() -> Self {
         Self(0)
     }
@@ -1888,7 +1894,7 @@ impl SpaceLength {
     /// let len = SpaceLength::new(10);
     /// assert_eq!(len.abs(), len);
     /// ```
-    #[inline(always)]
+    #[inline]
     pub const fn abs(self) -> Self {
         self
     }
@@ -1905,7 +1911,7 @@ impl SpaceLength {
     /// assert!(SpaceLength::new(0).is_zero());
     /// assert!(!SpaceLength::new(1).is_zero());
     /// ```
-    #[inline(always)]
+    #[inline]
     pub const fn is_zero(self) -> bool {
         self.0 == 0
     }
@@ -1922,7 +1928,7 @@ impl SpaceLength {
     /// assert!(SpaceLength::new(1).is_positive());
     /// assert!(!SpaceLength::new(0).is_positive());
     /// ```
-    #[inline(always)]
+    #[inline]
     pub const fn is_positive(self) -> bool {
         self.0 != 0
     }
@@ -2211,7 +2217,7 @@ impl Mul<usize> for SpaceLength {
         SpaceLength(
             self.0
                 .checked_mul(rhs)
-                .expect("overflow in SpaceLength * usize"),
+                .expect("overflow in SpaceLength * scalar"),
         )
     }
 }
@@ -2240,7 +2246,7 @@ impl MulAssign<usize> for SpaceLength {
         self.0 = self
             .0
             .checked_mul(rhs)
-            .expect("overflow in SpaceLength *= usize");
+            .expect("overflow in SpaceLength *= scalar");
     }
 }
 
@@ -2251,6 +2257,10 @@ impl Div<usize> for SpaceLength {
     ///
     /// This method takes a usize and divides the current `SpaceLength` by it,
     /// returning a new `SpaceLength` with the updated value.
+    ///
+    /// # Note
+    ///
+    /// Unsigned integer division; panics on division by zero.
     ///
     /// # Panics
     ///
@@ -2270,7 +2280,7 @@ impl Div<usize> for SpaceLength {
         SpaceLength(
             self.0
                 .checked_div(rhs)
-                .expect("division by zero in SpaceLength / usize"),
+                .expect("division by zero in SpaceLength / scalar"),
         )
     }
 }
@@ -2299,7 +2309,7 @@ impl DivAssign<usize> for SpaceLength {
         self.0 = self
             .0
             .checked_div(rhs)
-            .expect("division by zero in SpaceLength /= usize");
+            .expect("division by zero in SpaceLength /= scalar");
     }
 }
 
@@ -2487,19 +2497,25 @@ impl<T: Copy> Cost<T> {
         Cost(self.0.saturating_add(&other.0))
     }
 
-    /// Saturating subtraction. Computes `self - other`, saturatring at bounds.
+    /// Saturating subtraction. Computes `self - other`, saturating at numeric bounds.
     ///
-    /// Performs a subtraction that returns `Cost(0)` if the result would overflow.
+    /// Behavior depends on `T`:
+    /// - Unsigned (e.g., `u32`): clamps at `0`.
+    /// - Signed (e.g., `i32`): clamps at `T::MIN`.
     ///
     /// # Examples
-    ///
     /// ```
     /// use dock_alloc_core::domain::Cost;
     ///
-    /// let cost1 = Cost::new(5);
-    /// let cost2 = Cost::new(10);
-    /// let result = cost1.saturating_sub(cost2);
-    /// assert_eq!(result.value(), -5);
+    /// // Unsigned: clamps to 0
+    /// let a = Cost::new(10_u32);
+    /// let b = Cost::new(20_u32);
+    /// assert_eq!(a.saturating_sub(b).value(), 0);
+    ///
+    /// // Signed: clamps to i32::MIN
+    /// let c = Cost::new(i32::MIN + 1);
+    /// let d = Cost::new(5_i32);
+    /// assert_eq!(c.saturating_sub(d).value(), i32::MIN);
     /// ```
     #[inline]
     pub fn saturating_sub(self, other: Cost<T>) -> Self
@@ -2743,15 +2759,19 @@ where
     /// This method takes another `Cost` and subtracts it from the current instance,
     /// returning a new `Cost` that saturates at zero if the subtraction would result in a negative value.
     ///
+    /// Behavior depends on `T`:
+    /// - Unsigned (e.g., `u32`): clamps at `0`.
+    /// - Signed (e.g., `i32`): clamps at `T::MIN`.
+    ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::Cost;
     ///
-    /// let cost1 = Cost::new(5);
+    /// let cost1 = Cost::new(15);
     /// let cost2 = Cost::new(10);
     /// let result = cost1.saturating_sub(cost2);
-    /// assert_eq!(result.value(), -5);
+    /// assert_eq!(result.value(), 5);
     /// ```
     #[inline]
     fn saturating_sub(&self, rhs: &Self) -> Self {
@@ -2785,7 +2805,7 @@ where
     /// ```
     #[inline]
     fn mul(self, rhs: T) -> Self::Output {
-        Cost(self.0.checked_mul(&rhs).expect("overflow in Cost * T"))
+        Cost(self.0.checked_mul(&rhs).expect("overflow in Cost * scalar"))
     }
 }
 
@@ -2813,7 +2833,10 @@ where
     /// ```
     #[inline]
     fn mul_assign(&mut self, rhs: T) {
-        self.0 = self.0.checked_mul(&rhs).expect("overflow in Cost *= T");
+        self.0 = self
+            .0
+            .checked_mul(&rhs)
+            .expect("overflow in Cost *= scalar");
     }
 }
 
@@ -2827,6 +2850,10 @@ where
     ///
     /// This method takes a primitive value and divides the current `Cost` by it,
     /// returning a new `Cost` with the updated value.
+    ///
+    /// # Note
+    /// For signed `T`, division truncates toward zero. Panics on division by zero.
+    /// For unsigned `T`, standard integer division.
     ///
     /// # Panics
     ///
@@ -2846,7 +2873,7 @@ where
         Cost(
             self.0
                 .checked_div(&rhs)
-                .expect("division by zero in Cost / T"),
+                .expect("division by zero in Cost / scalar"),
         )
     }
 }
@@ -2878,7 +2905,7 @@ where
         self.0 = self
             .0
             .checked_div(&rhs)
-            .expect("division by zero in Cost /= T");
+            .expect("division by zero in Cost /= scalar");
     }
 }
 
@@ -3460,7 +3487,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "overflow or division by zero in TimeDelta / primitive integer")]
+    #[should_panic(expected = "div-by-zero or overflow in TimeDelta / scalar")]
     fn test_timedelta_div_by_zero_panic() {
         let delta = TimeDelta::new(20_i32);
         let _ = delta / 0;
@@ -3487,14 +3514,14 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "overflow in TimeDelta * primitive integer")]
+    #[should_panic(expected = "overflow in TimeDelta * scalar")]
     fn test_timedelta_mul_panic_on_overflow() {
         let delta = TimeDelta::new(i32::MAX);
         let _ = delta * 2;
     }
 
     #[test]
-    #[should_panic(expected = "overflow or division by zero")]
+    #[should_panic(expected = "div-by-zero or overflow in TimeDelta / scalar")]
     fn test_timedelta_div_panic_on_overflow() {
         let delta = TimeDelta::new(i32::MIN);
         let _ = delta / -1;
@@ -3507,7 +3534,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "overflow in SpaceLength * usize")]
+    #[should_panic(expected = "overflow in SpaceLength * scalar")]
     fn test_space_length_mul_panic_on_overflow() {
         let length = SpaceLength::new(usize::MAX);
         let _ = length * 2;
@@ -3623,5 +3650,25 @@ mod tests {
         let cost3 = Cost::new(10_u32);
         let cost4 = Cost::new(20);
         assert_eq!(cost3.saturating_sub(cost4).value(), 0);
+    }
+
+    #[test]
+    fn cost_saturating_sub_unsigned_clamps_to_zero() {
+        let a = Cost::new(10_u32);
+        let b = Cost::new(20_u32);
+        assert_eq!(a.saturating_sub(b).value(), 0);
+    }
+
+    #[test]
+    fn cost_saturating_sub_signed_clamps_to_min() {
+        let a = Cost::new(i32::MIN + 1);
+        let b = Cost::new(5_i32);
+        assert_eq!(a.saturating_sub(b).value(), i32::MIN);
+    }
+
+    #[test]
+    fn timedelta_division_truncates_toward_zero() {
+        assert_eq!(TimeDelta::new(10_i32) / -3, TimeDelta::new(-3));
+        assert_eq!(TimeDelta::new(-10_i32) / 3, TimeDelta::new(-3));
     }
 }
