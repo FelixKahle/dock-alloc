@@ -2398,6 +2398,7 @@ impl Interval<SpacePosition> {
     }
 }
 
+#[repr(transparent)]
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct Cost<T>(T);
 
