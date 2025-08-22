@@ -18,15 +18,15 @@
 // LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-//
-// //! Core data types for the Berth Allocation Problem (BAP).
+
+//! Core data types for the Berth Allocation Problem (BAP).
 
 #[allow(dead_code)]
 use crate::primitives::Interval;
 use num_traits::{PrimInt, Signed, Zero};
 use std::{
     fmt::Display,
-    ops::{Add, AddAssign, Neg, Sub, SubAssign},
+    ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign},
 };
 
 /// Represents a point in time.
@@ -749,6 +749,66 @@ impl<T: PrimInt + Signed> Neg for TimeDelta<T> {
     }
 }
 
+impl<T: PrimInt + Signed> Mul<T> for TimeDelta<T> {
+    type Output = TimeDelta<T>;
+
+    /// Multiplies the `TimeDelta` by a primitive integer, returning a new `TimeDelta`.
+    ///
+    /// This method takes a primitive integer and multiplies it with the current `TimeDelta`,
+    /// returning a new `TimeDelta` with the updated value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if a overflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimeDelta;
+    ///
+    /// let delta = TimeDelta::new(10);
+    /// let result = delta * 2;
+    /// assert_eq!(result.value(), 20);
+    /// ```
+    fn mul(self, rhs: T) -> Self::Output {
+        TimeDelta::new(
+            self.0
+                .checked_mul(&rhs)
+                .expect("overflow in TimeDelta * primitive integer"),
+        )
+    }
+}
+
+impl<T: PrimInt + Signed> Div<T> for TimeDelta<T> {
+    type Output = TimeDelta<T>;
+
+    /// Divides the `TimeDelta` by a primitive integer, returning a new `TimeDelta`.
+    ///
+    /// This method takes a primitive integer and divides the current `TimeDelta` by it,
+    /// returning a new `TimeDelta` with the updated value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if a division by zero occurs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimeDelta;
+    ///
+    /// let delta = TimeDelta::new(20);
+    /// let result = delta / 2;
+    /// assert_eq!(result.value(), 10);
+    /// ```
+    fn div(self, rhs: T) -> Self::Output {
+        TimeDelta::new(
+            self.0
+                .checked_div(&rhs)
+                .expect("division by zero in TimeDelta / primitive integer"),
+        )
+    }
+}
+
 impl<T: PrimInt + Signed> Zero for TimeDelta<T> {
     /// Returns a `TimeDelta` with a value of zero.
     ///
@@ -1290,7 +1350,7 @@ impl SubAssign<QuayLength> for QuayPosition {
 /// ```
 #[repr(transparent)]
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
-pub struct QuayLength(pub usize);
+pub struct QuayLength(usize);
 
 impl Display for QuayLength {
     /// Formats the `QuayLength` as `QuayLength(value)`.
@@ -1657,7 +1717,7 @@ impl AddAssign for QuayLength {
         self.0 = self
             .0
             .checked_add(rhs.0)
-            .expect("overflow in SegLen += SegLen");
+            .expect("overflow in QuayLength += QuayLength");
     }
 }
 
@@ -1686,7 +1746,69 @@ impl SubAssign for QuayLength {
         self.0 = self
             .0
             .checked_sub(rhs.0)
-            .expect("underflow in SegLen -= SegLen");
+            .expect("underflow in QuayLength -= QuayLength");
+    }
+}
+
+impl Mul<usize> for QuayLength {
+    type Output = QuayLength;
+
+    /// Multiplies two `QuayLength`s, returning a new `QuayLength`.
+    ///
+    /// This method takes another `QuayLength` and multiplies it with the current instance,
+    /// returning a new `QuayLength` with the updated value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an overflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::QuayLength;
+    ///
+    /// let seg_length1 = QuayLength::new(10);
+    /// let result = seg_length1 * 2;
+    /// assert_eq!(result.value(), 20);
+    /// ```
+    #[inline]
+    fn mul(self, rhs: usize) -> Self::Output {
+        QuayLength(
+            self.0
+                .checked_mul(rhs)
+                .expect("overflow in QuayLength * usize"),
+        )
+    }
+}
+
+impl Div<usize> for QuayLength {
+    type Output = QuayLength;
+
+    /// Divides one `QuayLength` by another, returning a new `QuayLength`.
+    ///
+    /// This method takes another `QuayLength` and divides the current instance by it,
+    /// returning a new `QuayLength` with the updated value.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if an underflow occurs during the operation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::QuayLength;
+    ///
+    /// let seg_length1 = QuayLength::new(10);
+    /// let result = seg_length1 / 2;
+    /// assert_eq!(result.value(), 5);
+    /// ```
+    #[inline]
+    fn div(self, rhs: usize) -> Self::Output {
+        QuayLength(
+            self.0
+                .checked_div(rhs)
+                .expect("division by zero in QuayLength / usize"),
+        )
     }
 }
 
@@ -1952,14 +2074,14 @@ mod tests {
     }
 
     #[test]
-    fn u64_point_plus_i64_delta() {
+    fn i64_point_plus_i64_delta() {
         let t = TimePoint64::new(10);
         let dt = TimeDelta64::new(-3);
         assert_eq!((t + dt).value(), 7);
     }
 
     #[test]
-    fn u64_point_minus_point_gives_i64_delta() {
+    fn i64_point_minus_point_gives_i64_delta() {
         let a = TimePoint64::new(5);
         let b = TimePoint64::new(12);
         let dt: TimeDelta64 = b - a;
@@ -2170,5 +2292,47 @@ mod tests {
         assert_eq!(i.start(), TimePoint::new(10));
         assert_eq!(i.end(), TimePoint::new(15));
         assert!(tp.span_of(TimeDelta::new(-1)).is_none());
+    }
+
+    #[test]
+    fn test_timedelta_mul_scalar() {
+        let delta = TimeDelta::new(10_i32);
+        assert_eq!(delta * 3, TimeDelta::new(30));
+        assert_eq!(delta * -2, TimeDelta::new(-20));
+        assert_eq!(delta * 0, TimeDelta::new(0));
+    }
+
+    #[test]
+    fn test_timedelta_div_scalar() {
+        let delta = TimeDelta::new(20_i32);
+        assert_eq!(delta / 2, TimeDelta::new(10));
+        assert_eq!(delta / -4, TimeDelta::new(-5));
+    }
+
+    #[test]
+    #[should_panic(expected = "division by zero")]
+    fn test_timedelta_div_by_zero_panic() {
+        let delta = TimeDelta::new(20_i32);
+        let _ = delta / 0;
+    }
+
+    #[test]
+    fn test_quay_length_mul_scalar() {
+        let length = QuayLength::new(15);
+        assert_eq!(length * 2, QuayLength::new(30));
+        assert_eq!(length * 0, QuayLength::new(0));
+    }
+
+    #[test]
+    fn test_quay_length_div_scalar() {
+        let length = QuayLength::new(30);
+        assert_eq!(length / 3, QuayLength::new(10));
+    }
+
+    #[test]
+    #[should_panic(expected = "division by zero")]
+    fn test_quay_length_div_by_zero_panic() {
+        let length = QuayLength::new(30);
+        let _ = length / 0;
     }
 }
