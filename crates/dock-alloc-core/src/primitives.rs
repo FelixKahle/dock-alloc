@@ -260,6 +260,74 @@ impl<T> Interval<T> {
         start < end
     }
 
+    /// Translates the interval by a given distance.
+    ///
+    /// This method creates a new interval by adding a distance `d`
+    /// to both the start and end points of the current interval.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::primitives::Interval;
+    ///
+    /// let interval = Interval::new(1, 5);
+    /// let translated = interval.translate(2);
+    /// assert_eq!(translated.start(), 3); // start is now 1 + 2
+    /// assert_eq!(translated.end(), 7);   // end is now 5 +
+    /// ```
+    #[inline]
+    pub fn translate(&self, d: T) -> Self
+    where
+        T: Copy + PartialOrd + Add<Output = T>,
+    {
+        Self::new(self.start() + d, self.end() + d)
+    }
+
+    /// Inflates the interval by a given distance.
+    ///
+    /// This method creates a new interval by subtracting `d` from the start point
+    /// and adding `d` to the end point of the current interval.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::primitives::Interval;
+    ///
+    /// let interval = Interval::new(1, 5);
+    /// let inflated = interval.inflate(2);
+    /// assert_eq!(inflated.start(), -1); // start is now 1 - 2
+    /// assert_eq!(inflated.end(), 7);   // end is now 5 + 2
+    /// ```
+    #[inline]
+    pub fn inflate(&self, d: T) -> Self
+    where
+        T: Copy + PartialOrd + Sub<Output = T> + Add<Output = T>,
+    {
+        Self::new(self.start() - d, self.end() + d)
+    }
+
+    /// Measures the length of the interval.
+    ///
+    /// This method calculates the length of the interval as the difference between
+    /// `end_exclusive` and `start_inclusive`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::primitives::Interval;
+    ///
+    /// let interval = Interval::new(2, 5);
+    /// assert_eq!(interval.measure(), 3); // length is 5 - 2
+    /// let empty_interval = Interval::new(5, 5);
+    /// assert_eq!(empty_interval.measure(), 0); // length is 0 for empty
+    /// ```
+    pub fn measure<D>(&self) -> D
+    where
+        T: Copy + Sub<Output = D>,
+    {
+        self.end() - self.start()
+    }
+
     /// Returns the intersection of this interval with another interval.
     ///
     /// This method returns an `Option<Interval<T>>` that represents the

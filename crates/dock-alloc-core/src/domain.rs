@@ -23,7 +23,7 @@
 //!
 //! This module provides the fundamental data types for modeling the Berth Allocation Problem (BAP).
 //! It establishes a strong, type-safe foundation for representing the two primary domains
-//! of the problem: **time** and **quay space**.
+//! of the problem: **time** and **space**.
 //!
 //! ## Key Concepts
 //!
@@ -32,10 +32,10 @@
 //!   - `TimeDelta<T>`: Represents a duration or the difference between two time points.
 //!   - `TimeInterval<T>`: A half-open interval `[start, end)` composed of two `TimePoint`s.
 //!
-//! - **Quay Space**:
-//!   - `QuayPosition`: Represents a discrete position along the quay.
-//!   - `QuayLength`: Represents a length or size, such as that of a vessel.
-//!   - `QuayInterval`: A half-open interval `[start, end)` representing a contiguous section of the quay.
+//! - **Space**:
+//!   - `SpacePosition`: Represents a discrete position along the quay.
+//!   - `SpaceLength`: Represents a length or size, such as that of a vessel.
+//!   - `SpaceInterval`: A half-open interval `[start, end)` representing a contiguous section of the quay.
 //!
 //! The use of distinct newtypes enforces correctness at compile time—for example,
 //! preventing the addition of two `TimePoint`s.
@@ -1073,131 +1073,130 @@ impl<'a, T: PrimInt + Signed> Sum<&'a TimeDelta<T>> for TimeDelta<T> {
     }
 }
 
-/// Represents a position along a quay.
+/// Represents a position along a one-dimensional space (e.g., a quay).
 ///
-/// A `QuayPosition` is a wrapper around a primitive unsigned integer type
-/// that represents a position along a quay.
+/// A `SpacePosition` is a wrapper around a primitive unsigned integer type
+/// that represents a specific position along a quay or similar structure.
 ///
 /// # Examples
 ///
 /// ```
-/// use dock_alloc_core::domain::QuayPosition;
+/// use dock_alloc_core::domain::SpacePosition;
 ///
-/// let seg_idx = QuayPosition::new(5);
-/// assert_eq!(seg_idx.value(), 5);
-/// assert_eq!(format!("{}", seg_idx), "QuayPosition(5)");
+/// let pos = SpacePosition::new(5);
+/// assert_eq!(pos.value(), 5);
+/// assert_eq!(format!("{}", pos), "SpacePosition(5)");
 /// ```
 #[repr(transparent)]
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
-pub struct QuayPosition(usize);
+pub struct SpacePosition(usize);
 
-/// Represents an interval along a quay.
+/// Represents a contiguous half-open interval `[start, end)` along the space.
 ///
-/// A `QuayInterval` is a half-open interval defined by a start and end `QuayPosition`.
-/// It represents a contiguous section of the quay, where the start index is inclusive
-/// and the end index is exclusive.
+/// A `SpaceInterval` is a half-open interval defined by a start and end `SpacePosition`.
+/// It represents a contiguous segment of space, such as a section of a quay.
 ///
 /// # Examples
 ///
 /// ```
-/// use dock_alloc_core::domain::{QuayPosition, QuayInterval, QuayLength};
+/// use dock_alloc_core::domain::{SpacePosition, SpaceInterval, SpaceLength};
 ///
-/// let start = QuayPosition::new(5);
-/// let length = QuayLength::new(10);
+/// let start = SpacePosition::new(5);
+/// let length = SpaceLength::new(10);
 ///
 /// let span = start.span_of(length);
 /// assert_eq!(span.unwrap().start().value(), 5);
 /// assert_eq!(span.unwrap().end().value(), 15);
 /// ```
-pub type QuayInterval = Interval<QuayPosition>;
+pub type SpaceInterval = Interval<SpacePosition>;
 
-impl Display for QuayPosition {
-    /// Formats the `QuayPosition` as `QuayPosition(value)`.
+impl Display for SpacePosition {
+    /// Formats the `SpacePosition` as `SpacePosition(value)`.
     ///
-    /// Formats the `QuayPosition` instance as a string in the format `QuayPosition(value)`,
-    /// where `value` is the inner value of the `QuayPosition`.
+    /// Formats the `SpacePosition` instance as a string in the format `SpacePosition(value)`,
+    /// where `value` is the inner value of the `SpacePosition`.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayPosition;
+    /// use dock_alloc_core::domain::SpacePosition;
     ///
-    /// let seg_idx = QuayPosition::new(5);
-    /// assert_eq!(format!("{}", seg_idx), "QuayPosition(5)");
+    /// let pos = SpacePosition::new(5);
+    /// assert_eq!(format!("{}", pos), "SpacePosition(5)");
     /// ```
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "QuayPosition({})", self.0)
+        write!(f, "SpacePosition({})", self.0)
     }
 }
 
-impl From<usize> for QuayPosition {
-    /// Converts a primitive unsigned integer type into a `QuayPosition`.
+impl From<usize> for SpacePosition {
+    /// Converts a primitive unsigned integer type into a `SpacePosition`.
     ///
     /// This implementation allows for easy conversion from a primitive unsigned integer type
-    /// to a `QuayPosition`, enabling the use of `QuayPosition`
+    /// to a `SpacePosition`, enabling the use of `SpacePosition`
     /// in contexts where a primitive unsigned integer is available.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayPosition;
+    /// use dock_alloc_core::domain::SpacePosition;
     ///
     /// let value: usize = 5;
-    /// let seg_idx: QuayPosition = QuayPosition::from(value);
-    /// assert_eq!(seg_idx.value(), 5);
+    /// let pos: SpacePosition = SpacePosition::from(value);
+    /// assert_eq!(pos.value(), 5);
     /// ```
     #[inline]
     fn from(v: usize) -> Self {
-        QuayPosition(v)
+        SpacePosition(v)
     }
 }
 
-impl QuayPosition {
-    /// Creates a new `QuayPosition` with the given value.
+impl SpacePosition {
+    /// Creates a new `SpacePosition` with the given value.
     ///
-    /// Creates a new `QuayPosition` instance wrapping the provided `usize` value.
+    /// Creates a new `SpacePosition` instance wrapping the provided `usize` value.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayPosition;
+    /// use dock_alloc_core::domain::SpacePosition;
     ///
-    /// let pos = QuayPosition::new(5);
+    /// let pos = SpacePosition::new(5);
     /// assert_eq!(pos.value(), 5);
     /// ```
     #[inline(always)]
     pub const fn new(v: usize) -> Self {
-        QuayPosition(v)
+        SpacePosition(v)
     }
 
-    /// Creates a new `QuayPosition` with a value of zero.
+    /// Creates a new `SpacePosition` with a value of zero.
     ///
-    /// This is a convenient way to get a `QuayPosition` representing the start of the quay.
+    /// This is a convenient way to get a `SpacePosition` representing the start of the quay.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayPosition;
+    /// use dock_alloc_core::domain::SpacePosition;
     ///
-    /// let pos = QuayPosition::zero();
+    /// let pos = SpacePosition::zero();
     /// assert_eq!(pos.value(), 0);
     /// ```
     #[inline(always)]
     pub const fn zero() -> Self {
-        QuayPosition(0)
+        SpacePosition(0)
     }
 
-    /// Returns the inner value of the `QuayPosition`.
+    /// Returns the inner value of the `SpacePosition`.
     ///
-    /// Extracts the primitive `usize` value from the `QuayPosition` wrapper.
+    /// Extracts the primitive `usize` value from the `SpacePosition` wrapper.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayPosition;
+    /// use dock_alloc_core::domain::SpacePosition;
     ///
-    /// let pos = QuayPosition::new(5);
+    /// let pos = SpacePosition::new(5);
     /// assert_eq!(pos.value(), 5);
     /// ```
     #[inline(always)]
@@ -1205,17 +1204,17 @@ impl QuayPosition {
         self.0
     }
 
-    /// Checks if the `QuayPosition` is zero.
+    /// Checks if the `SpacePosition` is zero.
     ///
     /// Returns `true` if the position is at the start of the quay (value is 0).
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayPosition;
+    /// use dock_alloc_core::domain::SpacePosition;
     ///
-    /// assert!(QuayPosition::zero().is_zero());
-    /// assert!(!QuayPosition::new(1).is_zero());
+    /// assert!(SpacePosition::zero().is_zero());
+    /// assert!(!SpacePosition::new(1).is_zero());
     /// ```
     #[inline(always)]
     pub const fn is_zero(self) -> bool {
@@ -1229,14 +1228,14 @@ impl QuayPosition {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
+    /// use dock_alloc_core::domain::{SpacePosition, SpaceLength};
     ///
-    /// let pos = QuayPosition::new(usize::MAX);
-    /// assert!(pos.checked_add(QuayLength::new(1)).is_none());
+    /// let pos = SpacePosition::new(usize::MAX);
+    /// assert!(pos.checked_add(SpaceLength::new(1)).is_none());
     /// ```
     #[inline]
-    pub fn checked_add(self, len: QuayLength) -> Option<Self> {
-        self.0.checked_add(len.0).map(QuayPosition)
+    pub fn checked_add(self, len: SpaceLength) -> Option<Self> {
+        self.0.checked_add(len.0).map(SpacePosition)
     }
 
     /// Computes `self - len`, returning `None` if underflow occurred.
@@ -1246,50 +1245,50 @@ impl QuayPosition {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
+    /// use dock_alloc_core::domain::{SpacePosition, SpaceLength};
     ///
-    /// let pos = QuayPosition::new(5);
-    /// assert!(pos.checked_sub(QuayLength::new(10)).is_none());
+    /// let pos = SpacePosition::new(5);
+    /// assert!(pos.checked_sub(SpaceLength::new(10)).is_none());
     /// ```
     #[inline]
-    pub fn checked_sub(self, len: QuayLength) -> Option<Self> {
-        self.0.checked_sub(len.0).map(QuayPosition)
+    pub fn checked_sub(self, len: SpaceLength) -> Option<Self> {
+        self.0.checked_sub(len.0).map(SpacePosition)
     }
 
     /// Saturating addition. Computes `self + len`, saturating at the numeric bounds.
     ///
-    /// Performs an addition that returns `QuayPosition(usize::MAX)` if the result would overflow.
+    /// Performs an addition that returns `SpacePosition(usize::MAX)` if the result would overflow.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
+    /// use dock_alloc_core::domain::{SpacePosition, SpaceLength};
     ///
-    /// let pos = QuayPosition::new(usize::MAX - 2);
-    /// let result = pos.saturating_add(QuayLength::new(5));
+    /// let pos = SpacePosition::new(usize::MAX - 2);
+    /// let result = pos.saturating_add(SpaceLength::new(5));
     /// assert_eq!(result.value(), usize::MAX);
     /// ```
     #[inline]
-    pub fn saturating_add(self, len: QuayLength) -> Self {
-        QuayPosition(self.0.saturating_add(len.0))
+    pub fn saturating_add(self, len: SpaceLength) -> Self {
+        SpacePosition(self.0.saturating_add(len.0))
     }
 
     /// Saturating subtraction. Computes `self - len`, saturating at zero.
     ///
-    /// Performs a subtraction that returns `QuayPosition(0)` if the result would be negative.
+    /// Performs a subtraction that returns `SpacePosition(0)` if the result would be negative.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
+    /// use dock_alloc_core::domain::{SpacePosition, SpaceLength};
     ///
-    /// let pos = QuayPosition::new(5);
-    /// let result = pos.saturating_sub(QuayLength::new(10));
+    /// let pos = SpacePosition::new(5);
+    /// let result = pos.saturating_sub(SpaceLength::new(10));
     /// assert_eq!(result.value(), 0);
     /// ```
     #[inline]
-    pub fn saturating_sub(self, len: QuayLength) -> Self {
-        QuayPosition(self.0.saturating_sub(len.0))
+    pub fn saturating_sub(self, len: SpaceLength) -> Self {
+        SpacePosition(self.0.saturating_sub(len.0))
     }
 
     /// Creates a half-open interval `[self, self + len)`.
@@ -1299,29 +1298,29 @@ impl QuayPosition {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{QuayPosition, QuayLength, QuayInterval};
+    /// use dock_alloc_core::domain::{SpacePosition, SpaceLength, SpaceInterval};
     ///
-    /// let start = QuayPosition::new(10);
-    /// let length = QuayLength::new(20);
+    /// let start = SpacePosition::new(10);
+    /// let length = SpaceLength::new(20);
     /// let interval = start.span_of(length).unwrap();
     ///
     /// assert_eq!(interval.start(), start);
-    /// assert_eq!(interval.end(), QuayPosition::new(30));
+    /// assert_eq!(interval.end(), SpacePosition::new(30));
     /// ```
     #[inline]
-    pub fn span_of(self, len: QuayLength) -> Option<QuayInterval> {
+    pub fn span_of(self, len: SpaceLength) -> Option<SpaceInterval> {
         self.checked_add(len)
-            .map(|end| QuayInterval::new(self, end))
+            .map(|end| SpaceInterval::new(self, end))
     }
 }
 
-impl Add<QuayLength> for QuayPosition {
-    type Output = QuayPosition;
+impl Add<SpaceLength> for SpacePosition {
+    type Output = SpacePosition;
 
-    /// Adds a `QuayLength` to a `QuayPosition`, returning a new `QuayPosition`.
+    /// Adds a `SpaceLength` to a `SpacePosition`, returning a new `SpacePosition`.
     ///
-    /// This method takes a `QuayLength` and adds it to the current `QuayPosition`,
-    /// returning a new `QuayPosition` with the updated value.
+    /// This method takes a `SpaceLength` and adds it to the current `SpacePosition`,
+    /// returning a new `SpacePosition` with the updated value.
     ///
     /// # Panics
     ///
@@ -1330,30 +1329,30 @@ impl Add<QuayLength> for QuayPosition {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
+    /// use dock_alloc_core::domain::{SpacePosition, SpaceLength};
     ///
-    /// let seg_idx = QuayPosition::new(5);
-    /// let length = QuayLength::new(3);
-    /// let new_seg_idx = seg_idx + length;
-    /// assert_eq!(new_seg_idx.value(), 8);
+    /// let pos = SpacePosition::new(5);
+    /// let length = SpaceLength::new(3);
+    /// let new_pos = pos + length;
+    /// assert_eq!(new_pos.value(), 8);
     /// ```
     #[inline]
-    fn add(self, rhs: QuayLength) -> Self::Output {
-        QuayPosition(
+    fn add(self, rhs: SpaceLength) -> Self::Output {
+        SpacePosition(
             self.0
                 .checked_add(rhs.0)
-                .expect("overflow in QuayPosition + QuayLength"),
+                .expect("overflow in SpacePosition + SpaceLength"),
         )
     }
 }
 
-impl Add<QuayPosition> for QuayLength {
-    type Output = QuayPosition;
+impl Add<SpacePosition> for SpaceLength {
+    type Output = SpacePosition;
 
-    /// Adds a `QuayPosition` to a `QuayLength`, returning a new `QuayPosition`.
+    /// Adds a `SpacePosition` to a `SpaceLength`, returning a new `SpacePosition`.
     ///
-    /// This method takes a `QuayPosition` and adds it to the current `QuayLength`,
-    /// returning a new `QuayPosition` with the updated value.
+    /// This method takes a `SpacePosition` and adds it to the current `SpaceLength`,
+    /// returning a new `SpacePosition` with the updated value.
     ///
     /// # Panics
     ///
@@ -1362,26 +1361,26 @@ impl Add<QuayPosition> for QuayLength {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
+    /// use dock_alloc_core::domain::{SpacePosition, SpaceLength};
     ///
-    /// let length = QuayLength::new(3);
-    /// let seg_idx = QuayPosition::new(5);
-    /// let new_seg_idx = length + seg_idx;
-    /// assert_eq!(new_seg_idx.value(), 8);
+    /// let length = SpaceLength::new(3);
+    /// let pos = SpacePosition::new(5);
+    /// let new_pos = length + pos;
+    /// assert_eq!(new_pos.value(), 8);
     /// ```
     #[inline]
-    fn add(self, rhs: QuayPosition) -> Self::Output {
+    fn add(self, rhs: SpacePosition) -> Self::Output {
         rhs + self
     }
 }
 
-impl Sub<QuayLength> for QuayPosition {
-    type Output = QuayPosition;
+impl Sub<SpaceLength> for SpacePosition {
+    type Output = SpacePosition;
 
-    /// Subtracts a `QuayLength` from a `QuayPosition`, returning a new `QuayPosition`.
+    /// Subtracts a `SpaceLength` from a `SpacePosition`, returning a new `SpacePosition`.
     ///
-    /// This method takes a `QuayLength` and subtracts it from the current `QuayPosition`,
-    /// returning a new `QuayPosition` with the updated value.
+    /// This method takes a `SpaceLength` and subtracts it from the current `SpacePosition`,
+    /// returning a new `SpacePosition` with the updated value.
     ///
     /// # Panics
     ///
@@ -1390,30 +1389,30 @@ impl Sub<QuayLength> for QuayPosition {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
+    /// use dock_alloc_core::domain::{SpacePosition, SpaceLength};
     ///
-    /// let seg_idx = QuayPosition::new(5);
-    /// let length = QuayLength::new(3);
-    /// let new_seg_idx = seg_idx - length;
-    /// assert_eq!(new_seg_idx.value(), 2);
+    /// let pos = SpacePosition::new(5);
+    /// let length = SpaceLength::new(3);
+    /// let new_pos = pos - length;
+    /// assert_eq!(new_pos.value(), 2);
     /// ```
     #[inline]
-    fn sub(self, rhs: QuayLength) -> Self::Output {
-        QuayPosition(
+    fn sub(self, rhs: SpaceLength) -> Self::Output {
+        SpacePosition(
             self.0
                 .checked_sub(rhs.0)
-                .expect("underflow in QuayPosition - QuayLength"),
+                .expect("underflow in SpacePosition - SpaceLength"),
         )
     }
 }
 
-impl Sub<QuayPosition> for QuayPosition {
-    type Output = QuayLength;
+impl Sub<SpacePosition> for SpacePosition {
+    type Output = SpaceLength;
 
-    /// Subtracts one `QuayPosition` from another, returning a `QuayLength`.
+    /// Subtracts one `SpacePosition` from another, returning a `SpaceLength`.
     ///
-    /// This method takes another `QuayPosition` and subtracts it from the current instance,
-    /// returning a new `QuayLength` that represents the difference between the two indices.
+    /// This method takes another `SpacePosition` and subtracts it from the current instance,
+    /// returning a new `SpaceLength` that represents the difference between the two indices.
     ///
     /// # Panics
     ///
@@ -1422,27 +1421,27 @@ impl Sub<QuayPosition> for QuayPosition {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
+    /// use dock_alloc_core::domain::{SpacePosition, SpaceLength};
     ///
-    /// let seg_idx1 = QuayPosition::new(10);
-    /// let seg_idx2 = QuayPosition::new(5);
-    /// let length = seg_idx1 - seg_idx2;
+    /// let pos1 = SpacePosition::new(10);
+    /// let pos2 = SpacePosition::new(5);
+    /// let length = pos1 - pos2;
     /// assert_eq!(length.value(), 5);
     /// ```
     #[inline]
-    fn sub(self, rhs: QuayPosition) -> Self::Output {
-        QuayLength(
+    fn sub(self, rhs: SpacePosition) -> Self::Output {
+        SpaceLength(
             self.0
                 .checked_sub(rhs.0)
-                .expect("underflow in QuayPosition - QuayPosition"),
+                .expect("underflow in SpacePosition - SpacePosition"),
         )
     }
 }
 
-impl AddAssign<QuayLength> for QuayPosition {
-    /// Adds a `QuayLength` to the current `QuayPosition`, modifying it in place.
+impl AddAssign<SpaceLength> for SpacePosition {
+    /// Adds a `SpaceLength` to the current `SpacePosition`, modifying it in place.
     ///
-    /// This method takes a `QuayLength` and adds it to the current `QuayPosition`,
+    /// This method takes a `SpaceLength` and adds it to the current `SpacePosition`,
     /// modifying the current instance to reflect the new value.
     ///
     /// # Panics
@@ -1452,26 +1451,26 @@ impl AddAssign<QuayLength> for QuayPosition {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
+    /// use dock_alloc_core::domain::{SpacePosition, SpaceLength};
     ///
-    /// let mut seg_idx = QuayPosition::new(5);
-    /// let length = QuayLength::new(3);
-    /// seg_idx += length;
-    /// assert_eq!(seg_idx.value(), 8);
+    /// let mut pos = SpacePosition::new(5);
+    /// let length = SpaceLength::new(3);
+    /// pos += length;
+    /// assert_eq!(pos.value(), 8);
     /// ```
     #[inline]
-    fn add_assign(&mut self, rhs: QuayLength) {
+    fn add_assign(&mut self, rhs: SpaceLength) {
         self.0 = self
             .0
             .checked_add(rhs.0)
-            .expect("overflow in QuayPosition += QuayLength");
+            .expect("overflow in SpacePosition += SpaceLength");
     }
 }
 
-impl SubAssign<QuayLength> for QuayPosition {
-    /// Subtracts a `QuayLength` from the current `QuayPosition`, modifying it in place.
+impl SubAssign<SpaceLength> for SpacePosition {
+    /// Subtracts a `SpaceLength` from the current `SpacePosition`, modifying it in place.
     ///
-    /// This method takes a `QuayLength` and subtracts it from the current `QuayPosition`,
+    /// This method takes a `SpaceLength` and subtracts it from the current `SpacePosition`,
     /// modifying the current instance to reflect the new value.
     ///
     /// # Panics
@@ -1481,110 +1480,110 @@ impl SubAssign<QuayLength> for QuayPosition {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::{QuayPosition, QuayLength};
+    /// use dock_alloc_core::domain::{SpacePosition, SpaceLength};
     ///
-    /// let mut seg_idx = QuayPosition::new(5);
-    /// let length = QuayLength::new(3);
-    /// seg_idx -= length;
-    /// assert_eq!(seg_idx.value(), 2);
+    /// let mut pos = SpacePosition::new(5);
+    /// let length = SpaceLength::new(3);
+    /// pos -= length;
+    /// assert_eq!(pos.value(), 2);
     /// ```
     #[inline]
-    fn sub_assign(&mut self, rhs: QuayLength) {
+    fn sub_assign(&mut self, rhs: SpaceLength) {
         self.0 = self
             .0
             .checked_sub(rhs.0)
-            .expect("underflow in QuayPosition -= QuayLength");
+            .expect("underflow in SpacePosition -= SpaceLength");
     }
 }
 
-/// Represents the length of a segment along a quay.
+/// Represents a non-negative length along the space.
 ///
-/// A `QuayLength` is a wrapper around a primitive unsigned integer type
-/// that represents the length of a segment along the quay.
+/// A `SpaceLength` is a wrapper around a primitive unsigned integer type
+/// that represents a length or size along a quay or similar structure.
 ///
 /// # Examples
 ///
 /// ```
-/// use dock_alloc_core::domain::QuayLength;
+/// use dock_alloc_core::domain::SpaceLength;
 ///
-/// let seg_length = QuayLength::new(10);
+/// let seg_length = SpaceLength::new(10);
 /// assert_eq!(seg_length.value(), 10);
-/// assert_eq!(format!("{}", seg_length), "QuayLength(10)");
+/// assert_eq!(format!("{}", seg_length), "SpaceLength(10)");
 /// ```
 #[repr(transparent)]
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
-pub struct QuayLength(usize);
+pub struct SpaceLength(usize);
 
-impl Display for QuayLength {
-    /// Formats the `QuayLength` as `QuayLength(value)`.
+impl Display for SpaceLength {
+    /// Formats the `SpaceLength` as `SpaceLength(value)`.
     ///
-    /// Formats the `QuayLength` instance as a string in the format `QuayLength(value)`,
-    /// where `value` is the inner value of the `QuayLength`.
+    /// Formats the `SpaceLength` instance as a string in the format `SpaceLength(value)`,
+    /// where `value` is the inner value of the `SpaceLength`.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let seg_length = QuayLength::new(10);
-    /// assert_eq!(format!("{}", seg_length), "QuayLength(10)");
+    /// let seg_length = SpaceLength::new(10);
+    /// assert_eq!(format!("{}", seg_length), "SpaceLength(10)");
     /// ```
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "QuayLength({})", self.0)
+        write!(f, "SpaceLength({})", self.0)
     }
 }
 
-impl From<usize> for QuayLength {
-    /// Converts a primitive unsigned integer type into a `QuayLength`.
+impl From<usize> for SpaceLength {
+    /// Converts a primitive unsigned integer type into a `SpaceLength`.
     ///
     /// This implementation allows for easy conversion from a primitive unsigned integer type
-    /// to a `QuayLength`, enabling the use of `QuayLength`
+    /// to a `SpaceLength`, enabling the use of `SpaceLength`
     /// in contexts where a primitive unsigned integer is available.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
     /// let value: usize = 10;
-    /// let seg_length: QuayLength = QuayLength::from(value);
+    /// let seg_length: SpaceLength = SpaceLength::from(value);
     /// assert_eq!(seg_length.value(), 10);
     /// ```
     #[inline]
     fn from(v: usize) -> Self {
-        QuayLength(v)
+        SpaceLength(v)
     }
 }
 
-impl QuayLength {
-    /// Creates a new `QuayLength` with the given value.
+impl SpaceLength {
+    /// Creates a new `SpaceLength` with the given value.
     ///
-    /// Creates a new `QuayLength` instance wrapping the provided `usize` value.
+    /// Creates a new `SpaceLength` instance wrapping the provided `usize` value.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let len = QuayLength::new(10);
+    /// let len = SpaceLength::new(10);
     /// assert_eq!(len.value(), 10);
     /// ```
     #[inline(always)]
     pub const fn new(v: usize) -> Self {
-        QuayLength(v)
+        SpaceLength(v)
     }
 
-    /// Returns the inner value of the `QuayLength`.
+    /// Returns the inner value of the `SpaceLength`.
     ///
-    /// Extracts the primitive `usize` value from the `QuayLength` wrapper.
+    /// Extracts the primitive `usize` value from the `SpaceLength` wrapper.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let len = QuayLength::new(10);
+    /// let len = SpaceLength::new(10);
     /// assert_eq!(len.value(), 10);
     /// ```
     #[inline(always)]
@@ -1599,14 +1598,14 @@ impl QuayLength {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let len = QuayLength::new(usize::MAX);
-    /// assert!(len.checked_add(QuayLength::new(1)).is_none());
+    /// let len = SpaceLength::new(usize::MAX);
+    /// assert!(len.checked_add(SpaceLength::new(1)).is_none());
     /// ```
     #[inline]
     pub fn checked_add(self, rhs: Self) -> Option<Self> {
-        self.0.checked_add(rhs.0).map(QuayLength)
+        self.0.checked_add(rhs.0).map(SpaceLength)
     }
 
     /// Computes `self - rhs`, returning `None` if underflow occurred.
@@ -1616,50 +1615,50 @@ impl QuayLength {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let len = QuayLength::new(5);
-    /// assert!(len.checked_sub(QuayLength::new(10)).is_none());
+    /// let len = SpaceLength::new(5);
+    /// assert!(len.checked_sub(SpaceLength::new(10)).is_none());
     /// ```
     #[inline]
     pub fn checked_sub(self, rhs: Self) -> Option<Self> {
-        self.0.checked_sub(rhs.0).map(QuayLength)
+        self.0.checked_sub(rhs.0).map(SpaceLength)
     }
 
     /// Saturating addition. Computes `self + rhs`, saturating at the numeric bounds.
     ///
-    /// Performs an addition that returns `QuayLength(usize::MAX)` if the result would overflow.
+    /// Performs an addition that returns `SpaceLength(usize::MAX)` if the result would overflow.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let len = QuayLength::new(usize::MAX - 2);
-    /// let result = len.saturating_add(QuayLength::new(5));
+    /// let len = SpaceLength::new(usize::MAX - 2);
+    /// let result = len.saturating_add(SpaceLength::new(5));
     /// assert_eq!(result.value(), usize::MAX);
     /// ```
     #[inline]
     pub fn saturating_add(self, rhs: Self) -> Self {
-        QuayLength(self.0.saturating_add(rhs.0))
+        SpaceLength(self.0.saturating_add(rhs.0))
     }
 
     /// Saturating subtraction. Computes `self - rhs`, saturating at zero.
     ///
-    /// Performs a subtraction that returns `QuayLength(0)` if the result would be negative.
+    /// Performs a subtraction that returns `SpaceLength(0)` if the result would be negative.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let len = QuayLength::new(5);
-    /// let result = len.saturating_sub(QuayLength::new(10));
+    /// let len = SpaceLength::new(5);
+    /// let result = len.saturating_sub(SpaceLength::new(10));
     /// assert_eq!(result.value(), 0);
     /// ```
     #[inline]
     pub fn saturating_sub(self, rhs: Self) -> Self {
-        QuayLength(self.0.saturating_sub(rhs.0))
+        SpaceLength(self.0.saturating_sub(rhs.0))
     }
 
     /// Computes `self * rhs`, returning `None` if overflow occurred.
@@ -1669,14 +1668,14 @@ impl QuayLength {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let len = QuayLength::new(usize::MAX);
+    /// let len = SpaceLength::new(usize::MAX);
     /// assert!(len.checked_mul(2).is_none());
     /// ```
     #[inline]
     pub fn checked_mul(self, rhs: usize) -> Option<Self> {
-        self.0.checked_mul(rhs).map(QuayLength)
+        self.0.checked_mul(rhs).map(SpaceLength)
     }
 
     /// Computes `self / rhs`, returning `None` if `rhs` is zero.
@@ -1686,26 +1685,26 @@ impl QuayLength {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let len = QuayLength::new(10);
+    /// let len = SpaceLength::new(10);
     /// assert!(len.checked_div(0).is_none());
     /// ```
     #[inline]
     pub fn checked_div(self, rhs: usize) -> Option<Self> {
-        self.0.checked_div(rhs).map(QuayLength)
+        self.0.checked_div(rhs).map(SpaceLength)
     }
 
     /// Saturating multiplication. Computes `self * rhs`, saturating at the numeric bounds.
     ///
-    /// Performs a multiplication that returns `QuayLength(usize::MAX)` if the result would overflow.
+    /// Performs a multiplication that returns `SpaceLength(usize::MAX)` if the result would overflow.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let len = QuayLength::new(usize::MAX / 2);
+    /// let len = SpaceLength::new(usize::MAX / 2);
     /// let result = len.saturating_mul(3);
     /// assert_eq!(result.value(), usize::MAX);
     /// ```
@@ -1714,16 +1713,16 @@ impl QuayLength {
         Self(self.0.saturating_mul(rhs))
     }
 
-    /// Creates a new `QuayLength` with a value of zero.
+    /// Creates a new `SpaceLength` with a value of zero.
     ///
     /// This is useful for representing a zero-length segment.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let len = QuayLength::zero();
+    /// let len = SpaceLength::zero();
     /// assert!(len.is_zero());
     /// ```
     #[inline(always)]
@@ -1731,16 +1730,16 @@ impl QuayLength {
         Self(0)
     }
 
-    /// Returns the absolute value of the `QuayLength`.
+    /// Returns the absolute value of the `SpaceLength`.
     ///
-    /// Since `QuayLength` is always non-negative, this method simply returns a copy.
+    /// Since `SpaceLength` is always non-negative, this method simply returns a copy.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let len = QuayLength::new(10);
+    /// let len = SpaceLength::new(10);
     /// assert_eq!(len.abs(), len);
     /// ```
     #[inline(always)]
@@ -1748,34 +1747,34 @@ impl QuayLength {
         self
     }
 
-    /// Checks if the `QuayLength` is zero.
+    /// Checks if the `SpaceLength` is zero.
     ///
     /// Returns `true` if the length is zero.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// assert!(QuayLength::new(0).is_zero());
-    /// assert!(!QuayLength::new(1).is_zero());
+    /// assert!(SpaceLength::new(0).is_zero());
+    /// assert!(!SpaceLength::new(1).is_zero());
     /// ```
     #[inline(always)]
     pub const fn is_zero(self) -> bool {
         self.0 == 0
     }
 
-    /// Checks if the `QuayLength` is positive.
+    /// Checks if the `SpaceLength` is positive.
     ///
     /// Returns `true` if the length is greater than zero.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// assert!(QuayLength::new(1).is_positive());
-    /// assert!(!QuayLength::new(0).is_positive());
+    /// assert!(SpaceLength::new(1).is_positive());
+    /// assert!(!SpaceLength::new(0).is_positive());
     /// ```
     #[inline(always)]
     pub const fn is_positive(self) -> bool {
@@ -1783,41 +1782,41 @@ impl QuayLength {
     }
 }
 
-impl Zero for QuayLength {
-    /// Returns a `QuayLength` with a value of zero.
+impl Zero for SpaceLength {
+    /// Returns a `SpaceLength` with a value of zero.
     ///
-    /// This implementation provides a `QuayLength` with a value of zero,
-    /// which is useful when you need to initialize a `QuayLength`
+    /// This implementation provides a `SpaceLength` with a value of zero,
+    /// which is useful when you need to initialize a `SpaceLength`
     /// without a specific value.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     /// use num_traits::Zero;
     ///
-    /// let seg_length: QuayLength = QuayLength::zero();
+    /// let seg_length: SpaceLength = SpaceLength::zero();
     /// assert!(seg_length.is_zero());
     /// ```
     #[inline]
     fn zero() -> Self {
-        QuayLength::new(0)
+        SpaceLength::new(0)
     }
 
-    /// Checks if the `QuayLength` is zero.
+    /// Checks if the `SpaceLength` is zero.
     ///
-    /// This implementation checks if the inner value of the `QuayLength` is zero,
-    /// which is useful for determining if a `QuayLength` represents no length.
+    /// This implementation checks if the inner value of the `SpaceLength` is zero,
+    /// which is useful for determining if a `SpaceLength` represents no length.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     /// use num_traits::identities::Zero;
     ///
-    /// let seg_length: QuayLength = QuayLength::zero();
+    /// let seg_length: SpaceLength = SpaceLength::zero();
     /// assert!(seg_length.is_zero());
-    /// let non_zero_seg_length: QuayLength = QuayLength::new(10);
+    /// let non_zero_seg_length: SpaceLength = SpaceLength::new(10);
     /// assert!(!non_zero_seg_length.is_zero());
     /// ```
     #[inline]
@@ -1826,13 +1825,13 @@ impl Zero for QuayLength {
     }
 }
 
-impl Add for QuayLength {
-    type Output = QuayLength;
+impl Add for SpaceLength {
+    type Output = SpaceLength;
 
-    /// Adds two `QuayLength`s, returning a new `QuayLength`.
+    /// Adds two `SpaceLength`s, returning a new `SpaceLength`.
     ///
-    /// This method takes another `QuayLength` and adds it to the current instance,
-    /// returning a new `QuayLength` with the updated value.
+    /// This method takes another `SpaceLength` and adds it to the current instance,
+    /// returning a new `SpaceLength` with the updated value.
     ///
     /// # Panics
     ///
@@ -1841,29 +1840,29 @@ impl Add for QuayLength {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let seg_length1 = QuayLength::new(10);
-    /// let seg_length2 = QuayLength::new(5);
+    /// let seg_length1 = SpaceLength::new(10);
+    /// let seg_length2 = SpaceLength::new(5);
     /// let result = seg_length1 + seg_length2;
     /// assert_eq!(result.value(), 15);
     /// ```
     #[inline]
     fn add(self, rhs: Self) -> Self::Output {
-        QuayLength(
+        SpaceLength(
             self.0
                 .checked_add(rhs.0)
-                .expect("overflow in QuayLength + QuayLength"),
+                .expect("overflow in SpaceLength + SpaceLength"),
         )
     }
 }
-impl Sub for QuayLength {
-    type Output = QuayLength;
+impl Sub for SpaceLength {
+    type Output = SpaceLength;
 
-    /// Subtracts one `QuayLength` from another, returning a new `QuayLength`.
+    /// Subtracts one `SpaceLength` from another, returning a new `SpaceLength`.
     ///
-    /// This method takes another `QuayLength` and subtracts it from the current instance,
-    /// returning a new `QuayLength` with the updated value.
+    /// This method takes another `SpaceLength` and subtracts it from the current instance,
+    /// returning a new `SpaceLength` with the updated value.
     ///
     /// # Panics
     ///
@@ -1872,26 +1871,26 @@ impl Sub for QuayLength {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let seg_length1 = QuayLength::new(10);
-    /// let seg_length2 = QuayLength::new(5);
+    /// let seg_length1 = SpaceLength::new(10);
+    /// let seg_length2 = SpaceLength::new(5);
     /// let result = seg_length1 - seg_length2;
     /// assert_eq!(result.value(), 5);
     /// ```
     #[inline]
     fn sub(self, rhs: Self) -> Self::Output {
-        QuayLength(
+        SpaceLength(
             self.0
                 .checked_sub(rhs.0)
-                .expect("underflow in QuayLength - QuayLength"),
+                .expect("underflow in SpaceLength - SpaceLength"),
         )
     }
 }
-impl AddAssign for QuayLength {
-    /// Adds another `QuayLength` to the current instance, modifying it in place.
+impl AddAssign for SpaceLength {
+    /// Adds another `SpaceLength` to the current instance, modifying it in place.
     ///
-    /// This method takes another `QuayLength` and adds it to the current instance,
+    /// This method takes another `SpaceLength` and adds it to the current instance,
     /// modifying the current instance to reflect the new value.
     ///
     /// # Panics
@@ -1901,10 +1900,10 @@ impl AddAssign for QuayLength {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let mut seg_length1 = QuayLength::new(10);
-    /// let seg_length2 = QuayLength::new(5);
+    /// let mut seg_length1 = SpaceLength::new(10);
+    /// let seg_length2 = SpaceLength::new(5);
     /// seg_length1 += seg_length2;
     /// assert_eq!(seg_length1.value(), 15);
     /// ```
@@ -1913,14 +1912,14 @@ impl AddAssign for QuayLength {
         self.0 = self
             .0
             .checked_add(rhs.0)
-            .expect("overflow in QuayLength += QuayLength");
+            .expect("overflow in SpaceLength += SpaceLength");
     }
 }
 
-impl SubAssign for QuayLength {
-    /// Subtracts another `QuayLength` from the current instance, modifying it in place.
+impl SubAssign for SpaceLength {
+    /// Subtracts another `SpaceLength` from the current instance, modifying it in place.
     ///
-    /// This method takes another `QuayLength` and subtracts it from the current instance,
+    /// This method takes another `SpaceLength` and subtracts it from the current instance,
     /// modifying the current instance to reflect the new value.
     ///
     /// # Panics
@@ -1930,10 +1929,10 @@ impl SubAssign for QuayLength {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let mut seg_length1 = QuayLength::new(10);
-    /// let seg_length2 = QuayLength::new(5);
+    /// let mut seg_length1 = SpaceLength::new(10);
+    /// let seg_length2 = SpaceLength::new(5);
     /// seg_length1 -= seg_length2;
     /// assert_eq!(seg_length1.value(), 5);
     /// ```
@@ -1942,17 +1941,17 @@ impl SubAssign for QuayLength {
         self.0 = self
             .0
             .checked_sub(rhs.0)
-            .expect("underflow in QuayLength -= QuayLength");
+            .expect("underflow in SpaceLength -= SpaceLength");
     }
 }
 
-impl Mul<usize> for QuayLength {
-    type Output = QuayLength;
+impl Mul<usize> for SpaceLength {
+    type Output = SpaceLength;
 
-    /// Multiplies a `QuayLength` by a primitive unsigned integer type, returning a new `QuayLength`.
+    /// Multiplies a `SpaceLength` by a primitive unsigned integer type, returning a new `SpaceLength`.
     ///
-    /// This method takes a primitive unsigned integer type and multiplies it with the current `QuayLength`,
-    /// returning a new `QuayLength` with the updated value.
+    /// This method takes a primitive unsigned integer type and multiplies it with the current `SpaceLength`,
+    /// returning a new `SpaceLength` with the updated value.
     ///
     /// # Panics
     ///
@@ -1961,29 +1960,29 @@ impl Mul<usize> for QuayLength {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let seg_length1 = QuayLength::new(10);
+    /// let seg_length1 = SpaceLength::new(10);
     /// let result = seg_length1 * 2;
     /// assert_eq!(result.value(), 20);
     /// ```
     #[inline]
     fn mul(self, rhs: usize) -> Self::Output {
-        QuayLength(
+        SpaceLength(
             self.0
                 .checked_mul(rhs)
-                .expect("overflow in QuayLength * usize"),
+                .expect("overflow in SpaceLength * usize"),
         )
     }
 }
 
-impl Div<usize> for QuayLength {
-    type Output = QuayLength;
+impl Div<usize> for SpaceLength {
+    type Output = SpaceLength;
 
-    /// Divides one `QuayLength` by a usize, returning a new `QuayLength`.
+    /// Divides one `SpaceLength` by a usize, returning a new `SpaceLength`.
     ///
-    /// This method takes a usize and divides the current `QuayLength` by it,
-    /// returning a new `QuayLength` with the updated value.
+    /// This method takes a usize and divides the current `SpaceLength` by it,
+    /// returning a new `SpaceLength` with the updated value.
     ///
     /// # Panics
     ///
@@ -1992,35 +1991,35 @@ impl Div<usize> for QuayLength {
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let seg_length1 = QuayLength::new(10);
+    /// let seg_length1 = SpaceLength::new(10);
     /// let result = seg_length1 / 2;
     /// assert_eq!(result.value(), 5);
     /// ```
     #[inline]
     fn div(self, rhs: usize) -> Self::Output {
-        QuayLength(
+        SpaceLength(
             self.0
                 .checked_div(rhs)
-                .expect("division by zero in QuayLength / usize"),
+                .expect("division by zero in SpaceLength / usize"),
         )
     }
 }
 
-impl Sum for QuayLength {
-    /// Sums up a collection of `QuayLength` instances, returning a new `QuayLength`.
+impl Sum for SpaceLength {
+    /// Sums up a collection of `SpaceLength` instances, returning a new `SpaceLength`.
     ///
-    /// This method takes an iterator of `QuayLength` instances and sums them up,
-    /// returning a new `QuayLength` that represents the total length.
+    /// This method takes an iterator of `SpaceLength` instances and sums them up,
+    /// returning a new `SpaceLength` that represents the total length.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let lengths = vec![QuayLength::new(10), QuayLength::new(5)];
-    /// let total_length: QuayLength = lengths.into_iter().sum();
+    /// let lengths = vec![SpaceLength::new(10), SpaceLength::new(5)];
+    /// let total_length: SpaceLength = lengths.into_iter().sum();
     /// assert_eq!(total_length.value(), 15);
     /// ```
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
@@ -2028,19 +2027,19 @@ impl Sum for QuayLength {
     }
 }
 
-impl<'a> Sum<&'a QuayLength> for QuayLength {
-    /// Sums up a collection of references to `QuayLength` instances, returning a new `QuayLength`.
+impl<'a> Sum<&'a SpaceLength> for SpaceLength {
+    /// Sums up a collection of references to `SpaceLength` instances, returning a new `SpaceLength`.
     ///
-    /// This method takes an iterator of references to `QuayLength` instances and sums them up,
-    /// returning a new `QuayLength` that represents the total length.
+    /// This method takes an iterator of references to `SpaceLength` instances and sums them up,
+    /// returning a new `SpaceLength` that represents the total length.
     ///
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_core::domain::QuayLength;
+    /// use dock_alloc_core::domain::SpaceLength;
     ///
-    /// let lengths = vec![QuayLength::new(10), QuayLength::new(5)];
-    /// let total_length: QuayLength = lengths.iter().sum();
+    /// let lengths = vec![SpaceLength::new(10), SpaceLength::new(5)];
+    /// let total_length: SpaceLength = lengths.iter().sum();
     /// assert_eq!(total_length.value(), 15);
     /// ```
     fn sum<I: Iterator<Item = &'a Self>>(iter: I) -> Self {
@@ -2050,6 +2049,48 @@ impl<'a> Sum<&'a QuayLength> for QuayLength {
 
 pub type TimePoint64 = TimePoint<i64>;
 pub type TimeDelta64 = TimeDelta<i64>;
+
+impl<T: PrimInt + Signed> Interval<TimePoint<T>> {
+    /// Calculates the duration of the time interval.
+    ///
+    /// Returns a `TimeDelta` representing the difference between the end and start points of the interval.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{TimePoint, TimeDelta, TimeInterval};
+    ///
+    /// let start = TimePoint::new(10);
+    /// let end = TimePoint::new(20);
+    /// let interval = TimeInterval::new(start, end);
+    /// assert_eq!(interval.duration(), TimeDelta::new(10));
+    /// ```
+    #[inline]
+    pub fn duration(&self) -> TimeDelta<T> {
+        self.end() - self.start()
+    }
+}
+
+impl Interval<SpacePosition> {
+    /// Calculates the extent of the space interval.
+    ///
+    /// Returns a `SpaceLength` representing the difference between the end and start positions of the interval.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{SpacePosition, SpaceLength, SpaceInterval};
+    ///
+    /// let start = SpacePosition::new(10);
+    /// let end = SpacePosition::new(20);
+    /// let interval = SpaceInterval::new(start, end);
+    /// assert_eq!(interval.extent(), SpaceLength::new(10));
+    /// ```
+    #[inline]
+    pub fn extent(&self) -> SpaceLength {
+        self.end() - self.start()
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -2325,198 +2366,195 @@ mod tests {
     }
 
     #[test]
-    fn test_quay_position_creation() {
-        let seg_idx = QuayPosition::new(5);
-        assert_eq!(seg_idx.value(), 5);
+    fn test_space_position_creation() {
+        let pos = SpacePosition::new(5);
+        assert_eq!(pos.value(), 5);
     }
 
     #[test]
-    fn test_quay_position_zero() {
-        let seg_idx = QuayPosition::zero();
-        assert_eq!(seg_idx.value(), 0);
-        assert!(seg_idx.is_zero());
+    fn test_space_position_zero() {
+        let pos = SpacePosition::zero();
+        assert_eq!(pos.value(), 0);
+        assert!(pos.is_zero());
     }
 
     #[test]
-    fn test_quay_position_display() {
-        let seg_idx = QuayPosition::new(5);
-        assert_eq!(format!("{}", seg_idx), "QuayPosition(5)");
+    fn test_space_position_display() {
+        let pos = SpacePosition::new(5);
+        assert_eq!(format!("{}", pos), "SpacePosition(5)");
     }
 
     #[test]
-    fn test_quay_position_from() {
+    fn test_space_position_from() {
         let value: usize = 5;
-        let seg_idx: QuayPosition = value.into();
-        assert_eq!(seg_idx.value(), 5);
+        let pos: SpacePosition = value.into();
+        assert_eq!(pos.value(), 5);
     }
 
     #[test]
-    fn test_quay_position_add_length() {
-        let seg_idx = QuayPosition::new(5);
-        let length = QuayLength::new(3);
-        assert_eq!((seg_idx + length).value(), 8);
+    fn test_space_position_add_length() {
+        let pos = SpacePosition::new(5);
+        let length = SpaceLength::new(3);
+        assert_eq!((pos + length).value(), 8);
     }
 
     #[test]
-    fn test_quay_position_add_assign_length() {
-        let mut seg_idx = QuayPosition::new(5);
-        seg_idx += QuayLength::new(3);
-        assert_eq!(seg_idx.value(), 8);
+    fn test_space_position_add_assign_length() {
+        let mut pos = SpacePosition::new(5);
+        pos += SpaceLength::new(3);
+        assert_eq!(pos.value(), 8);
     }
 
     #[test]
-    fn test_quay_position_sub_length() {
-        let seg_idx = QuayPosition::new(5);
-        let length = QuayLength::new(3);
-        assert_eq!((seg_idx - length).value(), 2);
+    fn test_space_position_sub_length() {
+        let pos = SpacePosition::new(5);
+        let length = SpaceLength::new(3);
+        assert_eq!((pos - length).value(), 2);
     }
 
     #[test]
-    fn test_quay_position_sub_assign_length() {
-        let mut seg_idx = QuayPosition::new(5);
-        seg_idx -= QuayLength::new(3);
-        assert_eq!(seg_idx.value(), 2);
+    fn test_space_position_sub_assign_length() {
+        let mut pos = SpacePosition::new(5);
+        pos -= SpaceLength::new(3);
+        assert_eq!(pos.value(), 2);
     }
 
     #[test]
-    fn test_quay_position_sub_index() {
-        let seg_idx1 = QuayPosition::new(10);
-        let seg_idx2 = QuayPosition::new(4);
-        let length = seg_idx1 - seg_idx2;
+    fn test_space_position_sub_index() {
+        let pos1 = SpacePosition::new(10);
+        let pos2 = SpacePosition::new(4);
+        let length = pos1 - pos2;
         assert_eq!(length.value(), 6);
-        assert_eq!(length, QuayLength::new(6));
+        assert_eq!(length, SpaceLength::new(6));
     }
 
     #[test]
-    fn test_quay_position_checked_add() {
-        let seg_idx = QuayPosition::new(usize::MAX - 1);
-        let length = QuayLength::new(1);
+    fn test_space_position_checked_add() {
+        let pos = SpacePosition::new(usize::MAX - 1);
+        let length = SpaceLength::new(1);
         assert_eq!(
-            seg_idx.checked_add(length),
-            Some(QuayPosition::new(usize::MAX))
+            pos.checked_add(length),
+            Some(SpacePosition::new(usize::MAX))
         );
-        let length_overflow = QuayLength::new(2);
-        assert_eq!(seg_idx.checked_add(length_overflow), None);
+        let length_overflow = SpaceLength::new(2);
+        assert_eq!(pos.checked_add(length_overflow), None);
     }
 
     #[test]
-    fn test_quay_position_checked_sub_len() {
-        let seg_idx = QuayPosition::new(1);
-        let length = QuayLength::new(1);
-        assert_eq!(seg_idx.checked_sub(length), Some(QuayPosition::new(0)));
-        let length_underflow = QuayLength::new(2);
-        assert_eq!(seg_idx.checked_sub(length_underflow), None);
+    fn test_space_position_checked_sub_len() {
+        let pos = SpacePosition::new(1);
+        let length = SpaceLength::new(1);
+        assert_eq!(pos.checked_sub(length), Some(SpacePosition::new(0)));
+        let length_underflow = SpaceLength::new(2);
+        assert_eq!(pos.checked_sub(length_underflow), None);
     }
 
     #[test]
-    fn test_quay_position_saturating_add() {
-        let seg_idx = QuayPosition::new(usize::MAX - 1);
-        let length = QuayLength::new(5);
-        assert_eq!(
-            seg_idx.saturating_add(length),
-            QuayPosition::new(usize::MAX)
-        );
+    fn test_space_position_saturating_add() {
+        let pos = SpacePosition::new(usize::MAX - 1);
+        let length = SpaceLength::new(5);
+        assert_eq!(pos.saturating_add(length), SpacePosition::new(usize::MAX));
     }
 
     #[test]
-    fn test_quay_position_saturating_sub() {
-        let seg_idx = QuayPosition::new(5);
-        let length = QuayLength::new(10);
-        assert_eq!(seg_idx.saturating_sub(length), QuayPosition::new(0));
+    fn test_space_position_saturating_sub() {
+        let pos = SpacePosition::new(5);
+        let length = SpaceLength::new(10);
+        assert_eq!(pos.saturating_sub(length), SpacePosition::new(0));
     }
 
     #[test]
-    fn test_quay_position_span_of() {
-        let seg_idx = QuayPosition::new(5);
-        let length = QuayLength::new(10);
-        let interval = seg_idx.span_of(length);
-        assert_eq!(interval.unwrap().start(), QuayPosition::new(5));
-        assert_eq!(interval.unwrap().end(), QuayPosition::new(15));
+    fn test_space_position_span_of() {
+        let pos = SpacePosition::new(5);
+        let length = SpaceLength::new(10);
+        let interval = pos.span_of(length);
+        assert_eq!(interval.unwrap().start(), SpacePosition::new(5));
+        assert_eq!(interval.unwrap().end(), SpacePosition::new(15));
     }
 
     #[test]
-    #[should_panic(expected = "overflow in QuayPosition + QuayLength")]
-    fn test_quay_position_add_panic_on_overflow() {
-        let seg_idx = QuayPosition::new(usize::MAX);
-        let length = QuayLength::new(1);
-        let _ = seg_idx + length;
+    #[should_panic(expected = "overflow in SpacePosition + SpaceLength")]
+    fn test_space_position_add_panic_on_overflow() {
+        let pos = SpacePosition::new(usize::MAX);
+        let length = SpaceLength::new(1);
+        let _ = pos + length;
     }
 
     #[test]
-    #[should_panic(expected = "underflow in QuayPosition - QuayLength")]
-    fn test_quay_position_sub_panic_on_underflow() {
-        let seg_idx = QuayPosition::new(0);
-        let length = QuayLength::new(1);
-        let _ = seg_idx - length;
+    #[should_panic(expected = "underflow in SpacePosition - SpaceLength")]
+    fn test_space_position_sub_panic_on_underflow() {
+        let pos = SpacePosition::new(0);
+        let length = SpaceLength::new(1);
+        let _ = pos - length;
     }
 
     #[test]
-    fn test_quay_length_creation() {
-        let seg_len = QuayLength::new(10);
+    fn test_space_length_creation() {
+        let seg_len = SpaceLength::new(10);
         assert_eq!(seg_len.value(), 10);
     }
 
     #[test]
-    fn test_quay_length_zero() {
-        let seg_len: QuayLength = num_traits::Zero::zero();
+    fn test_space_length_zero() {
+        let seg_len: SpaceLength = num_traits::Zero::zero();
         assert_eq!(seg_len.value(), 0);
         assert!(seg_len.is_zero());
     }
 
     #[test]
-    fn test_quay_length_display() {
-        let seg_len = QuayLength::new(10);
-        assert_eq!(format!("{}", seg_len), "QuayLength(10)");
+    fn test_space_length_display() {
+        let seg_len = SpaceLength::new(10);
+        assert_eq!(format!("{}", seg_len), "SpaceLength(10)");
     }
 
     #[test]
-    fn test_quay_length_from() {
+    fn test_space_length_from() {
         let value: usize = 10;
-        let seg_len: QuayLength = value.into();
+        let seg_len: SpaceLength = value.into();
         assert_eq!(seg_len.value(), 10);
     }
 
     #[test]
-    fn test_quay_length_add_length() {
-        let len1 = QuayLength::new(10);
-        let len2 = QuayLength::new(5);
+    fn test_space_length_add_length() {
+        let len1 = SpaceLength::new(10);
+        let len2 = SpaceLength::new(5);
         assert_eq!((len1 + len2).value(), 15);
     }
 
     #[test]
-    fn test_quay_length_add_assign_length() {
-        let mut len1 = QuayLength::new(10);
-        len1 += QuayLength::new(5);
+    fn test_space_length_add_assign_length() {
+        let mut len1 = SpaceLength::new(10);
+        len1 += SpaceLength::new(5);
         assert_eq!(len1.value(), 15);
     }
 
     #[test]
-    fn test_quay_length_sub_length() {
-        let len1 = QuayLength::new(10);
-        let len2 = QuayLength::new(5);
+    fn test_space_length_sub_length() {
+        let len1 = SpaceLength::new(10);
+        let len2 = SpaceLength::new(5);
         assert_eq!((len1 - len2).value(), 5);
     }
 
     #[test]
-    fn test_quay_length_sub_assign_length() {
-        let mut len1 = QuayLength::new(10);
-        len1 -= QuayLength::new(5);
+    fn test_space_length_sub_assign_length() {
+        let mut len1 = SpaceLength::new(10);
+        len1 -= SpaceLength::new(5);
         assert_eq!(len1.value(), 5);
     }
 
     #[test]
-    #[should_panic(expected = "overflow in QuayLength + QuayLength")]
-    fn test_quay_length_add_panic_on_overflow() {
-        let len1 = QuayLength::new(usize::MAX);
-        let len2 = QuayLength::new(1);
+    #[should_panic(expected = "overflow in SpaceLength + SpaceLength")]
+    fn test_space_length_add_panic_on_overflow() {
+        let len1 = SpaceLength::new(usize::MAX);
+        let len2 = SpaceLength::new(1);
         let _ = len1 + len2;
     }
 
     #[test]
-    #[should_panic(expected = "underflow in QuayLength - QuayLength")]
-    fn test_quay_length_sub_panic_on_underflow() {
-        let len1 = QuayLength::new(0);
-        let len2 = QuayLength::new(1);
+    #[should_panic(expected = "underflow in SpaceLength - SpaceLength")]
+    fn test_space_length_sub_panic_on_underflow() {
+        let len1 = SpaceLength::new(0);
+        let len2 = SpaceLength::new(1);
         let _ = len1 - len2;
     }
 
@@ -2553,22 +2591,22 @@ mod tests {
     }
 
     #[test]
-    fn test_quay_length_mul_scalar() {
-        let length = QuayLength::new(15);
-        assert_eq!(length * 2, QuayLength::new(30));
-        assert_eq!(length * 0, QuayLength::new(0));
+    fn test_space_length_mul_scalar() {
+        let length = SpaceLength::new(15);
+        assert_eq!(length * 2, SpaceLength::new(30));
+        assert_eq!(length * 0, SpaceLength::new(0));
     }
 
     #[test]
-    fn test_quay_length_div_scalar() {
-        let length = QuayLength::new(30);
-        assert_eq!(length / 3, QuayLength::new(10));
+    fn test_space_length_div_scalar() {
+        let length = SpaceLength::new(30);
+        assert_eq!(length / 3, SpaceLength::new(10));
     }
 
     #[test]
     #[should_panic(expected = "division by zero")]
-    fn test_quay_length_div_by_zero_panic() {
-        let length = QuayLength::new(30);
+    fn test_space_length_div_by_zero_panic() {
+        let length = SpaceLength::new(30);
         let _ = length / 0;
     }
 
@@ -2593,15 +2631,15 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "overflow in QuayLength * usize")]
-    fn test_quay_length_mul_panic_on_overflow() {
-        let length = QuayLength::new(usize::MAX);
+    #[should_panic(expected = "overflow in SpaceLength * usize")]
+    fn test_space_length_mul_panic_on_overflow() {
+        let length = SpaceLength::new(usize::MAX);
         let _ = length * 2;
     }
 
     #[test]
-    fn test_quay_length_div_truncation() {
-        let length = QuayLength::new(17);
-        assert_eq!(length / 4, QuayLength::new(4));
+    fn test_space_length_div_truncation() {
+        let length = SpaceLength::new(17);
+        assert_eq!(length / 4, SpaceLength::new(4));
     }
 }

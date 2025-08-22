@@ -32,7 +32,7 @@
 //! ## Core Modules
 //!
 //! - **`domain`**: Contains the primary data types specific to BAP, such as
-//!   `TimePoint`, `TimeDelta`, `QuayPosition`, and `QuayLength`.
+//!   `TimePoint`, `TimeDelta`, `SpacePosition`, and `SpaceLength`.
 //! - **`primitives`**: Provides generic, reusable structures like `Interval`, which
 //!   are used to build the more complex domain types.
 
