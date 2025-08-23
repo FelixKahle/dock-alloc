@@ -694,6 +694,248 @@ where
     }
 }
 
+/// Represents an assignment of a vessel to a berthing position and time.
+///
+/// This struct encapsulates the details of a vessel's assignment, including the vessel itself,
+/// the berthing position along the quay, and the berthing time.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{Assignment, VesselId};
+/// use dock_alloc_core::domain::{SpacePosition, TimePoint};
+///
+/// let assignment = Assignment::new(
+///     VesselId::new(1),
+///     SpacePosition::new(100),
+///     TimePoint::new(1622547800)
+/// );
+/// assert_eq!(assignment.vessel_id(), VesselId::new(1));
+/// assert_eq!(assignment.berthing_position(), SpacePosition::new(100));
+/// assert_eq!(assignment.berthing_time(), TimePoint::new(1622547800));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Assignment<TimeType = i64>
+where
+    TimeType: PrimInt + Signed,
+{
+    vessel_id: VesselId,
+    berthing_position: SpacePosition,
+    berthing_time: TimePoint<TimeType>,
+}
+
+impl<TimeType> Assignment<TimeType>
+where
+    TimeType: PrimInt + Signed,
+{
+    /// Creates a new `Assignment` instance with the specified parameters.
+    ///
+    /// This function initializes an `Assignment` with the vessel's unique identifier,
+    /// the berthing position along the quay, and the berthing time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Assignment, VesselId};
+    /// use dock_alloc_core::domain::{SpacePosition, TimePoint};
+    ///
+    /// let assignment = Assignment::new(
+    ///     VesselId::new(1),
+    ///     SpacePosition::new(100),
+    ///     TimePoint::new(1622547800)
+    /// );
+    /// assert_eq!(assignment.vessel_id(), VesselId::new(1));
+    /// assert_eq!(assignment.berthing_position(), SpacePosition::new(100));
+    /// assert_eq!(assignment.berthing_time(), TimePoint::new(1622547800));
+    /// ```
+    #[inline]
+    pub fn new(
+        vessel_id: VesselId,
+        berthing_position: SpacePosition,
+        berthing_time: TimePoint<TimeType>,
+    ) -> Self {
+        Assignment {
+            vessel_id,
+            berthing_position,
+            berthing_time,
+        }
+    }
+
+    /// Returns the unique identifier of the vessel associated with the assignment.
+    ///
+    /// This function retrieves the `VesselId` of the vessel that has
+    /// been assigned to a specific berthing position and time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Assignment, VesselId};
+    /// use dock_alloc_core::domain::{SpacePosition, TimePoint};
+    ///
+    /// let assignment = Assignment::new(
+    ///     VesselId::new(1),
+    ///     SpacePosition::new(100),
+    ///     TimePoint::new(1622547800)
+    /// );
+    /// assert_eq!(assignment.vessel_id(), VesselId::new(1));
+    /// ```
+    #[inline]
+    pub fn vessel_id(&self) -> VesselId {
+        self.vessel_id
+    }
+
+    /// Returns the berthing position of the vessel.
+    ///
+    /// This function retrieves the `SpacePosition` along the
+    /// quay where the vessel is assigned to berth.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Assignment, VesselId};
+    /// use dock_alloc_core::domain::{SpacePosition, TimePoint};
+    ///
+    /// let assignment = Assignment::new(
+    ///     VesselId::new(1),
+    ///     SpacePosition::new(100),
+    ///     TimePoint::new(1622547800)
+    /// );
+    /// assert_eq!(assignment.berthing_position(), SpacePosition::new(100));
+    /// ```
+    #[inline]
+    pub fn berthing_position(&self) -> SpacePosition {
+        self.berthing_position
+    }
+
+    /// Returns the berthing time of the vessel.
+    ///
+    /// This function retrieves the `TimePoint` representing
+    /// when the vessel is scheduled to berth.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Assignment, VesselId};
+    /// use dock_alloc_core::domain::{SpacePosition, TimePoint};
+    ///
+    /// let assignment = Assignment::new(
+    ///     VesselId::new(1),
+    ///     SpacePosition::new(100),
+    ///     TimePoint::new(1622547800)
+    /// );
+    /// assert_eq!(assignment.berthing_time(), TimePoint::new(1622547800));
+    /// ```
+    #[inline]
+    pub fn berthing_time(&self) -> TimePoint<TimeType> {
+        self.berthing_time
+    }
+}
+
+impl<TimeType> Display for Assignment<TimeType>
+where
+    TimeType: PrimInt + Signed + Display,
+{
+    /// Formats the `Assignment` for display.
+    ///
+    /// This implementation provides a string representation of the `Assignment`
+    /// including the vessel identifier, berthing position, and berthing time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Assignment, VesselId};
+    /// use dock_alloc_core::domain::{SpacePosition, TimePoint};
+    ///
+    /// let assignment = Assignment::new(
+    ///     VesselId::new(1),
+    ///     SpacePosition::new(100),
+    ///     TimePoint::new(1622547800)
+    /// );
+    /// println!("{}", assignment);
+    /// ```
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Assignment(vessel_id: {}, berthing_position: {}, berthing_time: {})",
+            self.vessel_id, self.berthing_position, self.berthing_time
+        )
+    }
+}
+
+/// Represents an entry in the Berthing Allocation Problem.
+///
+/// This enum distinguishes between vessels that are unassigned and those
+/// that have been pre-assigned specific berthing positions and times.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{ProblemEntry, Assignment, VesselId};
+/// use dock_alloc_core::domain::{SpacePosition, TimePoint};
+///
+/// let unassigned: ProblemEntry<i64> = ProblemEntry::Unassigned(VesselId::new(1));
+/// let pre_assigned: ProblemEntry<i64> = ProblemEntry::PreAssigned(Assignment::new(
+///     VesselId::new(2),
+///     SpacePosition::new(100),
+///     TimePoint::new(1622547800)
+/// ));
+/// assert!(matches!(unassigned, ProblemEntry::Unassigned(_)));
+/// assert!(matches!(pre_assigned, ProblemEntry::PreAssigned(_)));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ProblemEntry<TimeType = i64>
+where
+    TimeType: PrimInt + Signed,
+{
+    /// A vessel that has not been assigned a berthing position or time.
+    ///
+    /// This variant holds the `VesselId` of the unassigned vessel.
+    /// The solver can decide freely where and when to berth this vessel.
+    Unassigned(VesselId),
+
+    /// A vessel that has been pre-assigned a specific berthing position and time.
+    ///
+    /// This variant holds an `Assignment` struct containing the details of the pre-assignment.
+    /// The solver must respect this assignment and cannot change it.
+    PreAssigned(Assignment<TimeType>),
+}
+
+impl<TimeType> Display for ProblemEntry<TimeType>
+where
+    TimeType: PrimInt + Signed + Display,
+{
+    /// Formats the `ProblemEntry` for display.
+    ///
+    /// This implementation provides a string representation of the `ProblemEntry`
+    /// indicating whether it is an unassigned vessel or a pre-assigned vessel with its details.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{ProblemEntry, Assignment, VesselId};
+    /// use dock_alloc_core::domain::{SpacePosition, TimePoint};
+    ///
+    /// let unassigned: ProblemEntry<i64> = ProblemEntry::Unassigned(VesselId::new(1));
+    /// let pre_assigned: ProblemEntry<i64> = ProblemEntry::PreAssigned(Assignment::new(
+    ///     VesselId::new(2),
+    ///     SpacePosition::new(100),
+    ///     TimePoint::new(1622547800)
+    /// ));
+    /// println!("{}", unassigned);
+    /// println!("{}", pre_assigned);
+    /// ```
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProblemEntry::Unassigned(vessel_id) => {
+                write!(f, "Unassigned(vessel_id: {})", vessel_id)
+            }
+            ProblemEntry::PreAssigned(assignment) => {
+                write!(f, "PreAssigned({})", assignment)
+            }
+        }
+    }
+}
+
 /// Represents the Berthing Allocation Problem.
 ///
 /// This struct encapsulates the problem's vessels and the quay length available for berthing.
@@ -705,6 +947,7 @@ where
     CostType: PrimInt + Signed,
 {
     vessels: HashSet<Vessel<TimeType, CostType>>,
+    entries: HashSet<ProblemEntry<TimeType>>,
     quay_length: SpaceLength,
 }
 
@@ -721,18 +964,24 @@ where
     ///
     /// ```
     /// use std::collections::HashSet;
-    /// use dock_alloc_model::{Problem, VesselId};
+    /// use dock_alloc_model::{ProblemEntry, Problem, VesselId};
     /// use dock_alloc_core::domain::{Cost, SpaceLength, SpacePosition, TimeDelta , TimePoint};
     ///
     /// let vessels = HashSet::new();
+    /// let entries = HashSet::new();
     /// let quay_length = SpaceLength::new(1000);
-    /// let problem = Problem::<i64, i64>::new(vessels, quay_length);
+    /// let problem = Problem::<i64, i64>::new(vessels, entries, quay_length);
     /// assert_eq!(problem.quay_length(), SpaceLength::new(1000));
     /// ```
     #[inline]
-    pub fn new(vessels: HashSet<Vessel<TimeType, CostType>>, quay_length: SpaceLength) -> Self {
+    pub fn new(
+        vessels: HashSet<Vessel<TimeType, CostType>>,
+        entries: HashSet<ProblemEntry<TimeType>>,
+        quay_length: SpaceLength,
+    ) -> Self {
         Problem {
             vessels,
+            entries,
             quay_length,
         }
     }
@@ -745,12 +994,13 @@ where
     ///
     /// ```
     /// use std::collections::HashSet;
-    /// use dock_alloc_model::{Problem, VesselId};
+    /// use dock_alloc_model::{ProblemEntry, Problem, VesselId};
     /// use dock_alloc_core::domain::{Cost, SpaceLength, SpacePosition, TimeDelta , TimePoint};
     ///
     /// let vessels = HashSet::new();
+    /// let entries = HashSet::new();
     /// let quay_length = SpaceLength::new(1000);
-    /// let problem = Problem::<i64, i64>::new(vessels, quay_length);
+    /// let problem = Problem::<i64, i64>::new(vessels, entries, quay_length);
     /// assert_eq!(problem.quay_length(), SpaceLength::new(1000));
     /// ```
     #[inline]
@@ -766,17 +1016,41 @@ where
     ///
     /// ```
     /// use std::collections::HashSet;
-    /// use dock_alloc_model::{Problem, Vessel, VesselId};
+    /// use dock_alloc_model::{ProblemEntry, Problem, Vessel, VesselId};
     /// use dock_alloc_core::domain::{Cost, SpaceLength, SpacePosition, TimeDelta, TimePoint};
     ///
     /// let vessels = HashSet::new();
+    /// let entries = HashSet::new();
     /// let quay_length = SpaceLength::new(1000);
-    /// let problem = Problem::<i64, i64>::new(vessels, quay_length);
+    /// let problem = Problem::<i64, i64>::new(vessels, entries, quay_length);
     /// assert!(problem.vessels().is_empty());
     /// ```
     #[inline]
     pub fn vessels(&self) -> &HashSet<Vessel<TimeType, CostType>> {
         &self.vessels
+    }
+
+    /// Returns a reference to the set of problem entries.
+    ///
+    /// This function provides access to the `HashSet` of problem entries,
+    /// allowing iteration or inspection of the entries involved in the problem.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::collections::HashSet;
+    /// use dock_alloc_model::{ProblemEntry, Problem, Vessel, VesselId};
+    /// use dock_alloc_core::domain::{Cost, SpaceLength, SpacePosition, TimeDelta, TimePoint};
+    ///
+    /// let vessels = HashSet::new();
+    /// let entries = HashSet::new();
+    /// let quay_length = SpaceLength::new(1000);
+    /// let problem = Problem::<i64, i64>::new(vessels, entries, quay_length);
+    /// assert!(problem.entries().is_empty());
+    /// ```
+    #[inline]
+    pub fn entries(&self) -> &HashSet<ProblemEntry<TimeType>> {
+        &self.entries
     }
 
     /// Returns the number of vessels in the problem.
@@ -791,8 +1065,9 @@ where
     /// use dock_alloc_core::domain::{Cost, SpaceLength, SpacePosition, TimeDelta, TimePoint};
     ///
     /// let vessels = HashSet::new();
+    /// let entries = HashSet::new();
     /// let quay_length = SpaceLength::new(1000);
-    /// let problem = Problem::<i64, i64>::new(vessels, quay_length);
+    /// let problem = Problem::<i64, i64>::new(vessels, entries, quay_length);
     /// assert_eq!(problem.vessel_len(), 0);
     /// ```
     #[inline]
@@ -916,5 +1191,20 @@ mod tests {
         let deviation = SpaceLength::new(3);
         let cost = vessel.target_berthing_deviation_cost(deviation);
         assert_eq!(cost.value(), 15); // 5 * 3
+    }
+
+    #[test]
+    fn test_assignment_display() {
+        let assignment = Assignment::new(
+            VesselId::new(1),
+            SpacePosition::new(100),
+            TimePoint::new(1622547800),
+        );
+        assert_eq!(
+            format!("{}", assignment),
+            "Assignment(vessel_id: VesselId(1), \
+            berthing_position: SpacePosition(100), \
+            berthing_time: TimePoint(1622547800))"
+        );
     }
 }
