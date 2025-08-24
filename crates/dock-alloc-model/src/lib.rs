@@ -21,9 +21,17 @@
 
 #[allow(dead_code)]
 use std::fmt::Display;
-use std::{collections::HashSet, hash::Hash};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeSet, HashMap, HashSet},
+    fmt::Debug,
+    hash::Hash,
+    iter,
+};
 
-use dock_alloc_core::domain::{Cost, SpaceLength, SpacePosition, TimeDelta, TimePoint};
+use dock_alloc_core::domain::{
+    Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
+};
 use num_traits::{PrimInt, Signed};
 
 /// Represents a unique identifier for a vessel.
@@ -936,11 +944,609 @@ where
     }
 }
 
+/// Error indicating that a vessel with a specified ID is missing.
+///
+/// This error is used to signal that a required vessel could not be found
+/// in the context of a berthing allocation problem.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::MissingVesselError;
+///
+/// let error = MissingVesselError::new(1.into());
+/// assert_eq!(error.vessel_id(), 1.into());
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct MissingVesselError(VesselId);
+
+impl Display for MissingVesselError {
+    /// Formats the `MissingVesselError` for display.
+    ///
+    /// This implementation provides a string representation of the error,
+    /// including the ID of the missing vessel.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{VesselId, MissingVesselError};
+    ///
+    /// let error = MissingVesselError::new(VesselId::new(1).into());
+    /// println!("{}", error);
+    /// ```
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Missing vessel with ID: {}", self.0)
+    }
+}
+
+impl std::error::Error for MissingVesselError {}
+
+impl From<VesselId> for MissingVesselError {
+    /// Converts a `VesselId` into a `MissingVesselError`.
+    ///
+    /// This implementation allows for easy creation of a `MissingVesselError`
+    /// from a `VesselId`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{VesselId, MissingVesselError};
+    ///
+    /// let error: MissingVesselError = VesselId::new(1).into();
+    /// assert_eq!(error.vessel_id(), 1.into());
+    /// ```
+    #[inline]
+    fn from(vessel_id: VesselId) -> Self {
+        MissingVesselError(vessel_id)
+    }
+}
+
+impl MissingVesselError {
+    /// Creates a new `MissingVesselError` with the specified vessel ID.
+    ///
+    /// This function initializes a `MissingVesselError` with the given `VesselId`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{VesselId, MissingVesselError};
+    ///
+    /// let error = MissingVesselError::new(VesselId::new(1));
+    /// assert_eq!(error.vessel_id(), VesselId::new(1));
+    /// ```
+    #[inline]
+    pub fn new(vessel_id: VesselId) -> Self {
+        MissingVesselError(vessel_id)
+    }
+
+    /// Returns the unique identifier of the missing vessel.
+    ///
+    /// This function retrieves the `VesselId` associated with the missing vessel.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{VesselId, MissingVesselError};
+    ///
+    /// let error = MissingVesselError::new(VesselId::new(1));
+    /// assert_eq!(error.vessel_id(), VesselId::new(1));
+    /// ```
+    #[inline]
+    pub fn vessel_id(&self) -> VesselId {
+        self.0
+    }
+}
+
+/// Error indicating that a vessel is out of placed in a way that exceeds the quay length.
+///
+/// This error is used to signal that a vessel's end position exceeds the quay length.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{VesselId, VesselOutOfBoundsError};
+/// use dock_alloc_core::domain::{SpaceLength, SpacePosition};
+///
+/// let error = VesselOutOfBoundsError::new(
+///     VesselId::new(1),
+///     SpacePosition::new(1500),
+///     SpaceLength::new(1000)
+/// );
+/// assert_eq!(error.vessel_id(), VesselId::new(1));
+/// assert_eq!(error.end_pos(), SpacePosition::new(1500));
+/// assert_eq!(error.quay_length(), SpaceLength::new(1000));
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct VesselOutOfBoundsError {
+    vessel_id: VesselId,
+    end_pos: SpacePosition,
+    quay_length: SpaceLength,
+}
+
+impl Display for VesselOutOfBoundsError {
+    /// Formats the `VesselOutOfBoundsError` for display.
+    ///
+    /// This implementation provides a string representation of the error,
+    /// including the vessel ID, end position, and quay length.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{VesselId, VesselOutOfBoundsError};
+    /// use dock_alloc_core::domain::{SpaceLength, SpacePosition};
+    ///
+    /// let error = VesselOutOfBoundsError::new(
+    ///     VesselId::new(1),
+    ///     SpacePosition::new(1500),
+    ///     SpaceLength::new(1000)
+    /// );
+    /// println!("{}", error);
+    /// ```
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Vessel with ID {} is out of bounds: end position {} exceeds quay length {}",
+            self.vessel_id, self.end_pos, self.quay_length
+        )
+    }
+}
+
+impl std::error::Error for VesselOutOfBoundsError {}
+
+impl VesselOutOfBoundsError {
+    /// Creates a new `VesselOutOfBoundsError` with the specified parameters.
+    ///
+    /// This function initializes a `VesselOutOfBoundsError` with the vessel's unique identifier,
+    /// the end position, and the quay length.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{VesselId, VesselOutOfBoundsError};
+    /// use dock_alloc_core::domain::{SpaceLength, SpacePosition};
+    ///
+    /// let error = VesselOutOfBoundsError::new(
+    ///     VesselId::new(1),
+    ///     SpacePosition::new(1500),
+    ///     SpaceLength::new(1000)
+    /// );
+    /// assert_eq!(error.vessel_id(), VesselId::new(1));
+    /// assert_eq!(error.end_pos(), SpacePosition::new(1500));
+    /// assert_eq!(error.quay_length(), SpaceLength::new(1000));
+    /// ```
+    #[inline]
+    pub fn new(vessel_id: VesselId, end_pos: SpacePosition, quay_length: SpaceLength) -> Self {
+        VesselOutOfBoundsError {
+            vessel_id,
+            end_pos,
+            quay_length,
+        }
+    }
+
+    /// Returns the unique identifier of the vessel associated with the error.
+    ///
+    /// This function retrieves the `VesselId` of the vessel that is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{VesselId, VesselOutOfBoundsError};
+    /// use dock_alloc_core::domain::{SpaceLength, SpacePosition};
+    ///
+    /// let error = VesselOutOfBoundsError::new(
+    ///     VesselId::new(1),
+    ///     SpacePosition::new(1500),
+    ///     SpaceLength::new(1000)
+    /// );
+    /// assert_eq!(error.vessel_id(), VesselId::new(1));
+    /// ```
+    pub fn vessel_id(&self) -> VesselId {
+        self.vessel_id
+    }
+
+    /// Returns the end position of the vessel that caused the error.
+    ///
+    /// This function retrieves the `SpacePosition` representing the end position of the vessel.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{VesselId, VesselOutOfBoundsError};
+    /// use dock_alloc_core::domain::{SpaceLength, SpacePosition};
+    ///
+    /// let error = VesselOutOfBoundsError::new(
+    ///     VesselId::new(1),
+    ///     SpacePosition::new(1500),
+    ///     SpaceLength::new(1000)
+    /// );
+    /// assert_eq!(error.end_pos(), SpacePosition::new(1500));
+    /// ```
+    pub fn end_pos(&self) -> SpacePosition {
+        self.end_pos
+    }
+
+    /// Returns the quay length associated with the error.
+    ///
+    /// This function retrieves the `SpaceLength` representing the quay length.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{VesselId, VesselOutOfBoundsError};
+    /// use dock_alloc_core::domain::{SpaceLength, SpacePosition};
+    ///
+    /// let error = VesselOutOfBoundsError::new(
+    ///     VesselId::new(1),
+    ///     SpacePosition::new(1500),
+    ///     SpaceLength::new(1000)
+    /// );
+    /// assert_eq!(error.quay_length(), SpaceLength::new(1000));
+    /// ```
+    pub fn quay_length(&self) -> SpaceLength {
+        self.quay_length
+    }
+}
+
+/// Represents a rectangular region in the time-space domain for a vessel.
+///
+/// This struct encapsulates the vessel's identifier, the time interval during which
+/// the vessel occupies a position, and the spatial interval along the quay that the vessel occupies.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{VesselRect, VesselId};
+/// use dock_alloc_core::domain::{TimeInterval, SpaceInterval};
+///
+/// let vessel_rect = VesselRect::new(
+///     VesselId::new(1),
+///     TimeInterval::new(0.into(), 10.into()),
+///     SpaceInterval::new(100.into(), 200.into())
+/// );
+/// assert_eq!(vessel_rect.id(), VesselId::new(1));
+/// assert_eq!(vessel_rect.time_interval(), &TimeInterval::new(0.into(), 10.into()));
+/// assert_eq!(vessel_rect.space_interval(), &SpaceInterval::new(100.into(), 200.into()));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VesselRect<TimeType: PrimInt + Signed> {
+    id: VesselId,
+    time_interval: TimeInterval<TimeType>,
+    space_interval: SpaceInterval,
+}
+
+impl<TimeType: PrimInt + Signed> VesselRect<TimeType> {
+    /// Creates a new `VesselRect` instance with the specified parameters.
+    ///
+    /// This function initializes a `VesselRect` with the vessel's unique identifier,
+    /// the time interval during which the vessel occupies a position,
+    /// and the spatial interval along the quay that the vessel occupies.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{VesselRect, VesselId};
+    /// use dock_alloc_core::domain::{TimeInterval, SpaceInterval};
+    ///
+    /// let vessel_rect = VesselRect::new(
+    ///     VesselId::new(1),
+    ///     TimeInterval::new(0.into(), 10.into()),
+    ///     SpaceInterval::new(100.into(), 200.into())
+    /// );
+    /// assert_eq!(vessel_rect.id(), VesselId::new(1));
+    /// assert_eq!(vessel_rect.time_interval(), &TimeInterval::new(0.into(), 10.into()));
+    /// assert_eq!(vessel_rect.space_interval(), &SpaceInterval::new(100.into(), 200.into()));
+    /// ```
+    pub fn new(
+        id: VesselId,
+        time_interval: TimeInterval<TimeType>,
+        space_interval: SpaceInterval,
+    ) -> Self {
+        Self {
+            id,
+            time_interval,
+            space_interval,
+        }
+    }
+
+    /// Returns the unique identifier of the vessel associated with the rectangle.
+    ///
+    /// This function retrieves the `VesselId` of the vessel that the rectangle represents.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{VesselRect, VesselId};
+    /// use dock_alloc_core::domain::{TimeInterval, SpaceInterval};
+    ///
+    /// let vessel_rect = VesselRect::new(
+    ///     VesselId::new(1),
+    ///     TimeInterval::new(0.into(), 10.into()),
+    ///     SpaceInterval::new(100.into(), 200.into())
+    /// );
+    ///
+    /// assert_eq!(vessel_rect.id(), VesselId::new(1));
+    /// ```
+    #[inline]
+    pub fn id(&self) -> VesselId {
+        self.id
+    }
+
+    /// Returns the time interval during which the vessel occupies a position.
+    ///
+    /// This function retrieves a reference to the `TimeInterval` representing
+    /// the time span of the vessel's occupation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{VesselRect, VesselId};
+    /// use dock_alloc_core::domain::{TimeInterval, SpaceInterval};
+    ///
+    /// let vessel_rect = VesselRect::new(
+    ///     VesselId::new(1),
+    ///     TimeInterval::new(0.into(), 10.into()),
+    ///     SpaceInterval::new(100.into(), 200.into())
+    /// );
+    /// assert_eq!(vessel_rect.time_interval(), &TimeInterval::new(0.into(), 10.into()));
+    /// ```
+    pub fn time_interval(&self) -> &TimeInterval<TimeType> {
+        &self.time_interval
+    }
+
+    /// Returns the spatial interval along the quay that the vessel occupies.
+    ///
+    /// This function retrieves a reference to the `SpaceInterval` representing
+    /// the spatial span of the vessel's occupation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{VesselRect, VesselId};
+    /// use dock_alloc_core::domain::{TimeInterval, SpaceInterval};
+    ///
+    /// let vessel_rect = VesselRect::new(
+    ///     VesselId::new(1),
+    ///     TimeInterval::new(0.into(), 10.into()),
+    ///     SpaceInterval::new(100.into(), 200.into())
+    /// );
+    /// assert_eq!(vessel_rect.space_interval(), &SpaceInterval::new(100.into(), 200.into()));
+    /// ```
+    pub fn space_interval(&self) -> &SpaceInterval {
+        &self.space_interval
+    }
+}
+
+impl<TimeType: PrimInt + Signed + Display> Display for VesselRect<TimeType> {
+    /// Formats the `VesselRect` for display.
+    ///
+    /// This implementation provides a string representation of the `VesselRect`
+    /// including the vessel identifier, time interval, and space interval.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{VesselRect, VesselId};
+    /// use dock_alloc_core::domain::{TimeInterval, SpaceInterval};
+    ///
+    /// let vessel_rect = VesselRect::new(
+    ///     VesselId::new(1),
+    ///     TimeInterval::new(0.into(), 10.into()),
+    ///     SpaceInterval::new(100.into(), 200.into())
+    /// );
+    /// println!("{}", vessel_rect);
+    /// ```
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "VesselRect(id: {}, time_interval: {}, space_interval: {})",
+            self.id, self.time_interval, self.space_interval
+        )
+    }
+}
+
+/// Error indicating that two vessels overlap in their assigned time-space regions.
+///
+/// This error is used to signal that two vessels have been assigned overlapping
+/// time intervals and spatial intervals, which is not allowed in the berthing allocation problem.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{VesselRect, VesselId, VesselOverlapError};
+/// use dock_alloc_core::domain::{TimeInterval, SpaceInterval};
+///
+/// let vessel_rect_1 = VesselRect::new(
+///     VesselId::new(1),
+///     TimeInterval::new(0.into(), 10.into()),
+///     SpaceInterval::new(100.into(), 200.into())
+/// );
+///
+/// let vessel_rect_2 = VesselRect::new(
+///     VesselId::new(2),
+///     TimeInterval::new(5.into(), 15.into()),
+///     SpaceInterval::new(150.into(), 250.into())
+/// );
+/// let error = VesselOverlapError::new(vessel_rect_1, vessel_rect_2);
+/// assert_eq!(error.a(), &vessel_rect_1);
+/// assert_eq!(error.b(), &vessel_rect_2);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct VesselOverlapError<TimeType: PrimInt + Signed> {
+    a: VesselRect<TimeType>,
+    b: VesselRect<TimeType>,
+}
+
+impl<TimeType: PrimInt + Signed + Display> Display for VesselOverlapError<TimeType> {
+    /// Formats the `VesselOverlapError` for display.
+    ///
+    /// This implementation provides a string representation of the error,
+    /// including the details of the two overlapping vessel rectangles.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{VesselRect, VesselId, VesselOverlapError};
+    /// use dock_alloc_core::domain::{TimeInterval, SpaceInterval};
+    ///
+    /// let vessel_rect_1 = VesselRect::new(
+    ///     VesselId::new(1),
+    ///     TimeInterval::new(0.into(), 10.into()),
+    ///     SpaceInterval::new(100.into(), 200.into())
+    /// );
+    ///
+    /// let vessel_rect_2 = VesselRect::new(
+    ///     VesselId::new(2),
+    ///     TimeInterval::new(5.into(), 15.into()),
+    ///     SpaceInterval::new(150.into(), 250.into())
+    /// );
+    /// let error = VesselOverlapError::new(vessel_rect_1, vessel_rect_2);
+    /// println!("{}", error);
+    /// ```
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "VesselOverlapError between {} and {}", self.a, self.b)
+    }
+}
+
+impl<TimeType: PrimInt + Signed> VesselOverlapError<TimeType> {
+    /// Creates a new `VesselOverlapError` with the specified vessel rectangles.
+    ///
+    /// This function initializes a `VesselOverlapError` with the two overlapping `VesselRect` instances.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{VesselRect, VesselId, VesselOverlapError};
+    /// use dock_alloc_core::domain::{TimeInterval, SpaceInterval};
+    ///
+    /// let vessel_rect_1 = VesselRect::new(
+    ///     VesselId::new(1),
+    ///     TimeInterval::new(0.into(), 10.into()),
+    ///     SpaceInterval::new(100.into(), 200.into())
+    /// );
+    ///
+    /// let vessel_rect_2 = VesselRect::new(
+    ///     VesselId::new(2),
+    ///     TimeInterval::new(5.into(), 15.into()),
+    ///     SpaceInterval::new(150.into(), 250.into())
+    /// );
+    /// let error = VesselOverlapError::new(vessel_rect_1, vessel_rect_2);
+    /// assert_eq!(error.a(), &vessel_rect_1);
+    /// assert_eq!(error.b(), &vessel_rect_2);
+    /// ```
+    #[inline]
+    pub fn new(a: VesselRect<TimeType>, b: VesselRect<TimeType>) -> Self {
+        Self { a, b }
+    }
+
+    /// Returns a reference to the first overlapping vessel rectangle.
+    ///
+    /// This function retrieves a reference to the first `VesselRect` involved in the overlap.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{VesselRect, VesselId, VesselOverlapError};
+    /// use dock_alloc_core::domain::{TimeInterval, SpaceInterval};
+    ///
+    /// let vessel_rect_1 = VesselRect::new(
+    ///     VesselId::new(1),
+    ///     TimeInterval::new(0.into(), 10.into()),
+    ///     SpaceInterval::new(100.into(), 200.into())
+    /// );
+    ///
+    /// let vessel_rect_2 = VesselRect::new(
+    ///     VesselId::new(2),
+    ///     TimeInterval::new(5.into(), 15.into()),
+    ///     SpaceInterval::new(150.into(), 250.into())
+    /// );
+    /// let error = VesselOverlapError::new(vessel_rect_1, vessel_rect_2);
+    /// assert_eq!(error.a(), &vessel_rect_1);
+    /// ```
+    pub fn a(&self) -> &VesselRect<TimeType> {
+        &self.a
+    }
+
+    /// Returns a reference to the second overlapping vessel rectangle.
+    ///
+    /// This function retrieves a reference to the second `VesselRect` involved in the overlap.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{VesselRect, VesselId, VesselOverlapError};
+    /// use dock_alloc_core::domain::{TimeInterval, SpaceInterval};
+    ///
+    /// let vessel_rect_1 = VesselRect::new(
+    ///     VesselId::new(1),
+    ///     TimeInterval::new(0.into(), 10.into()),
+    ///     SpaceInterval::new(100.into(), 200.into())
+    /// );
+    ///
+    /// let vessel_rect_2 = VesselRect::new(
+    ///     VesselId::new(2),
+    ///     TimeInterval::new(5.into(), 15.into()),
+    ///     SpaceInterval::new(150.into(), 250.into())
+    /// );
+    /// let error = VesselOverlapError::new(vessel_rect_1, vessel_rect_2);
+    /// assert_eq!(error.b(), &vessel_rect_2);
+    /// ```
+    pub fn b(&self) -> &VesselRect<TimeType> {
+        &self.b
+    }
+}
+
+/// Represents errors that can occur in the creation of a problem instance.
+///
+/// This enum encapsulates various error types that may arise when defining
+/// a berthing allocation problem, such as missing vessels, vessels placed
+/// out of bounds, or overlapping vessels.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{ProblemError, MissingVesselError, VesselOutOfBoundsError, VesselOverlapError, VesselRect, VesselId};
+///
+/// let missing_vessel_error: ProblemError<i64> = ProblemError::MissingVessel(MissingVesselError::new(VesselId::new(1)));
+/// println!("{}", missing_vessel_error);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ProblemError<TimeType: PrimInt + Signed> {
+    MissingVessel(MissingVesselError),
+    VesselOutOfBounds(VesselOutOfBoundsError),
+    VesselOverlap(VesselOverlapError<TimeType>),
+}
+
+impl<TimeType: PrimInt + Signed + Display> Display for ProblemError<TimeType> {
+    /// Formats the `ProblemError` for display.
+    ///
+    /// This implementation provides a string representation of the error,
+    /// including the details of the specific error variant.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{ProblemError, MissingVesselError, VesselId};
+    ///
+    /// let missing_vessel_error: ProblemError<i64> = ProblemError::MissingVessel(MissingVesselError::new(VesselId::new(1)));
+    /// println!("{}", missing_vessel_error);
+    /// ```
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProblemError::MissingVessel(err) => write!(f, "{}", err),
+            ProblemError::VesselOutOfBounds(err) => write!(f, "{}", err),
+            ProblemError::VesselOverlap(err) => write!(f, "{}", err),
+        }
+    }
+}
+
+impl<TimeType: PrimInt + Signed + Display + Debug> std::error::Error for ProblemError<TimeType> {}
+
 /// Represents the Berthing Allocation Problem.
 ///
 /// This struct encapsulates the problem's vessels and the quay length available for berthing.
 /// It provides methods to create a new problem instance, retrieve the quay length,
 /// and access the set of vessels involved in the problem.
+#[derive(Debug, Clone)]
 pub struct Problem<TimeType = i64, CostType = i64>
 where
     TimeType: PrimInt + Signed,
@@ -971,19 +1577,139 @@ where
     /// let entries = HashSet::new();
     /// let quay_length = SpaceLength::new(1000);
     /// let problem = Problem::<i64, i64>::new(vessels, entries, quay_length);
+    /// assert!(problem.is_ok());
+    /// let problem = problem.unwrap();
     /// assert_eq!(problem.quay_length(), SpaceLength::new(1000));
+    /// assert!(problem.vessels().is_empty());
+    /// assert!(problem.entries().is_empty());
     /// ```
     #[inline]
     pub fn new(
         vessels: HashSet<Vessel<TimeType, CostType>>,
         entries: HashSet<ProblemEntry<TimeType>>,
         quay_length: SpaceLength,
-    ) -> Self {
-        Problem {
+    ) -> Result<Self, ProblemError<TimeType>> {
+        let vmap: HashMap<VesselId, &Vessel<TimeType, CostType>> =
+            vessels.iter().map(|v| (v.id(), v)).collect();
+        let quay_end: SpacePosition = SpacePosition::new(quay_length.value());
+
+        let rects: Vec<VesselRect<TimeType>> = entries
+            .iter()
+            .filter_map(|e| match e {
+                ProblemEntry::PreAssigned(a) => Some(a),
+                _ => None,
+            })
+            .map(|a| {
+                let vid = a.vessel_id();
+                let v = *vmap
+                    .get(&vid)
+                    .ok_or_else(|| ProblemError::MissingVessel(MissingVesselError::new(vid)))?;
+
+                let t0: TimePoint<TimeType> = a.berthing_time();
+                let t1: TimePoint<TimeType> = t0 + v.processing_duration();
+                let time = TimeInterval::new(t0, t1);
+
+                let x0: SpacePosition = a.berthing_position();
+                let x1: SpacePosition = x0 + v.length();
+                if x1 > quay_end {
+                    return Err(ProblemError::VesselOutOfBounds(
+                        VesselOutOfBoundsError::new(vid, x1, quay_length),
+                    ));
+                }
+                let space = SpaceInterval::new(x0, x1);
+
+                Ok(VesselRect::new(vid, time, space))
+            })
+            .collect::<Result<_, ProblemError<TimeType>>>()?;
+
+        if rects.is_empty() {
+            return Ok(Problem {
+                vessels,
+                entries,
+                quay_length,
+            });
+        }
+
+        #[derive(Clone, Copy, PartialEq, Eq)]
+        enum Kind {
+            Start,
+            End,
+        }
+
+        #[derive(Clone, Copy)]
+        struct Event<T: PrimInt> {
+            t: TimePoint<T>,
+            kind: Kind,
+            idx: usize,
+        }
+
+        let mut events: Vec<Event<TimeType>> = rects
+            .iter()
+            .enumerate()
+            .flat_map(|(i, r)| {
+                iter::once(Event {
+                    t: r.time_interval().start(),
+                    kind: Kind::Start,
+                    idx: i,
+                })
+                .chain(iter::once(Event {
+                    t: r.time_interval().end(),
+                    kind: Kind::End,
+                    idx: i,
+                }))
+            })
+            .collect();
+
+        events.sort_by(|a, b| {
+            a.t.cmp(&b.t).then_with(|| match (a.kind, b.kind) {
+                (Kind::End, Kind::Start) => Ordering::Less,
+                (Kind::Start, Kind::End) => Ordering::Greater,
+                _ => Ordering::Equal,
+            })
+        });
+        let mut active: BTreeSet<(SpacePosition, usize)> = BTreeSet::new();
+
+        #[inline]
+        fn overlaps_ho(a: &SpaceInterval, b: &SpaceInterval) -> bool {
+            a.start() < b.end() && b.start() < a.end()
+        }
+
+        for e in events {
+            let r = rects[e.idx];
+            match e.kind {
+                Kind::Start => {
+                    let key = (r.space_interval().start(), e.idx);
+
+                    if let Some(&(_, pidx)) = active.range(..key).next_back() {
+                        let pr = rects[pidx];
+                        if overlaps_ho(pr.space_interval(), r.space_interval()) {
+                            return Err(ProblemError::VesselOverlap(VesselOverlapError::new(
+                                pr, r,
+                            )));
+                        }
+                    }
+                    if let Some(&(_, sidx)) = active.range(key..).next() {
+                        let sr = rects[sidx];
+                        if overlaps_ho(sr.space_interval(), r.space_interval()) {
+                            return Err(ProblemError::VesselOverlap(VesselOverlapError::new(
+                                sr, r,
+                            )));
+                        }
+                    }
+
+                    active.insert(key);
+                }
+                Kind::End => {
+                    active.remove(&(r.space_interval().start(), e.idx));
+                }
+            }
+        }
+
+        Ok(Problem {
             vessels,
             entries,
             quay_length,
-        }
+        })
     }
 
     /// Returns the quay length of the problem.
@@ -1001,6 +1727,8 @@ where
     /// let entries = HashSet::new();
     /// let quay_length = SpaceLength::new(1000);
     /// let problem = Problem::<i64, i64>::new(vessels, entries, quay_length);
+    /// assert!(problem.is_ok());
+    /// let problem = problem.unwrap();
     /// assert_eq!(problem.quay_length(), SpaceLength::new(1000));
     /// ```
     #[inline]
@@ -1023,6 +1751,8 @@ where
     /// let entries = HashSet::new();
     /// let quay_length = SpaceLength::new(1000);
     /// let problem = Problem::<i64, i64>::new(vessels, entries, quay_length);
+    /// assert!(problem.is_ok());
+    /// let problem = problem.unwrap();
     /// assert!(problem.vessels().is_empty());
     /// ```
     #[inline]
@@ -1046,6 +1776,8 @@ where
     /// let entries = HashSet::new();
     /// let quay_length = SpaceLength::new(1000);
     /// let problem = Problem::<i64, i64>::new(vessels, entries, quay_length);
+    /// assert!(problem.is_ok());
+    /// let problem = problem.unwrap();
     /// assert!(problem.entries().is_empty());
     /// ```
     #[inline]
@@ -1068,6 +1800,8 @@ where
     /// let entries = HashSet::new();
     /// let quay_length = SpaceLength::new(1000);
     /// let problem = Problem::<i64, i64>::new(vessels, entries, quay_length);
+    /// assert!(problem.is_ok());
+    /// let problem = problem.unwrap();
     /// assert_eq!(problem.vessel_len(), 0);
     /// ```
     #[inline]
@@ -1206,5 +1940,200 @@ mod tests {
             berthing_position: SpacePosition(100), \
             berthing_time: TimePoint(1622547800))"
         );
+    }
+
+    fn v<T: PrimInt + Signed>(id: u64, len: usize, proc: T, arr: T, tgt: usize) -> Vessel<T, i64> {
+        Vessel::new(
+            VesselId::new(id),
+            SpaceLength::new(len),
+            TimePoint::new(arr),
+            TimeDelta::new(proc),
+            SpacePosition::new(tgt),
+            Cost::new(1),
+            Cost::new(1),
+        )
+    }
+
+    fn a<T: PrimInt + Signed>(id: u64, x0: usize, t0: T) -> ProblemEntry<T> {
+        ProblemEntry::PreAssigned(Assignment::new(
+            VesselId::new(id),
+            SpacePosition::new(x0),
+            TimePoint::new(t0),
+        ))
+    }
+
+    fn hs<T>(items: impl IntoIterator<Item = T>) -> HashSet<T>
+    where
+        T: Eq + Hash,
+    {
+        items.into_iter().collect()
+    }
+
+    // ---------- tests ----------
+
+    /// No pre-assignments → always OK.
+    #[test]
+    fn new_ok_no_entries() {
+        let vessels = hs([v::<i64>(1, 100, 10, 0, 0)]);
+        let entries = HashSet::new();
+        let quay = SpaceLength::new(1_000);
+        let p = Problem::new(vessels, entries, quay);
+        assert!(p.is_ok());
+    }
+
+    /// Single pre-assignment within quay bounds.
+    #[test]
+    fn new_ok_single_preassignment_in_bounds() {
+        let vessels = hs([v::<i64>(1, 100, 10, 0, 0)]);
+        let entries = hs([a::<i64>(1, 50, 5)]);
+        let quay = SpaceLength::new(1_000);
+        let p = Problem::new(vessels, entries, quay);
+        assert!(p.is_ok());
+    }
+
+    /// Pre-assigned vessel not present in vessels set → MissingVessel error.
+    #[test]
+    fn new_err_missing_vessel() {
+        let vessels = hs([v::<i64>(1, 100, 10, 0, 0)]);
+        let entries = hs([a::<i64>(2, 50, 5)]); // vessel 2 does not exist
+        let quay = SpaceLength::new(1_000);
+        let err = Problem::new(vessels, entries, quay).unwrap_err();
+        matches!(err, ProblemError::MissingVessel(_));
+    }
+
+    /// End position (x0 + len) past quay_end → VesselOutOfBounds error.
+    #[test]
+    fn new_err_out_of_bounds() {
+        let vessels = hs([v::<i64>(1, 200, 10, 0, 0)]);
+        // put the ship near the end so x1 > quay_end
+        let entries = hs([a::<i64>(1, 900, 0)]);
+        let quay = SpaceLength::new(1_000);
+        let err = Problem::new(vessels, entries, quay).unwrap_err();
+        matches!(err, ProblemError::VesselOutOfBounds(_));
+    }
+
+    /// Touching in time (t1 == t0') with same space overlap is allowed (half-open time).
+    #[test]
+    fn new_ok_touching_in_time_same_space() {
+        // both length 100 at same x0
+        let vessels = hs([v::<i64>(1, 100, 10, 0, 0), v::<i64>(2, 100, 10, 0, 0)]);
+        // first: [t=0,10), second: starts at 10
+        let entries = hs([a::<i64>(1, 100, 0), a::<i64>(2, 100, 10)]);
+        let quay = SpaceLength::new(1_000);
+        let p = Problem::new(vessels, entries, quay);
+        assert!(p.is_ok());
+    }
+
+    /// Touching in space (x1 == x0') during overlapping time is allowed (half-open space).
+    #[test]
+    fn new_ok_touching_in_space_same_time() {
+        let vessels = hs([v::<i64>(1, 100, 10, 0, 0), v::<i64>(2, 100, 10, 0, 0)]);
+        // same time window, adjacent in space: [100,200) and [200,300)
+        let entries = hs([a::<i64>(1, 100, 0), a::<i64>(2, 200, 0)]);
+        let quay = SpaceLength::new(1_000);
+        let p = Problem::new(vessels, entries, quay);
+        assert!(p.is_ok());
+    }
+
+    /// Overlap in both time and space → VesselOverlap error.
+    #[test]
+    fn new_err_overlap_in_time_and_space() {
+        let vessels = hs([v::<i64>(1, 150, 10, 0, 0), v::<i64>(2, 150, 10, 0, 0)]);
+        // same time window [0,10), space [100,250) vs [200,350) → overlap [200,250)
+        let entries = hs([a::<i64>(1, 100, 0), a::<i64>(2, 200, 0)]);
+        let quay = SpaceLength::new(1_000);
+        let err = Problem::new(vessels, entries, quay).unwrap_err();
+        matches!(err, ProblemError::VesselOverlap(_));
+    }
+
+    /// Overlap in time only (space disjoint) → OK.
+    #[test]
+    fn new_ok_overlap_time_only() {
+        let vessels = hs([v::<i64>(1, 100, 10, 0, 0), v::<i64>(2, 100, 10, 0, 0)]);
+        // time overlaps, but space disjoint: [100,200) vs [300,400)
+        let entries = hs([a::<i64>(1, 100, 0), a::<i64>(2, 300, 5)]);
+        let quay = SpaceLength::new(1_000);
+        let p = Problem::new(vessels, entries, quay);
+        assert!(p.is_ok());
+    }
+
+    /// Overlap in space only (time disjoint) → OK.
+    #[test]
+    fn new_ok_overlap_space_only() {
+        let vessels = hs([v::<i64>(1, 100, 10, 0, 0), v::<i64>(2, 100, 10, 0, 0)]);
+        // same space [100,200) but time-disjoint: [0,10) and [10,20)
+        let entries = hs([a::<i64>(1, 100, 0), a::<i64>(2, 100, 10)]);
+        let quay = SpaceLength::new(1_000);
+        let p = Problem::new(vessels, entries, quay);
+        assert!(p.is_ok());
+    }
+
+    /// End-before-Start tie handling: an assignment ending at t lets another
+    /// start at the same t without overlap.
+    #[test]
+    fn new_ok_end_before_start_tie() {
+        let vessels = hs([v::<i64>(1, 100, 10, 0, 0), v::<i64>(2, 100, 10, 0, 0)]);
+        // [0,10) then [10,20) at same space
+        let entries = hs([a::<i64>(1, 500, 0), a::<i64>(2, 500, 10)]);
+        let quay = SpaceLength::new(1_000);
+        let p = Problem::new(vessels, entries, quay);
+        assert!(p.is_ok());
+    }
+
+    /// Neighbor check robustness: inserting a rect whose space lies between two active neighbors.
+    #[test]
+    fn new_ok_non_overlapping_middle_insert() {
+        // three ships length 50; middle fits exactly between neighbors
+        let vessels = hs([
+            v::<i64>(1, 50, 10, 0, 0),
+            v::<i64>(2, 50, 10, 0, 0),
+            v::<i64>(3, 50, 10, 0, 0),
+        ]);
+        // all overlap in time; spaces are [100,150), [150,200), [200,250)
+        let entries = hs([
+            a::<i64>(1, 100, 0),
+            a::<i64>(2, 150, 0),
+            a::<i64>(3, 200, 0),
+        ]);
+        let quay = SpaceLength::new(1_000);
+        let p = Problem::new(vessels, entries, quay);
+        assert!(p.is_ok());
+    }
+
+    /// Overlap with equal x0: ensures we still detect overlap when two ships start at the same space start
+    /// and their times overlap.
+    #[test]
+    fn new_err_equal_x0_overlapping_time() {
+        let vessels = hs([v::<i64>(1, 80, 10, 0, 0), v::<i64>(2, 80, 10, 0, 0)]);
+        // same x0, time windows overlap → overlap in space and time
+        let entries = hs([a::<i64>(1, 300, 0), a::<i64>(2, 300, 5)]);
+        let quay = SpaceLength::new(1_000);
+        let err = Problem::new(vessels, entries, quay).unwrap_err();
+        matches!(err, ProblemError::VesselOverlap(_));
+    }
+
+    /// Many non-overlapping assignments in shuffled order (stress ordering & sorting).
+    #[test]
+    fn new_ok_many_nonoverlapping_shuffled() {
+        let vessels = hs([
+            v::<i64>(1, 60, 7, 0, 0),
+            v::<i64>(2, 60, 7, 0, 0),
+            v::<i64>(3, 60, 7, 0, 0),
+            v::<i64>(4, 60, 7, 0, 0),
+        ]);
+        // Shuffle events across time and space but keep disjoint in at least one dimension pairwise.
+        let entries = hs([
+            // time [0,7), space [0,60)
+            a::<i64>(1, 0, 0),
+            // time [5,12) but space disjoint: [120,180)
+            a::<i64>(2, 120, 5),
+            // time [12,19), same space as #1 (OK — time disjoint)
+            a::<i64>(3, 0, 12),
+            // time [10,17), space touches #2: [180,240) (OK — space touching)
+            a::<i64>(4, 180, 10),
+        ]);
+        let quay = SpaceLength::new(1_000);
+        let p = Problem::new(vessels, entries, quay);
+        assert!(p.is_ok());
     }
 }
