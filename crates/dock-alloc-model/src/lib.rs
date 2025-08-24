@@ -19,6 +19,85 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+//! # Dock Allocation Model
+//!
+//! `dock_alloc_model` provides the core data structures for defining and representing
+//! berth allocation problems (BAP). It serves as a foundational layer for developing
+//! optimization solvers, simulators, or management systems that deal with the
+//! allocation of resources along a one-dimensional space over time.
+//!
+//! The crate is designed to be **solver-agnostic**, focusing solely on providing a
+//! robust, type-safe, and validated model of the problem domain.
+//!
+//! ## Core Concepts
+//!
+//! The main components of the model are:
+//!
+//! - **`Request`**: Represents a single need for a time-space allocation. A `Request`
+//!   encapsulates all necessary constraints, such as physical length, required processing
+//!   time, feasible time and space windows, and cost parameters for delays or deviations.
+//!
+//! - **`Problem`**: Defines a complete, self-contained problem instance. It consists of a
+//!   set of `Request`s, the total `quay_length`, and the status of each request—either
+//!   `Unassigned` (to be scheduled by a solver) or `PreAssigned` (a fixed, immovable
+//!   booking). The `Problem` constructor performs rigorous validation, such as checking for
+//!   overlaps between pre-assigned requests.
+//!
+//! - **`Decision` & `Solution`**: These structs represent the output of a solver. A `Decision`
+//!   is a choice for a single request (either `Assign` it to a specific time/place or `Drop` it),
+//!   and a `Solution` is a complete collection of decisions for a `Problem`. The `Solution`
+//!   constructor provides a comprehensive validation layer to ensure the solver's output is
+//!   feasible and correct according to the problem's rules.
+//!
+//! ## An Abstract `Request`
+//!
+//! It's important to note that a `Request` does not have to be a vessel. It is an
+//! abstract representation of any space-time requirement. For example, you can model:
+//!
+//! - **A maintenance window**: By creating a `Request` with a hard `feasible_time_window`
+//!   and `feasible_space_window` constraint, zero costs, and treating it as a `PreAssigned` entry
+//!   in the `Problem`.
+//! - **A no-go zone**: Similar to a maintenance window, blocking off a part of the quay
+//!   for a specific duration.
+//! - **Any other resource booking**: The generic nature of the model allows it to be adapted
+//!   to other domains beyond maritime logistics.
+//!
+//! ## Example
+//!
+//! Here is a minimal example of creating a simple berth allocation problem.
+//!
+//! ```
+//! use std::collections::HashSet;
+//! use dock_alloc_core::domain::{
+//!     Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
+//! };
+//! use dock_alloc_model::{Problem, ProblemEntry, Request, RequestId};
+//!
+//! // 1. Define the requests.
+//! let request1 = Request::new(
+//!     RequestId::new(1),
+//!     SpaceLength::new(150), // length of 150 units
+//!     TimeDelta::new(3600),  // needs 1 hour
+//!     SpacePosition::new(100), // prefers position 100
+//!     Cost::new(10),         // cost per second of delay
+//!     Cost::new(5),          // cost per meter of deviation
+//!     TimeInterval::new(TimePoint::new(0), TimePoint::new(86400)), // feasible anytime today
+//!     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(500)), // can berth anywhere up to 500
+//!     Some(Cost::new(10000)), // can be dropped for a penalty
+//! ).unwrap();
+//!
+//! let requests = HashSet::from([request1]);
+//!
+//! // 2. Define which requests are to be scheduled.
+//! let entries = HashSet::from([ProblemEntry::Unassigned(RequestId::new(1))]);
+//!
+//! // 3. Create the problem instance with a quay of length 1000.
+//! let quay_length = SpaceLength::new(1000);
+//! let problem = Problem::new(requests, entries, quay_length);
+//!
+//! assert!(problem.is_ok());
+//! ```
+
 #![allow(dead_code)]
 
 use dock_alloc_core::domain::{
