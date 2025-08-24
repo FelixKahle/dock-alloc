@@ -638,14 +638,14 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn new_normalizes_order_integers() {
+    fn test_new_normalizes_order_integers() {
         let i = Interval::new(5i32, 3i32);
         assert_eq!(i.start(), 3);
         assert_eq!(i.end(), 5);
     }
 
     #[test]
-    fn new_keeps_order_when_sorted() {
+    fn test_new_keeps_order_when_sorted() {
         let i = Interval::new(-4i64, 9i64);
         assert_eq!(i.start(), -4);
         assert_eq!(i.end(), 9);
@@ -653,30 +653,30 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn new_panics_on_nan_left() {
+    fn test_new_panics_on_nan_left() {
         let _ = Interval::new(f64::NAN, 1.0f64);
     }
 
     #[test]
     #[should_panic]
-    fn new_panics_on_nan_right() {
+    fn test_new_panics_on_nan_right() {
         let _ = Interval::new(1.0f64, f64::NAN);
     }
 
     #[test]
-    fn is_empty_true_when_bounds_equal() {
+    fn test_is_empty_true_when_bounds_equal() {
         let i = Interval::new(5u32, 5u32);
         assert!(i.is_empty());
     }
 
     #[test]
-    fn is_empty_false_when_bounds_different() {
+    fn test_is_empty_false_when_bounds_different() {
         let i = Interval::new(1u32, 2u32);
         assert!(!i.is_empty());
     }
 
     #[test]
-    fn contains_inclusive_start_and_exclusive_end() {
+    fn test_contains_inclusive_start_and_exclusive_end() {
         let i = Interval::new(10i32, 20i32);
         assert!(i.contains(10));
         assert!(i.contains(19));
@@ -685,7 +685,7 @@ mod tests {
     }
 
     #[test]
-    fn contains_on_empty_interval_is_always_false() {
+    fn test_contains_on_empty_interval_is_always_false() {
         let i = Interval::new(3i32, 3i32);
         assert!(!i.contains(3));
         assert!(!i.contains(2));
@@ -693,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    fn contains_interval_true_for_nested_and_equal() {
+    fn test_contains_interval_true_for_nested_and_equal() {
         let a = Interval::new(1i32, 5i32);
         let b = Interval::new(2i32, 4i32);
         let c = Interval::new(1i32, 5i32);
@@ -702,21 +702,21 @@ mod tests {
     }
 
     #[test]
-    fn contains_interval_false_when_other_extends_outside() {
+    fn test_contains_interval_false_when_other_extends_outside() {
         let a = Interval::new(1i32, 5i32);
         let bigger = Interval::new(0i32, 6i32);
         assert!(!a.contains_interval(&bigger));
     }
 
     #[test]
-    fn contains_interval_true_for_empty_other_if_anchor_inside() {
+    fn test_contains_interval_true_for_empty_other_if_anchor_inside() {
         let a = Interval::new(1i32, 5i32);
         let empty_inside = Interval::new(3i32, 3i32);
         assert!(a.contains_interval(&empty_inside));
     }
 
     #[test]
-    fn intersects_true_on_overlap() {
+    fn test_intersects_true_on_overlap() {
         let a = Interval::new(0i32, 10i32);
         let b = Interval::new(5i32, 15i32);
         assert!(a.intersects(&b));
@@ -724,7 +724,7 @@ mod tests {
     }
 
     #[test]
-    fn intersects_false_when_touching_at_endpoint() {
+    fn test_intersects_false_when_touching_at_endpoint() {
         let a = Interval::new(0i32, 10i32);
         let b = Interval::new(10i32, 20i32);
         assert!(!a.intersects(&b));
@@ -732,14 +732,14 @@ mod tests {
     }
 
     #[test]
-    fn intersects_false_when_disjoint() {
+    fn test_intersects_false_when_disjoint() {
         let a = Interval::new(0i32, 5i32);
         let b = Interval::new(6i32, 10i32);
         assert!(!a.intersects(&b));
     }
 
     #[test]
-    fn intersects_false_when_one_is_empty() {
+    fn test_intersects_false_when_one_is_empty() {
         let a = Interval::new(1i32, 5i32);
         let empty = Interval::new(3i32, 3i32);
         assert!(!a.intersects(&empty));
@@ -748,27 +748,27 @@ mod tests {
     }
 
     #[test]
-    fn intersects_true_with_itself_if_non_empty() {
+    fn test_intersects_true_with_itself_if_non_empty() {
         let a = Interval::new(1i32, 5i32);
         assert!(a.intersects(&a));
     }
 
     #[test]
-    fn intersection_returns_overlap_interval() {
+    fn test_intersection_returns_overlap_interval() {
         let a = Interval::new(0i32, 10i32);
         let b = Interval::new(5i32, 15i32);
         assert_eq!(a.intersection(&b), Some(Interval::new(5, 10)));
     }
 
     #[test]
-    fn intersection_is_none_when_touching_at_endpoint() {
+    fn test_intersection_is_none_when_touching_at_endpoint() {
         let a = Interval::new(0i32, 10i32);
         let b = Interval::new(10i32, 20i32);
         assert_eq!(a.intersection(&b), None);
     }
 
     #[test]
-    fn intersection_with_empty_is_none() {
+    fn test_intersection_with_empty_is_none() {
         let a = Interval::new(1i32, 5i32);
         let empty = Interval::new(3i32, 3i32);
         assert_eq!(a.intersection(&empty), None);
@@ -776,57 +776,57 @@ mod tests {
     }
 
     #[test]
-    fn intersection_with_itself_yields_self() {
+    fn test_intersection_with_itself_yields_self() {
         let a = Interval::new(2i32, 7i32);
         assert_eq!(a.intersection(&a), Some(a));
     }
 
     #[test]
-    fn clamp_to_inner_boundary_returns_inner() {
+    fn test_clamp_to_inner_boundary_returns_inner() {
         let a = Interval::new(0i32, 10i32);
         let boundary = Interval::new(2i32, 8i32);
         assert_eq!(a.clamp(&boundary), Some(boundary));
     }
 
     #[test]
-    fn clamp_disjoint_returns_none() {
+    fn test_clamp_disjoint_returns_none() {
         let a = Interval::new(0i32, 3i32);
         let boundary = Interval::new(5i32, 7i32);
         assert_eq!(a.clamp(&boundary), None);
     }
 
     #[test]
-    fn clamp_to_equal_returns_self() {
+    fn test_clamp_to_equal_returns_self() {
         let a = Interval::new(2i32, 6i32);
         assert_eq!(a.clamp(&a), Some(a));
     }
 
     #[test]
-    fn length_on_signed_integers() {
+    fn test_length_on_signed_integers() {
         let i = Interval::new(-3i32, 2i32);
         assert_eq!(i.length(), 5);
     }
 
     #[test]
-    fn length_on_unsigned_integers() {
+    fn test_length_on_unsigned_integers() {
         let i = Interval::new(3u32, 9u32);
         assert_eq!(i.length(), 6);
     }
 
     #[test]
-    fn midpoint_on_even_integer_span() {
+    fn test_midpoint_on_even_integer_span() {
         let i = Interval::new(2i32, 6i32);
         assert_eq!(i.midpoint(), 4);
     }
 
     #[test]
-    fn midpoint_on_odd_integer_span_floor_behavior() {
+    fn test_midpoint_on_odd_integer_span_floor_behavior() {
         let i = Interval::new(0i32, 3i32);
         assert_eq!(i.midpoint(), 1);
     }
 
     #[test]
-    fn midpoint_integer_avoids_overflow_where_a_plus_b_would() {
+    fn test_midpoint_integer_avoids_overflow_where_a_plus_b_would() {
         let a = i64::MAX - 2;
         let b = i64::MAX;
         let i = Interval::new(a, b);
@@ -834,7 +834,7 @@ mod tests {
     }
 
     #[test]
-    fn midpoint_on_floats_basic() {
+    fn test_midpoint_on_floats_basic() {
         let i = Interval::new(1.0f64, 3.0f64);
         assert_eq!(i.midpoint(), 2.0);
         let j = Interval::new(-10.0f32, 6.0f32);
@@ -842,33 +842,33 @@ mod tests {
     }
 
     #[test]
-    fn to_range_roundtrip() {
+    fn test_to_range_roundtrip() {
         let i = Interval::new(-2i32, 5i32);
         let r = i.to_range();
         assert_eq!(r, -2..5);
     }
 
     #[test]
-    fn from_range_normalizes_order() {
+    fn test_from_range_normalizes_order() {
         let i: Interval<i32> = (5..2).into();
         assert_eq!(i.start(), 2);
         assert_eq!(i.end(), 5);
     }
 
     #[test]
-    fn display_formats_as_half_open() {
+    fn test_display_formats_as_half_open() {
         let i = Interval::new(1i32, 5i32);
         assert_eq!(format!("{}", i), "[1, 5)");
     }
 
     #[test]
-    fn display_formats_empty() {
+    fn test_display_formats_empty() {
         let i = Interval::new(5i32, 5i32);
         assert_eq!(format!("{}", i), "[5, 5)");
     }
 
     #[test]
-    fn hash_and_eq_allow_dedup_in_set() {
+    fn test_hash_and_eq_allow_dedup_in_set() {
         let mut set = HashSet::new();
         set.insert(Interval::new(5i32, 3i32));
         set.insert(Interval::new(3i32, 5i32));
@@ -877,7 +877,7 @@ mod tests {
     }
 
     #[test]
-    fn contains_interval_with_empty_self_is_true_only_if_other_is_also_empty_and_equal() {
+    fn test_contains_interval_with_empty_self_is_true_only_if_other_is_also_empty_and_equal() {
         let empty = Interval::new(4i32, 4i32);
         let empty_same = Interval::new(4i32, 4i32);
         let non_empty = Interval::new(3i32, 5i32);
@@ -886,54 +886,54 @@ mod tests {
     }
 
     #[test]
-    fn floats_infinite_bounds_midpoint_is_nan() {
+    fn test_floats_infinite_bounds_midpoint_is_nan() {
         let i = Interval::new(f64::NEG_INFINITY, f64::INFINITY);
         assert!(i.midpoint().is_nan());
     }
 
     #[test]
-    fn contains_interval_with_empty_other_at_edges() {
+    fn test_contains_interval_with_empty_other_at_edges() {
         let a = Interval::new(1i32, 5i32);
         assert!(a.contains_interval(&Interval::new(1, 1)));
         assert!(a.contains_interval(&Interval::new(5, 5)));
     }
 
     #[test]
-    fn from_range_via_into_needs_parens() {
+    fn test_from_range_via_into_needs_parens() {
         let i: Interval<_> = (1..5).into();
         assert_eq!((i.start(), i.end()), (1, 5));
     }
 
     #[test]
     #[should_panic(expected = "step must be > 0")]
-    fn iter_panics_on_zero_step_int() {
+    fn test_iter_panics_on_zero_step_int() {
         let i = Interval::new(1i32, 5i32);
         let _ = i.iter(0).next();
     }
 
     #[test]
     #[should_panic(expected = "step must be > 0")]
-    fn iter_panics_on_negative_step_int() {
+    fn test_iter_panics_on_negative_step_int() {
         let i = Interval::new(1i32, 5i32);
         let _ = i.iter(-1).next();
     }
 
     #[test]
-    fn iter_basic_progression() {
+    fn test_iter_basic_progression() {
         let i = Interval::new(1i32, 5i32);
         let v: Vec<_> = i.iter(1).collect();
         assert_eq!(v, vec![1, 2, 3, 4]); // half-open
     }
 
     #[test]
-    fn iter_step_larger_than_span_emits_once_if_non_empty() {
+    fn test_iter_step_larger_than_span_emits_once_if_non_empty() {
         let i = Interval::new(1i32, 5i32);
         let v: Vec<_> = i.iter(10).collect();
         assert_eq!(v, vec![1]);
     }
 
     #[test]
-    fn iter_over_empty_is_empty() {
+    fn test_iter_over_empty_is_empty() {
         let i = Interval::new(3i32, 3i32);
         assert_eq!(i.iter(1).next(), None);
     }

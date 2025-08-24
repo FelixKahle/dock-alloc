@@ -3654,21 +3654,21 @@ mod tests {
     }
 
     #[test]
-    fn cost_saturating_sub_unsigned_clamps_to_zero() {
+    fn test_cost_saturating_sub_unsigned_clamps_to_zero() {
         let a = Cost::new(10_u32);
         let b = Cost::new(20_u32);
         assert_eq!(a.saturating_sub(b).value(), 0);
     }
 
     #[test]
-    fn cost_saturating_sub_signed_clamps_to_min() {
+    fn test_cost_saturating_sub_signed_clamps_to_min() {
         let a = Cost::new(i32::MIN + 1);
         let b = Cost::new(5_i32);
         assert_eq!(a.saturating_sub(b).value(), i32::MIN);
     }
 
     #[test]
-    fn timedelta_division_truncates_toward_zero() {
+    fn test_timedelta_division_truncates_toward_zero() {
         assert_eq!(TimeDelta::new(10_i32) / -3, TimeDelta::new(-3));
         assert_eq!(TimeDelta::new(-10_i32) / 3, TimeDelta::new(-3));
     }
