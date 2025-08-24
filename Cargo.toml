@@ -21,4 +21,8 @@
 
 [workspace]
 resolver = "2"
-members = ["crates/dock-alloc-core", "crates/dock-alloc-model"]
+members = [
+    "crates/dock-alloc-core",
+    "crates/dock-alloc-model",
+    "crates/dock-alloc-solver",
+]

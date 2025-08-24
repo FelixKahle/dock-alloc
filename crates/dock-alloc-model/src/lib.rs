@@ -106,47 +106,20 @@ use dock_alloc_core::domain::{
 use num_traits::{PrimInt, Signed, Zero};
 use std::fmt::Display;
 use std::{
-    cmp::Ordering,
     collections::{BTreeSet, HashMap, HashSet},
     fmt::Debug,
     hash::Hash,
 };
 
-/// A unique identifier for a berthing request.
-///
-/// This struct wraps a `u64` to provide type safety, ensuring that request IDs are not
-/// accidentally mixed with other numeric types throughout the API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RequestId(u64);
 
 impl RequestId {
-    /// Creates a new `RequestId`.
-    ///
-    /// This constructor takes a `u64` value and wraps it in the `RequestId` type.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_model::RequestId;
-    ///
-    /// let request_id = RequestId::new(42);
-    /// assert_eq!(request_id.value(), 42);
-    /// ```
     #[inline]
     pub const fn new(id: u64) -> Self {
         RequestId(id)
     }
 
-    /// Returns the underlying `u64` value of the ID.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_model::RequestId;
-    ///
-    /// let request_id = RequestId::new(123);
-    /// assert_eq!(request_id.value(), 123);
-    /// ```
     #[inline]
     pub const fn value(&self) -> u64 {
         self.0
@@ -154,46 +127,17 @@ impl RequestId {
 }
 
 impl Display for RequestId {
-    /// Formats the `RequestId` for display.
-    ///
-    /// The format is `RequestId(value)`, which is useful for logging and debugging.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_model::RequestId;
-    ///
-    /// let request_id = RequestId::new(101);
-    /// assert_eq!(format!("{}", request_id), "RequestId(101)");
-    /// ```
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "RequestId({})", self.0)
     }
 }
 
 impl From<u64> for RequestId {
-    /// Converts a `u64` into a `RequestId`.
-    ///
-    /// This allows for more ergonomic creation of `RequestId` instances from primitive integers.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_model::RequestId;
-    ///
-    /// let id_from_u64: RequestId = 42.into();
-    /// assert_eq!(id_from_u64.value(), 42);
-    /// ```
     fn from(value: u64) -> Self {
         RequestId(value)
     }
 }
 
-/// Represents a request for a berthing space at a quay.
-///
-/// A `Request` encapsulates all constraints and cost parameters associated with a single
-/// request's berthing needs, such as its physical length, required processing time,
-/// target position, and feasible time/space windows.
 #[derive(Debug, Clone, Copy)]
 pub struct Request<TimeType = i64, CostType = i64>
 where
@@ -262,10 +206,6 @@ where
     }
 }
 
-/// An error indicating a request's feasible time window is too short.
-///
-/// This error occurs during `Request` creation if the duration of the `feasible_time_window`
-/// is less than the required `processing_duration`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RequestTimeWindowTooShortError<TimeType: PrimInt + Signed> {
     feasible_time_window: TimeInterval<TimeType>,
@@ -273,7 +213,7 @@ pub struct RequestTimeWindowTooShortError<TimeType: PrimInt + Signed> {
 }
 
 impl<TimeType: PrimInt + Signed> RequestTimeWindowTooShortError<TimeType> {
-    /// Creates a new `RequestTimeWindowTooShortError`.
+    #[inline]
     pub fn new(
         feasible_time_window: TimeInterval<TimeType>,
         processing_duration: TimeDelta<TimeType>,
@@ -284,12 +224,12 @@ impl<TimeType: PrimInt + Signed> RequestTimeWindowTooShortError<TimeType> {
         }
     }
 
-    /// Returns the feasible time window that was too short.
+    #[inline]
     pub fn feasible_time_window(&self) -> TimeInterval<TimeType> {
         self.feasible_time_window
     }
 
-    /// Returns the processing duration that did not fit.
+    #[inline]
     pub fn processing_duration(&self) -> TimeDelta<TimeType> {
         self.processing_duration
     }
@@ -304,10 +244,6 @@ impl<TimeType: PrimInt + Signed + Display> Display for RequestTimeWindowTooShort
     }
 }
 
-/// An error indicating a request's feasible space window is too short.
-///
-/// This error occurs during `Request` creation if the length of the `feasible_space_window`
-/// is less than the required `length` of the request.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RequestSpaceWindowTooShortError {
     feasible_space_window: SpaceInterval,
@@ -315,7 +251,6 @@ pub struct RequestSpaceWindowTooShortError {
 }
 
 impl RequestSpaceWindowTooShortError {
-    /// Creates a new `RequestSpaceWindowTooShortError`.
     pub fn new(feasible_space_window: SpaceInterval, length: SpaceLength) -> Self {
         Self {
             feasible_space_window,
@@ -323,12 +258,12 @@ impl RequestSpaceWindowTooShortError {
         }
     }
 
-    /// Returns the feasible space window that was too short.
+    #[inline]
     pub fn feasible_space_window(&self) -> SpaceInterval {
         self.feasible_space_window
     }
 
-    /// Returns the request length that did not fit.
+    #[inline]
     pub fn length(&self) -> SpaceLength {
         self.length
     }
@@ -343,12 +278,9 @@ impl Display for RequestSpaceWindowTooShortError {
     }
 }
 
-/// An error that can occur during the creation of a `Request`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RequestCreationError<TimeType: PrimInt + Signed> {
-    /// The feasible time window is shorter than the processing duration.
     TimeWindowTooShort(RequestTimeWindowTooShortError<TimeType>),
-    /// The feasible space window is shorter than the request's length.
     SpaceWindowTooShort(RequestSpaceWindowTooShortError),
 }
 
@@ -371,54 +303,6 @@ where
     TimeType: PrimInt + Signed,
     CostType: PrimInt + Signed,
 {
-    /// Creates a new `Request` after validating its parameters.
-    ///
-    /// This function constructs a `Request` from its constituent parts. It performs
-    /// critical validation to ensure the request is logically consistent before creation.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Err` if the request parameters are invalid:
-    /// - `RequestCreationError::TimeWindowTooShort`: If the `feasible_time_window`'s
-    ///   duration is less than the `processing_duration`.
-    /// - `RequestCreationError::SpaceWindowTooShort`: If the `feasible_space_window`'s
-    ///   length is less than the request's `length`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_core::domain::{SpaceLength, TimeDelta, SpacePosition, Cost, TimeInterval, TimePoint, SpaceInterval};
-    /// use dock_alloc_model::{Request, RequestId};
-    ///
-    /// let request = Request::<i64, i64>::new(
-    ///     RequestId::new(1),
-    ///     SpaceLength::new(100),
-    ///     TimeDelta::new(3600),
-    ///     SpacePosition::new(50),
-    ///     Cost::new(10),
-    ///     Cost::new(5),
-    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(7200)),
-    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(200)),
-    ///     Some(Cost::new(1000)),
-    /// );
-    ///
-    /// assert!(request.is_ok());
-    ///
-    /// // Example of a time window that is too short
-    /// let bad_request = Request::<i64, i64>::new(
-    ///     RequestId::new(2),
-    ///     SpaceLength::new(100),
-    ///     TimeDelta::new(3600),
-    ///     SpacePosition::new(50),
-    ///     Cost::new(10),
-    ///     Cost::new(5),
-    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(3000)), // Duration < 3600
-    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(200)),
-    ///     None,
-    /// );
-    ///
-    /// assert!(bad_request.is_err());
-    /// ```
     #[allow(clippy::too_many_arguments)]
     #[inline]
     pub fn new(
@@ -456,82 +340,56 @@ where
         })
     }
 
-    /// Returns the unique identifier of the request.
     #[inline]
     pub fn id(&self) -> RequestId {
         self.id
     }
 
-    /// Returns the physical length of the request for this request.
     #[inline]
     pub fn length(&self) -> SpaceLength {
         self.length
     }
 
-    /// Returns the earliest time the request can arrive.
-    ///
-    /// This is defined as the start of the `feasible_time_window`.
     #[inline]
     pub fn arrival_time(&self) -> TimePoint<TimeType> {
         self.feasible_time_window.start()
     }
 
-    /// Returns the required time for processing (berthing duration).
     #[inline]
     pub fn processing_duration(&self) -> TimeDelta<TimeType> {
         self.processing_duration
     }
 
-    /// Returns the preferred berthing position for the request.
     #[inline]
     pub fn target_position(&self) -> SpacePosition {
         self.target_position
     }
 
-    /// Returns the cost incurred for each unit of time the request waits after arrival.
     #[inline]
     pub fn cost_per_delay(&self) -> Cost<CostType> {
         self.cost_per_delay
     }
 
-    /// Returns the cost incurred for each unit of distance from the target position.
     #[inline]
     pub fn cost_per_position_deviation(&self) -> Cost<CostType> {
         self.cost_per_position_deviation
     }
 
-    /// Returns the time interval within which the request must be processed.
     #[inline]
     pub fn feasible_time_window(&self) -> TimeInterval<TimeType> {
         self.feasible_time_window
     }
 
-    /// Returns the space interval along the quay where the request can be berthed.
     #[inline]
     pub fn feasible_space_window(&self) -> SpaceInterval {
         self.feasible_space_window
     }
 
-    /// Returns the penalty cost if this request is not assigned (dropped), if applicable.
     #[inline]
     pub fn drop_penalty(&self) -> Option<Cost<CostType>> {
         self.drop_penalty
     }
 
-    /// Returns `true` if the request can be dropped (i.e., has a drop penalty).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_core::domain::{SpaceLength, TimeDelta, SpacePosition, Cost, TimeInterval, TimePoint, SpaceInterval};
-    /// use dock_alloc_model::{Request, RequestId};
-    ///
-    /// let droppable_request = Request::<i64, i64>::new(RequestId::new(1), SpaceLength::new(100), TimeDelta::new(10), SpacePosition::new(0), Cost::new(1), Cost::new(1), TimeInterval::new(TimePoint::new(0), TimePoint::new(100)), SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(200)), Some(Cost::new(1000))).unwrap();
-    /// let mandatory_request = Request::<i64, i64>::new(RequestId::new(2), SpaceLength::new(100), TimeDelta::new(10), SpacePosition::new(0), Cost::new(1), Cost::new(1), TimeInterval::new(TimePoint::new(0), TimePoint::new(100)), SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(200)), None).unwrap();
-    ///
-    /// assert!(droppable_request.is_droppable());
-    /// assert!(!mandatory_request.is_droppable());
-    /// ```
     #[inline]
     pub fn is_droppable(&self) -> bool {
         self.drop_penalty.is_some()
@@ -543,27 +401,6 @@ where
     TimeType: PrimInt + Signed,
     CostType: PrimInt + Signed + TryFrom<TimeType>,
 {
-    /// Calculates the total cost for a given waiting time.
-    ///
-    /// The cost is calculated as `waiting_time` * `cost_per_delay`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the numeric value of `waiting_time` cannot be converted into `CostType`.
-    /// This may happen if `TimeType` is a larger integer type than `CostType`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_core::domain::{SpaceLength, TimeDelta, SpacePosition, Cost, TimeInterval, TimePoint, SpaceInterval};
-    /// use dock_alloc_model::{Request, RequestId};
-    ///
-    /// let request = Request::<i64, i64>::new(RequestId::new(1), SpaceLength::new(100), TimeDelta::new(3600), SpacePosition::new(50), Cost::new(10), Cost::new(5), TimeInterval::new(TimePoint::new(0), TimePoint::new(7200)), SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(200)), None).unwrap();
-    /// let waiting_time = TimeDelta::new(15); // 15 time units of waiting
-    ///
-    /// // Cost = 15 * 10 = 150
-    /// assert_eq!(request.waiting_cost(waiting_time), Cost::new(150));
-    /// ```
     #[inline]
     pub fn waiting_cost(&self, waiting_time: TimeDelta<TimeType>) -> Cost<CostType> {
         let scalar: CostType = CostType::try_from(waiting_time.value())
@@ -578,27 +415,6 @@ where
     TimeType: PrimInt + Signed,
     CostType: PrimInt + Signed + TryFrom<usize>,
 {
-    /// Calculates the total cost for a given deviation from the target position.
-    ///
-    /// The cost is calculated as `deviation` * `cost_per_position_deviation`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the numeric value of the `deviation` `SpaceLength` cannot be
-    /// converted into `CostType`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_core::domain::{SpaceLength, TimeDelta, SpacePosition, Cost, TimeInterval, TimePoint, SpaceInterval};
-    /// use dock_alloc_model::{Request, RequestId};
-    ///
-    /// let request = Request::<i64, i64>::new(RequestId::new(1), SpaceLength::new(100), TimeDelta::new(3600), SpacePosition::new(50), Cost::new(10), Cost::new(5), TimeInterval::new(TimePoint::new(0), TimePoint::new(7200)), SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(200)), None).unwrap();
-    /// let deviation = SpaceLength::new(20); // 20 units of distance from target
-    ///
-    /// // Cost = 20 * 5 = 100
-    /// assert_eq!(request.target_position_deviation_cost(deviation), Cost::new(100));
-    /// ```
     #[inline]
     pub fn target_position_deviation_cost(&self, deviation: SpaceLength) -> Cost<CostType> {
         let scalar: CostType = CostType::try_from(deviation.value())
@@ -613,7 +429,6 @@ where
     TimeType: PrimInt + Signed + Display,
     CostType: PrimInt + Signed + Display,
 {
-    /// Formats the `Request` for display.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -629,99 +444,67 @@ where
     }
 }
 
-/// Represents a concrete assignment of a request to a time and place.
-///
-/// An `Assignment` links a `RequestId` to a specific `berthing_time` and `berthing_position`,
-/// representing a fixed allocation on the quay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Assignment<TimeType = i64>
 where
     TimeType: PrimInt + Signed,
 {
     request_id: RequestId,
-    berthing_position: SpacePosition,
-    berthing_time: TimePoint<TimeType>,
+    start_position: SpacePosition,
+    start_time: TimePoint<TimeType>,
 }
 
 impl<TimeType> Assignment<TimeType>
 where
     TimeType: PrimInt + Signed,
 {
-    /// Creates a new `Assignment`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_core::domain::{SpacePosition, TimePoint};
-    /// use dock_alloc_model::{Assignment, RequestId};
-    ///
-    /// let assignment = Assignment::new(
-    ///     RequestId::new(1),
-    ///     SpacePosition::new(100),
-    ///     TimePoint::new(1622547800i64)
-    /// );
-    ///
-    /// assert_eq!(assignment.request_id().value(), 1);
-    /// assert_eq!(assignment.berthing_position().value(), 100);
-    /// ```
     #[inline]
     pub fn new(
         request_id: RequestId,
-        berthing_position: SpacePosition,
-        berthing_time: TimePoint<TimeType>,
+        start_position: SpacePosition,
+        start_time: TimePoint<TimeType>,
     ) -> Self {
         Self {
             request_id,
-            berthing_position,
-            berthing_time,
+            start_position,
+            start_time,
         }
     }
 
-    /// Returns the ID of the request being assigned.
     #[inline]
     pub fn request_id(&self) -> RequestId {
         self.request_id
     }
 
-    /// Returns the assigned starting position on the quay.
     #[inline]
-    pub fn berthing_position(&self) -> SpacePosition {
-        self.berthing_position
+    pub fn start_position(&self) -> SpacePosition {
+        self.start_position
     }
 
-    /// Returns the assigned start time for berthing.
     #[inline]
-    pub fn berthing_time(&self) -> TimePoint<TimeType> {
-        self.berthing_time
+    pub fn start_time(&self) -> TimePoint<TimeType> {
+        self.start_time
     }
 }
 impl<TimeType> Display for Assignment<TimeType>
 where
     TimeType: PrimInt + Signed + Display,
 {
-    /// Formats the `Assignment` for display.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Assignment(request_id: {}, berthing_position: {}, berthing_time: {})",
-            self.request_id, self.berthing_position, self.berthing_time
+            "Assignment(request_id: {}, start_position: {}, start_time: {})",
+            self.request_id, self.start_position, self.start_time
         )
     }
 }
 
-/// Represents the status of a request within a `Problem` definition.
-///
-/// A request can either be `Unassigned`, meaning a solver is free to find an
-/// assignment for it, or `PreAssigned`, meaning it has a fixed assignment
-/// that the solver must respect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ProblemEntry<TimeType = i64>
 where
     TimeType: PrimInt + Signed,
 {
-    /// The request needs to be scheduled by a solver.
     Unassigned(RequestId),
-    /// The request has a fixed, mandatory assignment.
     PreAssigned(Assignment<TimeType>),
 }
 
@@ -729,7 +512,6 @@ impl<TimeType> Display for ProblemEntry<TimeType>
 where
     TimeType: PrimInt + Signed + Display,
 {
-    /// Formats the `ProblemEntry` for display.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ProblemEntry::Unassigned(request_id) => {
@@ -740,7 +522,6 @@ where
     }
 }
 
-/// An error indicating that a `ProblemEntry` refers to a non-existent `RequestId`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MissingRequestError(RequestId);
 impl Display for MissingRequestError {
@@ -759,20 +540,17 @@ impl From<RequestId> for MissingRequestError {
 }
 
 impl MissingRequestError {
-    /// Creates a new `MissingRequestError`.
     #[inline]
     pub fn new(request_id: RequestId) -> Self {
         MissingRequestError(request_id)
     }
 
-    /// Returns the ID of the request that was missing.
     #[inline]
     pub fn request_id(&self) -> RequestId {
         self.0
     }
 }
 
-/// An error indicating that a pre-assignment places a request outside the quay's boundaries.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RequestOutOfBoundsError {
     request_id: RequestId,
@@ -793,7 +571,6 @@ impl Display for RequestOutOfBoundsError {
 impl std::error::Error for RequestOutOfBoundsError {}
 
 impl RequestOutOfBoundsError {
-    /// Creates a new `RequestOutOfBoundsError`.
     #[inline]
     pub fn new(request_id: RequestId, end_pos: SpacePosition, quay_length: SpaceLength) -> Self {
         Self {
@@ -803,35 +580,31 @@ impl RequestOutOfBoundsError {
         }
     }
 
-    /// Returns the ID of the out-of-bounds request.
+    #[inline]
     pub fn request_id(&self) -> RequestId {
         self.request_id
     }
 
-    /// Returns the calculated end position that was out of bounds.
+    #[inline]
     pub fn end_pos(&self) -> SpacePosition {
         self.end_pos
     }
 
-    /// Returns the total length of the quay.
+    #[inline]
     pub fn quay_length(&self) -> SpaceLength {
         self.quay_length
     }
 }
 
-/// A rectangle representing an assigned request in time and space.
-///
-/// This is a utility struct used for overlap detection, representing the time-space
-/// area occupied by an assigned request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct RequestRect<TimeType: PrimInt + Signed> {
+struct RequestRect<TimeType: PrimInt + Signed> {
     id: RequestId,
     time_interval: TimeInterval<TimeType>,
     space_interval: SpaceInterval,
 }
 
 impl<TimeType: PrimInt + Signed> RequestRect<TimeType> {
-    /// Creates a new `RequestRect`.
+    #[inline]
     pub fn new(
         id: RequestId,
         time_interval: TimeInterval<TimeType>,
@@ -844,18 +617,17 @@ impl<TimeType: PrimInt + Signed> RequestRect<TimeType> {
         }
     }
 
-    /// Returns the ID of the request associated with this rectangle.
     #[inline]
     pub fn id(&self) -> RequestId {
         self.id
     }
 
-    /// Returns the time interval occupied by the request.
+    #[inline]
     pub fn time_interval(&self) -> &TimeInterval<TimeType> {
         &self.time_interval
     }
 
-    /// Returns the space interval occupied by the request.
+    #[inline]
     pub fn space_interval(&self) -> &SpaceInterval {
         &self.space_interval
     }
@@ -871,7 +643,6 @@ impl<TimeType: PrimInt + Signed + Display> Display for RequestRect<TimeType> {
     }
 }
 
-/// An error indicating that two assigned requests overlap in both time and space.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RequestOverlapError<TimeType: PrimInt + Signed> {
     a: RequestRect<TimeType>,
@@ -885,24 +656,22 @@ impl<TimeType: PrimInt + Signed + Display> Display for RequestOverlapError<TimeT
 }
 
 impl<TimeType: PrimInt + Signed> RequestOverlapError<TimeType> {
-    /// Creates a new `RequestOverlapError`.
     #[inline]
-    pub fn new(a: RequestRect<TimeType>, b: RequestRect<TimeType>) -> Self {
+    fn new(a: RequestRect<TimeType>, b: RequestRect<TimeType>) -> Self {
         Self { a, b }
     }
 
-    /// Returns the first of the two overlapping requests.
-    pub fn a(&self) -> &RequestRect<TimeType> {
+    #[inline]
+    fn a(&self) -> &RequestRect<TimeType> {
         &self.a
     }
 
-    /// Returns the second of the two overlapping requests.
-    pub fn b(&self) -> &RequestRect<TimeType> {
+    #[inline]
+    fn b(&self) -> &RequestRect<TimeType> {
         &self.b
     }
 }
 
-/// An error indicating an assignment violates the request's feasible time window.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AssignmentViolatesTimeWindow<TimeType: PrimInt + Signed> {
     request_id: RequestId,
@@ -921,7 +690,7 @@ impl<TimeType: PrimInt + Signed + Display> Display for AssignmentViolatesTimeWin
 }
 
 impl<TimeType: PrimInt + Signed> AssignmentViolatesTimeWindow<TimeType> {
-    /// Creates a new `AssignmentViolatesTimeWindow` error.
+    #[inline]
     pub fn new(
         request_id: RequestId,
         assigned: TimeInterval<TimeType>,
@@ -935,7 +704,6 @@ impl<TimeType: PrimInt + Signed> AssignmentViolatesTimeWindow<TimeType> {
     }
 }
 
-/// An error indicating an assignment violates the request's feasible space window.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AssignmentViolatesSpaceWindow {
     request_id: RequestId,
@@ -954,7 +722,7 @@ impl Display for AssignmentViolatesSpaceWindow {
 }
 
 impl AssignmentViolatesSpaceWindow {
-    /// Creates a new `AssignmentViolatesSpaceWindow` error.
+    #[inline]
     pub fn new(request_id: RequestId, assigned: SpaceInterval, feasible: SpaceInterval) -> Self {
         Self {
             request_id,
@@ -964,19 +732,50 @@ impl AssignmentViolatesSpaceWindow {
     }
 }
 
-/// An error that can occur during the creation of a `Problem`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ProblemError<TimeType: PrimInt + Signed> {
-    /// An entry refers to a `RequestId` not present in the set of requests.
     MissingRequest(MissingRequestError),
-    /// A pre-assigned request is placed outside the quay's physical boundaries.
     RequestOutOfBounds(RequestOutOfBoundsError),
-    /// Two or more pre-assigned requests overlap in time and space.
     RequestOverlap(RequestOverlapError<TimeType>),
-    /// A pre-assigned request's time interval is outside its own feasible time window.
     AssignmentViolatesTimeWindow(AssignmentViolatesTimeWindow<TimeType>),
-    /// A pre-assigned request's space interval is outside its own feasible space window.
     AssignmentViolatesSpaceWindow(AssignmentViolatesSpaceWindow),
+}
+
+impl<TimeType: PrimInt + Signed> From<MissingRequestError> for ProblemError<TimeType> {
+    #[inline]
+    fn from(err: MissingRequestError) -> Self {
+        ProblemError::MissingRequest(err)
+    }
+}
+
+impl<TimeType: PrimInt + Signed> From<RequestOutOfBoundsError> for ProblemError<TimeType> {
+    #[inline]
+    fn from(err: RequestOutOfBoundsError) -> Self {
+        ProblemError::RequestOutOfBounds(err)
+    }
+}
+
+impl<TimeType: PrimInt + Signed> From<RequestOverlapError<TimeType>> for ProblemError<TimeType> {
+    #[inline]
+    fn from(err: RequestOverlapError<TimeType>) -> Self {
+        ProblemError::RequestOverlap(err)
+    }
+}
+
+impl<TimeType: PrimInt + Signed> From<AssignmentViolatesTimeWindow<TimeType>>
+    for ProblemError<TimeType>
+{
+    #[inline]
+    fn from(err: AssignmentViolatesTimeWindow<TimeType>) -> Self {
+        ProblemError::AssignmentViolatesTimeWindow(err)
+    }
+}
+
+impl<TimeType: PrimInt + Signed> From<AssignmentViolatesSpaceWindow> for ProblemError<TimeType> {
+    #[inline]
+    fn from(err: AssignmentViolatesSpaceWindow) -> Self {
+        ProblemError::AssignmentViolatesSpaceWindow(err)
+    }
 }
 
 impl<TimeType: PrimInt + Signed + Display> Display for ProblemError<TimeType> {
@@ -993,6 +792,59 @@ impl<TimeType: PrimInt + Signed + Display> Display for ProblemError<TimeType> {
 
 impl<TimeType: PrimInt + Signed + Display + Debug> std::error::Error for ProblemError<TimeType> {}
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EventKind {
+    Start,
+    End,
+}
+
+impl Display for EventKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EventKind::Start => write!(f, "Start"),
+            EventKind::End => write!(f, "End"),
+        }
+    }
+}
+
+impl EventKind {
+    #[inline]
+    const fn key(self) -> u8 {
+        match self {
+            EventKind::End => 0,
+            EventKind::Start => 1,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Event<U: PrimInt + Signed> {
+    time: TimePoint<U>,
+    kind: EventKind,
+    rect_index: usize,
+}
+
+impl<U: PrimInt + Signed> Event<U> {
+    #[inline]
+    fn new(time: TimePoint<U>, kind: EventKind, rect_index: usize) -> Self {
+        Self {
+            time,
+            kind,
+            rect_index,
+        }
+    }
+}
+
+impl<U: PrimInt + Signed + Display> Display for Event<U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Event(time: {}, kind: {}, rect_index: {})",
+            self.time, self.kind, self.rect_index
+        )
+    }
+}
+
 #[inline]
 fn check_space_overlaps<T: PrimInt + Signed>(
     rects: &[RequestRect<T>],
@@ -1000,67 +852,27 @@ fn check_space_overlaps<T: PrimInt + Signed>(
     if rects.is_empty() {
         return Ok(());
     }
-
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum EventKind {
-        Start,
-        End,
-    }
-    #[derive(Clone, Copy)]
-    struct Event<U: PrimInt + Signed> {
-        time: TimePoint<U>,
-        kind: EventKind,
-        rect_index: usize,
-    }
-
     let mut events: Vec<Event<T>> = Vec::with_capacity(rects.len() * 2);
     for (i, r) in rects.iter().enumerate() {
-        events.push(Event {
-            time: r.time_interval().start(),
-            kind: EventKind::Start,
-            rect_index: i,
-        });
-        events.push(Event {
-            time: r.time_interval().end(),
-            kind: EventKind::End,
-            rect_index: i,
-        });
+        events.push(Event::new(r.time_interval().start(), EventKind::Start, i));
+        events.push(Event::new(r.time_interval().end(), EventKind::End, i));
     }
-
-    // Sort by time; on ties, process End before Start so touching-in-time is allowed.
-    events.sort_by(|a, b| {
-        a.time.cmp(&b.time).then_with(|| match (a.kind, b.kind) {
-            (EventKind::End, EventKind::Start) => Ordering::Less,
-            (EventKind::Start, EventKind::End) => Ordering::Greater,
-            _ => Ordering::Equal,
-        })
-    });
-
+    events.sort_by_key(|e| (e.time, e.kind.key()));
     let mut active: BTreeSet<(SpacePosition, usize)> = BTreeSet::new();
-
-    #[inline]
-    fn intervals_overlap(a: &SpaceInterval, b: &SpaceInterval) -> bool {
-        // Half-open [start, end): touching in space is allowed.
-        a.start() < b.end() && b.start() < a.end()
-    }
-
     for e in events {
         let rect = rects[e.rect_index];
         match e.kind {
             EventKind::Start => {
                 let key = (rect.space_interval().start(), e.rect_index);
-
-                // Check predecessor in space order.
                 if let Some(&(_, pred_idx)) = active.range(..key).next_back() {
                     let pred = rects[pred_idx];
-                    if intervals_overlap(pred.space_interval(), rect.space_interval()) {
+                    if pred.space_interval().intersects(rect.space_interval()) {
                         return Err(RequestOverlapError::new(pred, rect));
                     }
                 }
-                // Check successor in space order.
                 if let Some(&(_, succ_idx)) = active.range(key..).next() {
                     let succ = rects[succ_idx];
-                    if intervals_overlap(succ.space_interval(), rect.space_interval()) {
+                    if succ.space_interval().intersects(rect.space_interval()) {
                         return Err(RequestOverlapError::new(succ, rect));
                     }
                 }
@@ -1071,15 +883,9 @@ fn check_space_overlaps<T: PrimInt + Signed>(
             }
         }
     }
-
     Ok(())
 }
 
-/// Defines a complete, validated berth allocation problem instance.
-///
-/// A `Problem` consists of a set of `Request`s, their status as `ProblemEntry`s
-/// (either unassigned or pre-assigned), and the total `quay_length`. This struct
-/// is the primary input for a solver.
 #[derive(Debug, Clone)]
 pub struct Problem<TimeType = i64, CostType = i64>
 where
@@ -1096,26 +902,6 @@ where
     TimeType: PrimInt + Signed,
     CostType: PrimInt + Signed,
 {
-    /// Creates a new `Problem` after performing comprehensive validation.
-    ///
-    /// This constructor is the safe way to new a `Problem`. It ensures that all
-    /// pre-assignments are valid and do not conflict with each other or with the
-    /// problem's constraints. It uses a sweep-line algorithm to efficiently check for
-    /// overlaps among pre-assigned requests.
-    ///
-    /// # Errors
-    ///
-    /// This function returns an error if the problem definition is invalid in any way:
-    /// - `ProblemError::MissingRequest`: If an entry in `entries` refers to a `RequestId` that
-    ///   is not found in the `requests` set.
-    /// - `ProblemError::AssignmentViolatesTimeWindow`: If a pre-assignment's time allocation
-    ///   falls outside the request's own `feasible_time_window`.
-    /// - `ProblemError::AssignmentViolatesSpaceWindow`: If a pre-assignment's space allocation
-    ///   falls outside the request's own `feasible_space_window`.
-    /// - `ProblemError::RequestOutOfBounds`: If a pre-assignment would cause a request to
-    ///   extend beyond the `quay_length`.
-    /// - `ProblemError::RequestOverlap`: If any two pre-assignments overlap in both time
-    ///   and space, which is physically impossible.
     pub fn new(
         requests: HashSet<Request<TimeType, CostType>>,
         entries: HashSet<ProblemEntry<TimeType>>,
@@ -1126,7 +912,6 @@ where
             .map(|request| (request.id(), request))
             .collect();
 
-        // Validate that all Unassigned IDs exist in `requests`.
         for entry in &entries {
             if let ProblemEntry::Unassigned(id) = *entry
                 && !request_map.contains_key(&id)
@@ -1136,8 +921,6 @@ where
         }
 
         let quay_end_position: SpacePosition = SpacePosition::new(quay_length.value());
-
-        // Build and validate rectangles for all pre-assigned entries.
         let pre_assigned_rects: Vec<RequestRect<TimeType>> = entries
             .iter()
             .filter_map(|entry| match entry {
@@ -1150,14 +933,11 @@ where
                     ProblemError::MissingRequest(MissingRequestError::new(request_id))
                 })?;
 
-                // Time-window validation
-                let berthing_time = assignment.berthing_time();
-                let departure_time = berthing_time + request.processing_duration();
-                let assigned_time_interval = TimeInterval::new(berthing_time, departure_time);
+                let start_time = assignment.start_time();
+                let end_time = start_time + request.processing_duration();
+                let assigned_time_interval = TimeInterval::new(start_time, end_time);
                 let feasible_time = request.feasible_time_window();
-                if !(berthing_time >= feasible_time.start()
-                    && departure_time <= feasible_time.end())
-                {
+                if !(start_time >= feasible_time.start() && end_time <= feasible_time.end()) {
                     return Err(ProblemError::AssignmentViolatesTimeWindow(
                         AssignmentViolatesTimeWindow::new(
                             request_id,
@@ -1167,17 +947,16 @@ where
                     ));
                 }
 
-                // Space/window and quay-bound validation
-                let berthing_position = assignment.berthing_position();
-                let end_position = berthing_position + request.length();
+                let start_position = assignment.start_position();
+                let end_position = start_position + request.length();
                 if end_position > quay_end_position {
                     return Err(ProblemError::RequestOutOfBounds(
                         RequestOutOfBoundsError::new(request_id, end_position, quay_length),
                     ));
                 }
-                let assigned_space_interval = SpaceInterval::new(berthing_position, end_position);
+                let assigned_space_interval = SpaceInterval::new(start_position, end_position);
                 let feasible_space = request.feasible_space_window();
-                if !(berthing_position >= feasible_space.start()
+                if !(start_position >= feasible_space.start()
                     && end_position <= feasible_space.end())
                 {
                     return Err(ProblemError::AssignmentViolatesSpaceWindow(
@@ -1197,7 +976,6 @@ where
             })
             .collect::<Result<_, ProblemError<TimeType>>>()?;
 
-        // Check overlaps among pre-assigned rectangles (time-sweep + space-neighbor check).
         if !pre_assigned_rects.is_empty() {
             check_space_overlaps(&pre_assigned_rects).map_err(ProblemError::RequestOverlap)?;
         }
@@ -1209,46 +987,35 @@ where
         })
     }
 
-    /// Returns the total physical length of the quay.
     #[inline]
     pub fn quay_length(&self) -> SpaceLength {
         self.quay_length
     }
 
-    /// Returns a reference to the set of all requests in the problem.
     #[inline]
     pub fn requests(&self) -> &HashSet<Request<TimeType, CostType>> {
         &self.requests
     }
 
-    /// Returns a reference to the set of all problem entries.
     #[inline]
     pub fn entries(&self) -> &HashSet<ProblemEntry<TimeType>> {
         &self.entries
     }
 
-    /// Returns the total number of requests in the problem.
     #[inline]
     pub fn request_len(&self) -> usize {
         self.requests.len()
     }
 }
 
-/// A type alias for the most common problem definition using `i64` for time and cost.
 pub type BerthAllocationProblem = Problem<i64, i64>;
 
-/// Represents a solver's decision for a single request.
-///
-/// A decision can either be to `Assign` the request to a specific time and place,
-/// or to `Drop` it if the request is droppable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Decision<TimeType = i64>
 where
     TimeType: PrimInt + Signed,
 {
-    /// Assign the request to a specific time and position.
     Assign(Assignment<TimeType>),
-    /// Drop the request (only valid for droppable requests).
     Drop(RequestId),
 }
 
@@ -1262,24 +1029,6 @@ impl<TimeType> Decision<TimeType>
 where
     TimeType: PrimInt + Signed,
 {
-    /// Returns the `RequestId` associated with this decision.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_core::domain::{SpacePosition, TimePoint};
-    /// use dock_alloc_model::{Decision, Assignment, RequestId};
-    ///
-    /// let assign_decision: Decision<i64> = Decision::Assign(Assignment::new(
-    ///     RequestId::new(1),
-    ///     SpacePosition::new(100),
-    ///     TimePoint::new(1000i64)
-    /// ));
-    /// let drop_decision: Decision<i64> = Decision::Drop(RequestId::new(2));
-    ///
-    /// assert_eq!(assign_decision.request_id(), RequestId::new(1));
-    /// assert_eq!(drop_decision.request_id(), RequestId::new(2));
-    /// ```
     #[inline]
     pub fn request_id(&self) -> RequestId {
         match *self {
@@ -1289,7 +1038,6 @@ where
     }
 }
 
-/// An error indicating that a solver's decision for a pre-assigned request differs from its fixed assignment.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PreassignedChangedError<TimeType: PrimInt + Signed> {
     request_id: RequestId,
@@ -1298,7 +1046,7 @@ pub struct PreassignedChangedError<TimeType: PrimInt + Signed> {
 }
 
 impl<TimeType: PrimInt + Signed> PreassignedChangedError<TimeType> {
-    /// Creates a new `PreassignedChangedError`.
+    #[inline]
     pub fn new(
         request_id: RequestId,
         expected: (TimePoint<TimeType>, SpacePosition),
@@ -1311,17 +1059,17 @@ impl<TimeType: PrimInt + Signed> PreassignedChangedError<TimeType> {
         }
     }
 
-    /// Returns the ID of the request whose pre-assignment was changed.
+    #[inline]
     pub fn request_id(&self) -> RequestId {
         self.request_id
     }
 
-    /// Returns the expected (time, position) tuple.
+    #[inline]
     pub fn expected(&self) -> &(TimePoint<TimeType>, SpacePosition) {
         &self.expected
     }
 
-    /// Returns the actual (time, position) tuple provided by the solver.
+    #[inline]
     pub fn actual(&self) -> &(TimePoint<TimeType>, SpacePosition) {
         &self.actual
     }
@@ -1337,31 +1085,58 @@ impl<TimeType: PrimInt + Signed + Display> Display for PreassignedChangedError<T
     }
 }
 
-/// An error that can occur during the validation and newing of a `Solution`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SolutionError<TimeType: PrimInt + Signed> {
-    /// A decision was made for a `RequestId` that does not exist in the problem.
     UnknownRequest(RequestId),
-    /// More than one decision was made for the same `RequestId`.
     DuplicateDecision(RequestId),
-    /// An unassigned request in the problem did not have a corresponding decision.
     MissingDecision(RequestId),
-    /// A solver's decision for a pre-assigned request was different from its fixed assignment.
     PreassignmentChanged(PreassignedChangedError<TimeType>),
-    /// A solver's decision was to drop a request that was pre-assigned.
     PreassignedDropped(RequestId),
-    /// A solver's decision was to drop a request that was not marked as droppable.
     DroppedNotDroppable(RequestId),
-    /// An assignment resulted in a berthing time earlier than the request's arrival time.
     NegativeWaitingTime(RequestId),
-    /// An assignment's time interval violates the request's feasible time window.
     AssignmentViolatesTimeWindow(AssignmentViolatesTimeWindow<TimeType>),
-    /// An assignment's space interval violates the request's feasible space window.
     AssignmentViolatesSpaceWindow(AssignmentViolatesSpaceWindow),
-    /// An assignment places a request outside the physical quay boundaries.
     RequestOutOfBounds(RequestOutOfBoundsError),
-    /// Two assignments in the final solution overlap in both time and space.
     RequestOverlap(RequestOverlapError<TimeType>),
+}
+
+impl<TimeType: PrimInt + Signed> From<PreassignedChangedError<TimeType>>
+    for SolutionError<TimeType>
+{
+    #[inline]
+    fn from(err: PreassignedChangedError<TimeType>) -> Self {
+        SolutionError::PreassignmentChanged(err)
+    }
+}
+
+impl<TimeType: PrimInt + Signed> From<AssignmentViolatesTimeWindow<TimeType>>
+    for SolutionError<TimeType>
+{
+    #[inline]
+    fn from(err: AssignmentViolatesTimeWindow<TimeType>) -> Self {
+        SolutionError::AssignmentViolatesTimeWindow(err)
+    }
+}
+
+impl<TimeType: PrimInt + Signed> From<AssignmentViolatesSpaceWindow> for SolutionError<TimeType> {
+    #[inline]
+    fn from(err: AssignmentViolatesSpaceWindow) -> Self {
+        SolutionError::AssignmentViolatesSpaceWindow(err)
+    }
+}
+
+impl<TimeType: PrimInt + Signed> From<RequestOutOfBoundsError> for SolutionError<TimeType> {
+    #[inline]
+    fn from(err: RequestOutOfBoundsError) -> Self {
+        SolutionError::RequestOutOfBounds(err)
+    }
+}
+
+impl<TimeType: PrimInt + Signed> From<RequestOverlapError<TimeType>> for SolutionError<TimeType> {
+    #[inline]
+    fn from(err: RequestOverlapError<TimeType>) -> Self {
+        SolutionError::RequestOverlap(err)
+    }
 }
 
 impl<TimeType: PrimInt + Signed + Display> Display for SolutionError<TimeType> {
@@ -1385,9 +1160,6 @@ impl<TimeType: PrimInt + Signed + Display> Display for SolutionError<TimeType> {
 
 impl<TimeType: PrimInt + Signed + Display + Debug> std::error::Error for SolutionError<TimeType> {}
 
-/// Contains aggregated statistics about a `Solution`.
-///
-/// This includes the total cost and other key performance indicators.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SolutionStats<TimeType = i64, CostType = i64>
 where
@@ -1405,38 +1177,27 @@ where
     TimeType: PrimInt + Signed,
     CostType: PrimInt + Signed,
 {
-    /// Returns the total cost of the solution.
-    ///
-    /// This cost is the sum of all waiting costs, position deviation costs, and drop penalties.
     #[inline]
     pub fn total_cost(&self) -> Cost<CostType> {
         self.total_cost
     }
 
-    /// Returns the sum of waiting times for all assigned requests.
     #[inline]
     pub fn total_waiting_time(&self) -> TimeDelta<TimeType> {
         self.total_waiting_time
     }
 
-    /// Returns the sum of absolute deviations from target positions for all assigned requests.
     #[inline]
     pub fn total_target_position_deviation(&self) -> SpaceLength {
         self.total_target_position_deviation
     }
 
-    /// Returns the total number of requests that were dropped.
     #[inline]
     pub fn total_dropped_requests(&self) -> usize {
         self.total_dropped_requests
     }
 }
 
-/// Represents a complete, validated solution to a `Problem`.
-///
-/// A `Solution` contains the set of `Decision`s for each request and the calculated
-/// `SolutionStats`. It can only be constructed via the `new` function, which
-/// ensures the solution is valid and consistent with the problem definition.
 #[derive(Debug, Clone)]
 pub struct Solution<TimeType = i64, CostType = i64>
 where
@@ -1452,17 +1213,6 @@ where
     TimeType: PrimInt + Signed,
     CostType: PrimInt + Signed + TryFrom<TimeType> + TryFrom<usize>,
 {
-    /// Validates a set of `Decision`s against a `Problem` and news a `Solution`.
-    ///
-    /// This is the primary way to create a `Solution`. It performs an exhaustive set of
-    /// checks to ensure that the provided decisions constitute a feasible and valid solution
-    /// to the given problem. If validation succeeds, it calculates solution statistics and
-    /// returns the `Solution`.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Err` if any of the validation checks fail. See `SolutionError` for a
-    /// complete list of possible failures.
     pub fn new(
         problem: &Problem<TimeType, CostType>,
         decisions: impl IntoIterator<Item = Decision<TimeType>>,
@@ -1473,7 +1223,6 @@ where
             .map(|req| (req.id(), req))
             .collect();
 
-        // Partition problem entries.
         let mut preassigned_map: HashMap<RequestId, Assignment<TimeType>> = HashMap::new();
         let mut unassigned_set: HashSet<RequestId> = HashSet::new();
         for entry in problem.entries() {
@@ -1490,7 +1239,6 @@ where
         let mut seen_ids: HashSet<RequestId> = HashSet::new();
         let mut decisions_map: HashMap<RequestId, Decision<TimeType>> = HashMap::new();
 
-        // Validate incoming decisions and normalize into a map.
         for decision in decisions {
             let request_id = decision.request_id();
             if !request_map.contains_key(&request_id) {
@@ -1503,14 +1251,14 @@ where
             match decision {
                 Decision::Assign(a) => {
                     if let Some(exp) = preassigned_map.get(&request_id)
-                        && (exp.berthing_position() != a.berthing_position()
-                            || exp.berthing_time() != a.berthing_time())
+                        && (exp.start_position() != a.start_position()
+                            || exp.start_time() != a.start_time())
                     {
                         return Err(SolutionError::PreassignmentChanged(
                             PreassignedChangedError::new(
                                 request_id,
-                                (exp.berthing_time(), exp.berthing_position()),
-                                (a.berthing_time(), a.berthing_position()),
+                                (exp.start_time(), exp.start_position()),
+                                (a.start_time(), a.start_position()),
                             ),
                         ));
                     }
@@ -1529,19 +1277,16 @@ where
             }
         }
 
-        // Ensure all Unassigned have a decision.
         for &id in &unassigned_set {
             if !seen_ids.contains(&id) {
                 return Err(SolutionError::MissingDecision(id));
             }
         }
 
-        // Ensure pre-assigned are present, even if not explicitly provided.
         for (&id, &assign) in &preassigned_map {
             decisions_map.entry(id).or_insert(Decision::Assign(assign));
         }
 
-        // Collect final assignments for validation/costing.
         let mut final_assignments: HashMap<RequestId, Assignment<TimeType>> = HashMap::new();
         for (&id, decision) in &decisions_map {
             if let Decision::Assign(a) = decision {
@@ -1557,55 +1302,45 @@ where
 
         for (&request_id, &assignment) in &final_assignments {
             let request = request_map[&request_id];
-
-            // Time-window validation.
-            let berthing_time = assignment.berthing_time();
-            let departure_time = berthing_time + request.processing_duration();
-            let assigned_time = TimeInterval::new(berthing_time, departure_time);
+            let start_time = assignment.start_time();
+            let end_time = start_time + request.processing_duration();
+            let assigned_time = TimeInterval::new(start_time, end_time);
             let feasible_time = request.feasible_time_window();
-            if !(berthing_time >= feasible_time.start() && departure_time <= feasible_time.end()) {
+            if !(start_time >= feasible_time.start() && end_time <= feasible_time.end()) {
                 return Err(SolutionError::AssignmentViolatesTimeWindow(
                     AssignmentViolatesTimeWindow::new(request_id, assigned_time, feasible_time),
                 ));
             }
 
-            // Space and quay-bound validation.
-            let berthing_position = assignment.berthing_position();
-            let end_position = berthing_position + request.length();
+            let start_position = assignment.start_position();
+            let end_position = start_position + request.length();
             if end_position > quay_end {
                 return Err(SolutionError::RequestOutOfBounds(
                     RequestOutOfBoundsError::new(request_id, end_position, problem.quay_length()),
                 ));
             }
-            let assigned_space = SpaceInterval::new(berthing_position, end_position);
+            let assigned_space = SpaceInterval::new(start_position, end_position);
             let feasible_space = request.feasible_space_window();
-            if !(berthing_position >= feasible_space.start()
-                && end_position <= feasible_space.end())
-            {
+            if !(start_position >= feasible_space.start() && end_position <= feasible_space.end()) {
                 return Err(SolutionError::AssignmentViolatesSpaceWindow(
                     AssignmentViolatesSpaceWindow::new(request_id, assigned_space, feasible_space),
                 ));
             }
 
-            // Logical validation and costs.
-            let waiting_time = berthing_time - request.arrival_time();
+            let waiting_time = start_time - request.arrival_time();
             if waiting_time.value() < TimeType::zero() {
                 return Err(SolutionError::NegativeWaitingTime(request_id));
             }
-
-            // Use typed absolute distance (requires SpacePosition::distance_to).
-            let position_deviation = berthing_position - request.target_position();
+            let position_deviation = start_position - request.target_position();
 
             total_cost = total_cost
                 + request.waiting_cost(waiting_time)
                 + request.target_position_deviation_cost(position_deviation);
             total_waiting_time += waiting_time;
             total_position_deviation += position_deviation;
-
             assigned_rects.push(RequestRect::new(request_id, assigned_time, assigned_space));
         }
 
-        // Add drop penalties.
         let mut dropped_count = 0usize;
         for (&request_id, decision) in &decisions_map {
             if let Decision::Drop(_) = decision {
@@ -1616,7 +1351,6 @@ where
             }
         }
 
-        // Overlap check for all assignments.
         if !assigned_rects.is_empty() {
             check_space_overlaps(&assigned_rects).map_err(SolutionError::RequestOverlap)?;
         }
@@ -1634,19 +1368,17 @@ where
         })
     }
 
-    /// Returns a reference to the solution's statistics.
     #[inline]
     pub fn stats(&self) -> &SolutionStats<TimeType, CostType> {
         &self.stats
     }
 
-    /// Returns a map of all decisions made for the requests.
     #[inline]
     pub fn decisions(&self) -> &HashMap<RequestId, Decision<TimeType>> {
         &self.decisions
     }
 
-    /// Returns an iterator over all assigned requests and their assignments.
+    #[inline]
     pub fn assigned(&self) -> impl Iterator<Item = (&RequestId, &Assignment<TimeType>)> {
         self.decisions
             .iter()
@@ -1656,7 +1388,7 @@ where
             })
     }
 
-    /// Returns an iterator over all dropped request IDs.
+    #[inline]
     pub fn dropped(&self) -> impl Iterator<Item = RequestId> {
         self.decisions
             .iter()
@@ -1751,8 +1483,8 @@ mod tests {
         assert_eq!(
             format!("{}", assignment),
             "Assignment(request_id: RequestId(1), \
-            berthing_position: SpacePosition(100), \
-            berthing_time: TimePoint(1622547800))"
+            start_position: SpacePosition(100), \
+            start_time: TimePoint(1622547800))"
         );
     }
 
@@ -2138,8 +1870,8 @@ mod tests {
 
         match sol.decisions().get(&RequestId::new(1)).copied().unwrap() {
             Decision::Assign(a) => {
-                assert_eq!(a.berthing_position(), SpacePosition::new(100));
-                assert_eq!(a.berthing_time(), TimePoint::new(5));
+                assert_eq!(a.start_position(), SpacePosition::new(100));
+                assert_eq!(a.start_time(), TimePoint::new(5));
             }
             _ => panic!("v1 should be assigned"),
         }
