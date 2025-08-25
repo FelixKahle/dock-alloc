@@ -699,6 +699,32 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed + TryFrom<T>,
 {
+    /// Calculates the waiting cost for a given waiting time.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the waiting time value does not fit into the cost type `C`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{SpaceLength, SpacePosition, TimePoint, TimeDelta, TimeInterval, SpaceInterval, Cost};
+    /// use dock_alloc_model::{Request, RequestId};
+    ///
+    /// let req = Request::new(
+    ///     RequestId::new(1),
+    ///     SpaceLength::new(100),
+    ///     TimeDelta::new(10),
+    ///     SpacePosition::new(50),
+    ///     Cost::new(5),
+    ///     Cost::new(2),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(100)),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(200)),
+    /// );
+    /// let waiting_time = TimeDelta::new(3);
+    /// let cost = req.waiting_cost(waiting_time);
+    /// assert_eq!(cost, Cost::new(15)); // 5 * 3
+    /// ```
     #[inline]
     pub fn waiting_cost(&self, waiting_time: TimeDelta<T>) -> Cost<C> {
         let scalar: C = C::try_from(waiting_time.value())
@@ -713,6 +739,32 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed + TryFrom<usize>,
 {
+    /// Calculates the target position deviation cost for a given deviation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the deviation value does not fit into the cost type `C`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::{SpaceLength, SpacePosition, TimePoint, TimeDelta, TimeInterval, SpaceInterval, Cost};
+    /// use dock_alloc_model::{Request, RequestId};
+    ///
+    /// let req = Request::new(
+    ///     RequestId::new(1),
+    ///     SpaceLength::new(100),
+    ///     TimeDelta::new(10),
+    ///     SpacePosition::new(50),
+    ///     Cost::new(5),
+    ///     Cost::new(2),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(100)),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(200)),
+    /// );
+    /// let deviation = SpaceLength::new(4);
+    /// let cost = req.target_position_deviation_cost(deviation);
+    /// assert_eq!(cost, Cost::new(8)); // 2 * 4
+    /// ```
     #[inline]
     pub fn target_position_deviation_cost(&self, deviation: SpaceLength) -> Cost<C> {
         let scalar: C = C::try_from(deviation.value())
