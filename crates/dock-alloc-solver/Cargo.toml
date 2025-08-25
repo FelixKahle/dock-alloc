@@ -29,3 +29,6 @@ edition = "2024"
 dock_alloc_model = { path = "../dock-alloc-model" }
 dock_alloc_core = { path = "../dock-alloc-core" }
 num-traits = "0.2.19"
+
+[dev-dependencies]
+criterion = "0.7.0"
