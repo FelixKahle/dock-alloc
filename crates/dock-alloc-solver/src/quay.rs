@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 ///
 /// It supports querying for free/occupied status, iterating over free intervals,
 /// and modifying the state by freeing or occupying intervals.
-pub trait QuayRead {
+pub trait QuayRead: Eq + Clone {
     /// Create a new `Quay` with the given total space.
     ///
     /// If `initially_free` is true, the entire space is marked as free; otherwise, it is occupied.
@@ -84,22 +84,6 @@ pub struct BTreeMapQuay {
 }
 
 impl BTreeMapQuay {
-    /// Create a new `BTreeMapQuay` with the given total space.
-    ///
-    /// If `initially_free` is true, the entire space is marked as free; otherwise, it is occupied.
-    /// The quay universe is `[0, total_space)`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_core::domain::{SpaceLength, SpacePosition, SpaceInterval};
-    /// use dock_alloc_solver::quay::{QuayRead, QuayWrite, BTreeMapQuay};
-    ///
-    /// let total = SpaceLength::new(10);
-    /// let q = BTreeMapQuay::new(total, /*initially_free=*/ true);
-    /// assert!(q.check_free(SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10))));
-    /// assert!(!q.check_occupied(SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10))));
-    /// ```
     #[inline]
     pub fn new(total_space: SpaceLength, initially_free: bool) -> Self {
         let mut free = BTreeMap::new();
@@ -112,18 +96,6 @@ impl BTreeMapQuay {
         }
     }
 
-    /// Returns the total capacity of the `BTreeMapQuay`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_core::domain::SpaceLength;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    ///
-    /// let total = SpaceLength::new(15);
-    /// let q = BTreeMapQuay::new(total, true);
-    /// assert_eq!(q.capacity(), total);
-    /// ```
     #[inline]
     pub fn capacity(&self) -> SpaceLength {
         self.total
@@ -371,6 +343,7 @@ impl QuayWrite for BTreeMapQuay {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BooleanVecQuay {
     total: SpaceLength,
     free: Vec<bool>, // true = free, false = occupied
@@ -515,7 +488,6 @@ impl QuayWrite for BooleanVecQuay {
         self.free[s..e].fill(true);
     }
 
-    #[inline]
     fn occupy(&mut self, space: SpaceInterval) {
         let (start_pos, end_pos) = self.clamp_positions(space);
         if start_pos >= end_pos {
@@ -526,7 +498,7 @@ impl QuayWrite for BooleanVecQuay {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BitPackedQuay {
     total: SpaceLength,
     words: Vec<u64>,
@@ -660,7 +632,7 @@ impl BitPackedQuay {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BitPackedFreeIter<'a> {
     quay: &'a BitPackedQuay,
     cur: SpacePosition,

@@ -27,7 +27,7 @@ use num_traits::{PrimInt, Signed, Zero};
 use std::collections::BTreeMap;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BerthOccupancy<T, Q>
 where
     T: PrimInt + Signed + Zero + Copy,
@@ -286,6 +286,37 @@ where
     fn space_within_quay(&self, space_interval: SpaceInterval) -> bool {
         let quay_bounds = self.quay_space_interval();
         quay_bounds.contains_interval(&space_interval)
+    }
+
+    #[inline]
+    pub fn slice_predecessor_key(&self, time_point: TimePoint<T>) -> Option<TimePoint<T>>
+    where
+        T: PrimInt + Signed + Zero + Copy,
+    {
+        self.timeline
+            .range(..=time_point)
+            .next_back()
+            .map(|(tp, _)| *tp)
+    }
+
+    #[inline]
+    pub fn slice_keys_in_open(
+        &self,
+        start_time: TimePoint<T>,
+        end_time: TimePoint<T>,
+        out: &mut Vec<TimePoint<T>>,
+    ) where
+        T: PrimInt + Signed + Zero + Copy,
+    {
+        if start_time >= end_time {
+            return;
+        }
+        for (time_point, _) in self
+            .timeline
+            .range((Excluded(start_time), Excluded(end_time)))
+        {
+            out.push(*time_point);
+        }
     }
 
     #[inline]
