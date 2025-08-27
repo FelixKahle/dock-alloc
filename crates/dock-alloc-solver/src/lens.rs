@@ -24,26 +24,27 @@ use crate::quay::{Quay, QuayRead, QuayWrite};
 use dock_alloc_core::domain::{SpaceInterval, SpaceLength, TimeDelta, TimeInterval, TimePoint};
 use num_traits::{PrimInt, Signed, Zero};
 use std::collections::BTreeMap;
-use std::fmt::Display;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Overlay<T: PrimInt + Signed> {
-    frees: BTreeMap<TimePoint<T>, Vec<SpaceInterval>>,
-    occs: BTreeMap<TimePoint<T>, Vec<SpaceInterval>>,
+pub struct BerthOccupancyOverlay<T: PrimInt + Signed> {
+    free_by_time: BTreeMap<TimePoint<T>, Vec<SpaceInterval>>,
+    occupied_by_time: BTreeMap<TimePoint<T>, Vec<SpaceInterval>>,
 }
 
-impl<T: PrimInt + Signed> Default for Overlay<T> {
+pub type Overlay<T> = BerthOccupancyOverlay<T>;
+
+impl<T: PrimInt + Signed> Default for BerthOccupancyOverlay<T> {
     fn default() -> Self {
         Self {
-            frees: BTreeMap::new(),
-            occs: BTreeMap::new(),
+            free_by_time: BTreeMap::new(),
+            occupied_by_time: BTreeMap::new(),
         }
     }
 }
 
-impl<T: PrimInt + Signed> Overlay<T> {
+impl<T: PrimInt + Signed> BerthOccupancyOverlay<T> {
     #[inline]
-    pub fn empty() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
@@ -52,7 +53,7 @@ impl<T: PrimInt + Signed> Overlay<T> {
         if space.start() >= space.end() {
             return;
         }
-        let v = self.frees.entry(time).or_default();
+        let v = self.free_by_time.entry(time).or_default();
         insert_coalesced(v, space);
     }
 
@@ -61,35 +62,99 @@ impl<T: PrimInt + Signed> Overlay<T> {
         if space.start() >= space.end() {
             return;
         }
-        let v = self.occs.entry(time).or_default();
+        let v = self.occupied_by_time.entry(time).or_default();
         insert_coalesced(v, space);
     }
 
     #[inline]
     pub fn free_keys(&self) -> impl Iterator<Item = TimePoint<T>> + '_ {
-        self.frees.keys().copied()
+        self.free_by_time.keys().copied()
     }
 
     #[inline]
     pub fn occ_keys(&self) -> impl Iterator<Item = TimePoint<T>> + '_ {
-        self.occs.keys().copied()
+        self.occupied_by_time.keys().copied()
     }
-}
 
-impl<T: PrimInt + Signed + Display> Display for Overlay<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Overlay(frees: {}, occs: {})",
-            self.frees.len(),
-            self.occs.len()
-        )
+    #[inline]
+    fn clamped_frees_at(&self, key: TimePoint<T>, bounds: SpaceInterval) -> Vec<SpaceInterval> {
+        let mut v = Vec::new();
+        if let Some(list) = self.free_by_time.get(&key) {
+            for r in list {
+                if let Some(cl) = bounds.clamp(r) {
+                    v.push(cl);
+                }
+            }
+        }
+        v
+    }
+
+    #[inline]
+    fn clamped_occupied_at(&self, key: TimePoint<T>, bounds: SpaceInterval) -> Vec<SpaceInterval> {
+        let mut v = Vec::new();
+        if let Some(list) = self.occupied_by_time.get(&key) {
+            for r in list {
+                if let Some(cl) = bounds.clamp(r) {
+                    v.push(cl);
+                }
+            }
+        }
+        v
+    }
+
+    #[inline]
+    fn occupied_overlaps_at(&self, key: TimePoint<T>, space: SpaceInterval) -> bool {
+        self.occupied_by_time
+            .get(&key)
+            .is_some_and(|list| list.iter().any(|r| r.intersects(&space)))
+    }
+
+    pub fn occupy<Q>(
+        &mut self,
+        berth: &BerthOccupancy<T, Q>,
+        window: TimeInterval<T>,
+        space: SpaceInterval,
+    ) where
+        T: Zero + Copy,
+        Q: QuayRead + QuayWrite + Clone + PartialEq,
+    {
+        if let Some(k0) = berth.predecessor_key(window.start()) {
+            self.add_occupy(k0, space);
+        }
+        let mut keys = Vec::new();
+        keys.extend(berth.keys_in_open_iter(window.start(), window.end()));
+        for k in keys {
+            self.add_occupy(k, space);
+        }
+    }
+
+    pub fn free<Q>(
+        &mut self,
+        berth: &BerthOccupancy<T, Q>,
+        window: TimeInterval<T>,
+        space: SpaceInterval,
+    ) where
+        T: Zero + Copy,
+        Q: QuayRead + QuayWrite + Clone + PartialEq,
+    {
+        if let Some(k0) = berth.predecessor_key(window.start()) {
+            self.add_free(k0, space);
+        }
+        let mut keys = Vec::new();
+        keys.extend(berth.keys_in_open_iter(window.start(), window.end()));
+        for k in keys {
+            self.add_free(k, space);
+        }
     }
 }
 
 pub trait TimelineSlices<T: PrimInt + Signed, Q: QuayRead> {
+    type KeyIter<'a>: Iterator<Item = TimePoint<T>>
+    where
+        Self: 'a;
+
     fn predecessor_key(&self, t: TimePoint<T>) -> Option<TimePoint<T>>;
-    fn keys_in_open(&self, start: TimePoint<T>, end: TimePoint<T>, out: &mut Vec<TimePoint<T>>);
+    fn keys_in_open_iter(&self, start: TimePoint<T>, end: TimePoint<T>) -> Self::KeyIter<'_>;
     fn quay_at(&self, key: TimePoint<T>) -> &Q;
 }
 
@@ -98,12 +163,19 @@ where
     T: PrimInt + Signed + Zero + Copy,
     Q: QuayRead + QuayWrite + Clone + PartialEq,
 {
+    type KeyIter<'a>
+        = std::vec::IntoIter<TimePoint<T>>
+    where
+        Self: 'a;
+
     fn predecessor_key(&self, t: TimePoint<T>) -> Option<TimePoint<T>> {
         self.slice_predecessor_key(t)
     }
 
-    fn keys_in_open(&self, start: TimePoint<T>, end: TimePoint<T>, out: &mut Vec<TimePoint<T>>) {
-        self.slice_keys_in_open(start, end, out);
+    fn keys_in_open_iter(&self, start: TimePoint<T>, end: TimePoint<T>) -> Self::KeyIter<'_> {
+        let mut v = Vec::new();
+        self.slice_keys_in_open(start, end, &mut v);
+        v.into_iter()
     }
 
     fn quay_at(&self, key: TimePoint<T>) -> &Q {
@@ -121,14 +193,13 @@ impl<'a, T, Q> AvailabilityView<'a, T, Q>
 where
     T: PrimInt + Signed + Zero + Copy,
     Q: QuayRead + QuayWrite + Clone + PartialEq,
-    BerthOccupancy<T, Q>: TimelineSlices<T, Q>,
 {
     pub fn new(berth: &'a BerthOccupancy<T, Q>, time_window: TimeInterval<T>) -> Self {
         let mut slice_keys = Vec::<TimePoint<T>>::new();
         if let Some(k0) = berth.predecessor_key(time_window.start()) {
             slice_keys.push(k0);
         }
-        berth.keys_in_open(time_window.start(), time_window.end(), &mut slice_keys);
+        slice_keys.extend(berth.keys_in_open_iter(time_window.start(), time_window.end()));
         Self { berth, slice_keys }
     }
 
@@ -146,9 +217,10 @@ where
         for &key in &self.slice_keys {
             let q = self.berth.quay_at(key);
             if let Some(ov) = overlay
-                && overlay_any_occupy_overlaps(ov, key, space) {
-                    return false;
-                }
+                && ov.occupied_overlaps_at(key, space)
+            {
+                return false;
+            }
 
             let base_free = q.check_free(space);
             if base_free {
@@ -156,7 +228,7 @@ where
             }
 
             if let Some(ov) = overlay {
-                let freed = overlay_frees_for_key_clamped(ov, key, space);
+                let freed = ov.clamped_frees_at(key, space);
                 if range_fully_covered(space, &freed) {
                     continue;
                 }
@@ -178,19 +250,7 @@ where
 
         for &key in &self.slice_keys {
             let q = self.berth.quay_at(key);
-            let mut runs = collect_runs(q, search_space, required_len);
-
-            if let Some(ov) = overlay {
-                let frees = overlay_frees_for_key_clamped(ov, key, search_space);
-                if !frees.is_empty() {
-                    runs = runs_union_linear(&runs, &frees);
-                }
-                let occs = overlay_occupies_for_key_clamped(ov, key, search_space);
-                if !occs.is_empty() {
-                    runs = runs_subtract_linear(&runs, &occs);
-                }
-                runs.retain(|r| r.extent() >= required_len);
-            }
+            let runs = collect_runs_with_overlay(q, key, search_space, required_len, overlay);
 
             if first {
                 acc_a = runs;
@@ -247,24 +307,11 @@ where
         if let Some(k0) = berth.predecessor_key(search_time.start()) {
             keys_all.push(k0);
         }
-        berth.keys_in_open(search_time.start(), search_time.end(), &mut keys_all);
+        keys_all.extend(berth.keys_in_open_iter(search_time.start(), search_time.end()));
         let mut runs_per_key: Vec<Vec<SpaceInterval>> = Vec::with_capacity(keys_all.len());
         for &key in &keys_all {
             let q = berth.quay_at(key);
-            let mut runs = collect_runs(q, search_space, len);
-
-            if let Some(ov) = overlay {
-                let frees = overlay_frees_for_key_clamped(ov, key, search_space);
-                if !frees.is_empty() {
-                    runs = runs_union_linear(&runs, &frees);
-                }
-                let occs = overlay_occupies_for_key_clamped(ov, key, search_space);
-                if !occs.is_empty() {
-                    runs = runs_subtract_linear(&runs, &occs);
-                }
-                runs.retain(|r| r.extent() >= len);
-            }
-
+            let runs = collect_runs_with_overlay(q, key, search_space, len, overlay);
             runs_per_key.push(runs);
         }
 
@@ -360,6 +407,35 @@ fn collect_runs<Q: QuayRead>(
 }
 
 #[inline]
+fn collect_runs_with_overlay<T, Q>(
+    q: &Q,
+    key: TimePoint<T>,
+    bounds: SpaceInterval,
+    req_len: SpaceLength,
+    overlay: Option<&Overlay<T>>,
+) -> Vec<SpaceInterval>
+where
+    T: PrimInt + Signed,
+    Q: QuayRead,
+{
+    let mut runs = collect_runs(q, bounds, req_len);
+
+    if let Some(ov) = overlay {
+        let frees = ov.clamped_frees_at(key, bounds);
+        if !frees.is_empty() {
+            runs = runs_union_linear(&runs, &frees);
+        }
+        let occs = ov.clamped_occupied_at(key, bounds);
+        if !occs.is_empty() {
+            runs = runs_subtract_linear(&runs, &occs);
+        }
+        runs.retain(|r| r.extent() >= req_len);
+    }
+
+    runs
+}
+
+#[inline]
 pub fn coalesce_in_place(v: &mut Vec<SpaceInterval>) {
     if v.is_empty() {
         return;
@@ -392,16 +468,17 @@ pub fn runs_union_linear(a: &[SpaceInterval], b: &[SpaceInterval]) -> Vec<SpaceI
 
     let mut push_run = |r: SpaceInterval| {
         if let Some(last) = out.last_mut()
-            && last.end() >= r.start() {
-                let new_end = if last.end() > r.end() {
-                    last.end()
-                } else {
-                    r.end()
-                };
-                let s = last.start();
-                *last = SpaceInterval::new(s, new_end);
-                return;
-            }
+            && last.end() >= r.start()
+        {
+            let new_end = if last.end() > r.end() {
+                last.end()
+            } else {
+                r.end()
+            };
+            let s = last.start();
+            *last = SpaceInterval::new(s, new_end);
+            return;
+        }
         out.push(r);
     };
 
@@ -579,91 +656,8 @@ pub fn range_fully_covered(want: SpaceInterval, runs: &[SpaceInterval]) -> bool 
     false
 }
 
-fn overlay_frees_for_key_clamped<T: PrimInt + Signed>(
-    ov: &Overlay<T>,
-    key: TimePoint<T>,
-    bounds: SpaceInterval,
-) -> Vec<SpaceInterval> {
-    let mut v = Vec::new();
-    if let Some(list) = ov.frees.get(&key) {
-        for r in list {
-            if let Some(cl) = bounds.clamp(r) {
-                v.push(cl);
-            }
-        }
-    }
-    v
-}
-
-fn overlay_occupies_for_key_clamped<T: PrimInt + Signed>(
-    ov: &Overlay<T>,
-    key: TimePoint<T>,
-    bounds: SpaceInterval,
-) -> Vec<SpaceInterval> {
-    let mut v = Vec::new();
-    if let Some(list) = ov.occs.get(&key) {
-        for r in list {
-            if let Some(cl) = bounds.clamp(r) {
-                v.push(cl);
-            }
-        }
-    }
-    v
-}
-
-fn overlay_any_occupy_overlaps<T: PrimInt + Signed>(
-    ov: &Overlay<T>,
-    key: TimePoint<T>,
-    space: SpaceInterval,
-) -> bool {
-    ov.occs
-        .get(&key)
-        .is_some_and(|list| list.iter().any(|r| r.intersects(&space)))
-}
-
-pub fn overlay_occupy_rect<T, Q>(
-    ov: &mut Overlay<T>,
-    berth: &BerthOccupancy<T, Q>,
-    window: TimeInterval<T>,
-    space: SpaceInterval,
-) where
-    T: PrimInt + Signed + Zero + Copy,
-    Q: QuayRead + QuayWrite + Clone + PartialEq,
-    BerthOccupancy<T, Q>: TimelineSlices<T, Q>,
-{
-    if let Some(k0) = berth.predecessor_key(window.start()) {
-        ov.add_occupy(k0, space);
-    }
-    let mut keys = Vec::new();
-    berth.keys_in_open(window.start(), window.end(), &mut keys);
-    for k in keys {
-        ov.add_occupy(k, space);
-    }
-}
-
-pub fn overlay_free_rect<T, Q>(
-    ov: &mut Overlay<T>,
-    berth: &BerthOccupancy<T, Q>,
-    window: TimeInterval<T>,
-    space: SpaceInterval,
-) where
-    T: PrimInt + Signed + Zero + Copy,
-    Q: QuayRead + QuayWrite + Clone + PartialEq,
-    BerthOccupancy<T, Q>: TimelineSlices<T, Q>,
-{
-    if let Some(k0) = berth.predecessor_key(window.start()) {
-        ov.add_free(k0, space);
-    }
-    let mut keys = Vec::new();
-    berth.keys_in_open(window.start(), window.end(), &mut keys);
-    for k in keys {
-        ov.add_free(k, space);
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::TimelineSlices;
     use super::*;
     use crate::occ::BerthOccupancy;
     use crate::quay::BTreeMapQuay;
@@ -697,17 +691,17 @@ mod tests {
         berth.occupy(ti(5, 10), si(2, 4));
 
         // Predecessor at exact key
-        assert_eq!(berth.predecessor_key(tp(5)), Some(tp(5)));
+        assert_eq!(berth.slice_predecessor_key(tp(5)), Some(tp(5)));
         // Predecessor strictly inside
-        assert_eq!(berth.predecessor_key(tp(6)), Some(tp(5)));
+        assert_eq!(berth.slice_predecessor_key(tp(6)), Some(tp(5)));
         // Predecessor at origin
-        assert_eq!(berth.predecessor_key(tp(0)), Some(tp(0)));
+        assert_eq!(berth.slice_predecessor_key(tp(0)), Some(tp(0)));
         // No predecessor before origin
-        assert_eq!(berth.predecessor_key(tp(-1)), None);
+        assert_eq!(berth.slice_predecessor_key(tp(-1)), None);
 
         // Interior keys in (4, 12) should be [5, 10]
         let mut keys = Vec::new();
-        berth.keys_in_open(tp(4), tp(12), &mut keys);
+        berth.slice_keys_in_open(tp(4), tp(12), &mut keys);
         assert_eq!(keys, vec![tp(5), tp(10)]);
     }
 
@@ -726,7 +720,7 @@ mod tests {
         let quay_length = len(12);
         let berth = BO::new(quay_length);
 
-        let mut ov = Overlay::empty();
+        let mut ov = Overlay::new();
         ov.add_occupy(tp(0), si(2, 5)); // applies to predecessor key 0
 
         let view = AvailabilityView::new(&berth, ti(0, 10));
@@ -748,7 +742,7 @@ mod tests {
         assert!(!view.is_rect_free_under(si(2, 6), None));
 
         // Overlay frees exactly that space at the only slice key (5)
-        let mut ov = Overlay::empty();
+        let mut ov = Overlay::new();
         ov.add_free(tp(5), si(2, 6));
 
         assert!(view.is_rect_free_under(si(2, 6), Some(&ov)));
@@ -768,7 +762,7 @@ mod tests {
         // Overlay adds free [2,4) -> union becomes [0,4) and [6,10)
         // Overlay occupies [7,9) -> subtract becomes [0,4), [6,7), [9,10)
         // After filtering by required len 2: only [0,4)
-        let mut ov = Overlay::empty();
+        let mut ov = Overlay::new();
         ov.add_free(tp(5), si(2, 4));
         ov.add_occupy(tp(5), si(7, 9));
 
@@ -832,7 +826,7 @@ mod tests {
 
         // Window starts at t=2, predecessor slice key is 0
         // Overlay occupies [3,5) at key=0 -> should block availability over the window
-        let mut ov = Overlay::empty();
+        let mut ov = Overlay::new();
         ov.add_occupy(tp(0), si(3, 5));
 
         let view = AvailabilityView::new(&berth, ti(2, 6));
@@ -890,7 +884,7 @@ mod tests {
         berth.occupy(ti(5, 10), si(0, 10));
 
         // Overlay: free [2,6) at key=5, creating a viable placement
-        let mut ov = Overlay::empty();
+        let mut ov = Overlay::new();
         ov.add_free(tp(5), si(2, 6));
 
         let search_time = ti(5, 10);
@@ -925,8 +919,8 @@ mod tests {
         let window = ti(2, 9);
         let space = si(3, 7);
 
-        let mut ov = Overlay::empty();
-        overlay_occupy_rect(&mut ov, &berth, window, space);
+        let mut ov = Overlay::new();
+        ov.occupy(&berth, window, space);
 
         let mut keys: Vec<T> = ov.occ_keys().map(|tp| tp.value()).collect();
         keys.sort_unstable();
@@ -945,8 +939,8 @@ mod tests {
         let window = ti(6, 12);
         let space = si(2, 8);
 
-        let mut ov = Overlay::empty();
-        overlay_free_rect(&mut ov, &berth, window, space);
+        let mut ov = Overlay::new();
+        ov.free(&berth, window, space);
 
         let mut keys: Vec<T> = ov.free_keys().map(|tp| tp.value()).collect();
         keys.sort_unstable();
@@ -973,7 +967,7 @@ mod tests {
         assert!(base_runs.is_empty());
 
         // Overlay frees [3,7) at key=5: feasibility restored
-        let mut ov = Overlay::empty();
+        let mut ov = Overlay::new();
         ov.add_free(tp(5), si(3, 7));
 
         assert!(view.is_rect_free_under(si(3, 7), Some(&ov)));
