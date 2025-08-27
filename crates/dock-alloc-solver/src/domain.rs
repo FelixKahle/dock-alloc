@@ -19,10 +19,24 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-pub mod constraints;
-pub mod domain;
-pub mod lens;
-pub mod model_access;
-pub mod occ;
-pub mod plan;
-pub mod quay;
+use std::fmt::Display;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub struct Version(u64);
+
+impl Version {
+    #[inline]
+    pub fn next(self) -> Self {
+        Version(self.0 + 1)
+    }
+
+    pub fn value(self) -> u64 {
+        self.0
+    }
+}
+
+impl Display for Version {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "v{}", self.0)
+    }
+}

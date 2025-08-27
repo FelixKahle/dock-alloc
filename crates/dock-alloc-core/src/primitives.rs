@@ -500,6 +500,16 @@ impl<T> Interval<T> {
     }
 }
 
+impl<T: Default> Default for Interval<T> {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            start_inclusive: T::default(),
+            end_exclusive: T::default(),
+        }
+    }
+}
+
 impl<T: fmt::Display> fmt::Display for Interval<T> {
     /// Formats the interval as a string in the form `[start, end)`.
     ///

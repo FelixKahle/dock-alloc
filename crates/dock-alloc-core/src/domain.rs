@@ -77,6 +77,25 @@ use std::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TimePoint<T: PrimInt>(T);
 
+impl<T: PrimInt> Default for TimePoint<T> {
+    /// Creates a default `TimePoint` with a value of zero.
+    ///
+    /// This is useful for initializing a `TimePoint` to a known state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimePoint;
+    ///
+    /// let tp: TimePoint<i32> = TimePoint::default();
+    /// assert_eq!(tp.value(), 0);
+    /// ```
+    #[inline]
+    fn default() -> Self {
+        TimePoint(T::zero())
+    }
+}
+
 impl<T: PrimInt + Display> Display for TimePoint<T> {
     /// Formats the `TimePoint` as `TimePoint(value)`.
     ///
