@@ -24,5 +24,5 @@ pub mod domain;
 pub mod lens;
 pub mod model_access;
 pub mod occ;
-pub mod plan;
 pub mod quay;
+pub mod search;

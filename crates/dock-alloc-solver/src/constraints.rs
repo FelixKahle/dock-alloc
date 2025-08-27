@@ -20,37 +20,31 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use crate::model_access::ModelAccess;
-use crate::occ::BerthOccupancy;
-use crate::quay::Quay;
 use dock_alloc_core::domain::{SpaceInterval, TimeInterval};
 use dock_alloc_model::RequestId;
 use num_traits::{PrimInt, Signed};
-use std::marker::PhantomData;
 
-pub struct ConstraintsView<
-    'a,
+pub struct ConstraintsView<'a, T, C, M>
+where
     T: PrimInt + Signed,
-    Q: Quay,
-    M: ModelAccess<T, C>,
     C: PrimInt + Signed,
-> {
-    pub berth: &'a BerthOccupancy<T, Q>,
-    pub model: &'a M,
-    _phantom: PhantomData<C>,
+    M: ModelAccess<T, C>,
+{
+    model: &'a M,
+    _phantom: std::marker::PhantomData<(T, C)>,
 }
 
-impl<'a, T: PrimInt + Signed, Q, M, C: PrimInt + Signed> ConstraintsView<'a, T, Q, M, C>
+impl<'a, T, C, M> ConstraintsView<'a, T, C, M>
 where
-    T: Copy + Ord,
-    Q: Quay,
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
     M: ModelAccess<T, C>,
 {
     #[inline]
-    pub fn new(berth: &'a BerthOccupancy<T, Q>, model: &'a M) -> Self {
+    pub fn new(model: &'a M) -> Self {
         Self {
-            berth,
             model,
-            _phantom: PhantomData,
+            _phantom: std::marker::PhantomData,
         }
     }
 

@@ -83,26 +83,41 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> InMemoryModel<T, C> {
     pub fn request_len(&self, id: RequestId) -> SpaceLength {
         self.request(id).length()
     }
+
     #[inline]
     pub fn request_proc(&self, id: RequestId) -> TimeDelta<T> {
         self.request(id).processing_duration()
     }
+
     #[inline]
     pub fn request_arrival(&self, id: RequestId) -> TimePoint<T> {
         self.request(id).arrival_time()
     }
 }
 
+impl<T: PrimInt + Signed, C: PrimInt + Signed> From<&Problem<T, C>> for InMemoryModel<T, C> {
+    fn from(problem: &Problem<T, C>) -> Self {
+        Self::from_problem(problem)
+    }
+}
+
 impl<T: PrimInt + Signed, C: PrimInt + Signed> ModelAccess<T, C> for InMemoryModel<T, C> {
+    #[inline]
     fn request(&self, id: RequestId) -> &Request<T, C> {
         &self.requests[self.idx(id)]
     }
+
+    #[inline]
     fn requests(&self) -> &[Request<T, C>] {
         &self.requests
     }
+
+    #[inline]
     fn assignment(&self, id: RequestId) -> Option<&Assignment<T, C>> {
         self.assigns[self.idx(id)].as_ref()
     }
+
+    #[inline]
     fn is_locked(&self, id: RequestId) -> bool {
         self.locked[self.idx(id)]
     }
@@ -113,6 +128,7 @@ where
     T: num_traits::PrimInt + num_traits::Signed,
     C: num_traits::PrimInt + num_traits::Signed,
 {
+    #[inline]
     fn set_assignment(
         &mut self,
         id: RequestId,
@@ -123,10 +139,14 @@ where
         let r = self.requests[idx];
         self.assigns[idx] = Some(Assignment::new(r, start_pos, start_time));
     }
+
+    #[inline]
     fn clear_assignment(&mut self, id: RequestId) {
         let idx = self.idx(id);
         self.assigns[idx] = None;
     }
+
+    #[inline]
     fn set_locked(&mut self, id: RequestId, locked: bool) {
         let idx = self.idx(id);
         self.locked[idx] = locked;

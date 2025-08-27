@@ -24,11 +24,6 @@ use dock_alloc_core::domain::{SpaceInterval, SpaceLength, TimeDelta, TimeInterva
 use num_traits::{PrimInt, Signed, Zero};
 use std::collections::BTreeMap;
 
-/// A collection of sorted, non-overlapping, and coalesced space intervals.
-///
-/// Invariants:
-/// - Sorted by `start()`
-/// - Non-overlapping and non-touching (adjacent merged)
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SpaceIntervalSet {
     intervals: Vec<SpaceInterval>,
@@ -55,15 +50,6 @@ impl SpaceIntervalSet {
             Self::coalesce_in_place(&mut intervals);
         }
         Self { intervals }
-    }
-
-    #[inline]
-    pub fn from_iter<I: IntoIterator<Item = SpaceInterval>>(iter: I) -> Self {
-        let mut v: Vec<SpaceInterval> = iter.into_iter().collect();
-        if !v.is_empty() {
-            Self::coalesce_in_place(&mut v);
-        }
-        Self { intervals: v }
     }
 
     #[inline]
@@ -161,12 +147,11 @@ impl SpaceIntervalSet {
             Ok(i) | Err(i) => i,
         };
 
-        let mut out = Self::with_capacity(/* rough upper bound */ 4.min(a.len()));
+        let mut out = Self::with_capacity(4.min(a.len()));
         while i < a.len() && a[i].start() < bounds.end() {
             let s = core::cmp::max(a[i].start(), bounds.start());
             let e = core::cmp::min(a[i].end(), bounds.end());
             if s < e {
-                // safe to push directly: inputs are disjoint → outputs are disjoint
                 out.intervals.push(SpaceInterval::new(s, e));
             }
             i += 1;
@@ -378,11 +363,11 @@ impl SpaceIntervalSet {
 
     #[inline]
     fn push_and_merge(vec: &mut Vec<SpaceInterval>, run: SpaceInterval) {
-        if let Some(last) = vec.last_mut() {
-            if last.end() >= run.start() {
-                *last = SpaceInterval::new(last.start(), last.end().max(run.end()));
-                return;
-            }
+        if let Some(last) = vec.last_mut()
+            && last.end() >= run.start()
+        {
+            *last = SpaceInterval::new(last.start(), last.end().max(run.end()));
+            return;
         }
         vec.push(run);
     }
@@ -397,6 +382,16 @@ impl SpaceIntervalSet {
     #[cfg(not(debug_assertions))]
     fn is_sorted_non_overlapping(_v: &[SpaceInterval]) -> bool {
         true
+    }
+}
+
+impl FromIterator<SpaceInterval> for SpaceIntervalSet {
+    fn from_iter<I: IntoIterator<Item = SpaceInterval>>(iter: I) -> Self {
+        let mut v: Vec<SpaceInterval> = iter.into_iter().collect();
+        if !v.is_empty() {
+            Self::coalesce_in_place(&mut v);
+        }
+        Self { intervals: v }
     }
 }
 
@@ -452,7 +447,7 @@ impl<T: PrimInt + Signed> BerthOccupancyOverlay<T> {
         }
         self.free_by_time
             .entry(time)
-            .or_insert_with(SpaceIntervalSet::new)
+            .or_default()
             .push_coalesced(space);
     }
 
@@ -463,7 +458,7 @@ impl<T: PrimInt + Signed> BerthOccupancyOverlay<T> {
         }
         self.occupied_by_time
             .entry(time)
-            .or_insert_with(SpaceIntervalSet::new)
+            .or_default()
             .push_coalesced(space);
     }
 
@@ -616,10 +611,10 @@ where
         for &key in &self.slice_keys {
             let q = self.berth.quay_at(key);
 
-            if let Some(ov) = overlay {
-                if ov.occupied_overlaps_at(key, space) {
-                    return false;
-                }
+            if let Some(ov) = overlay
+                && ov.occupied_overlaps_at(key, space)
+            {
+                return false;
             }
 
             if q.check_free(space) {

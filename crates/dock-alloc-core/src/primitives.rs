@@ -356,6 +356,67 @@ impl<T> Interval<T> {
         self.clamp(other)
     }
 
+    /// Returns the union of this interval with another interval, if they overlap or are adjacent.
+    ///
+    /// This method returns an `Option<Interval<T>>` that represents the union of the two intervals.
+    /// If the intervals do not overlap or are not adjacent, it returns `None`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::primitives::Interval;
+    ///
+    /// let a = Interval::new(1, 5);
+    /// let b = Interval::new(4, 7);
+    /// assert_eq!(a.union(&b), Some(Interval::new(1, 7))); // union exists
+    /// let c = Interval::new(6, 8);
+    /// assert_eq!(a.union(&c), None); // no union
+    /// let d = Interval::new(5, 10);
+    /// assert_eq!(a.union(&d), Some(Interval::new(1, 10))); // adjacent intervals
+    /// let e = Interval::new(1, 5);
+    /// assert_eq!(a.union(&e), Some(Interval::new(1, 5))); // union with itself
+    /// ```
+    #[inline]
+    pub fn union(&self, other: &Self) -> Option<Self>
+    where
+        T: PartialOrd + Copy,
+    {
+        // If exactly one side is empty, return the non-empty interval.
+        // If both are empty, fall through to the existing overlap/adjacency checks
+        // to preserve previous semantics (only unify if they coincide/are adjacent).
+        if self.is_empty() && !other.is_empty() {
+            return Some(Self {
+                start_inclusive: other.start_inclusive,
+                end_exclusive: other.end_exclusive,
+            });
+        }
+        if other.is_empty() && !self.is_empty() {
+            return Some(Self {
+                start_inclusive: self.start_inclusive,
+                end_exclusive: self.end_exclusive,
+            });
+        }
+
+        if self.intersects(other) || self.end() == other.start() || other.end() == self.start() {
+            let start = if self.start_inclusive < other.start_inclusive {
+                self.start_inclusive
+            } else {
+                other.start_inclusive
+            };
+            let end = if self.end_exclusive > other.end_exclusive {
+                self.end_exclusive
+            } else {
+                other.end_exclusive
+            };
+            Some(Self {
+                start_inclusive: start,
+                end_exclusive: end,
+            })
+        } else {
+            None
+        }
+    }
+
     /// Clamps this interval to the bounds of another interval.
     ///
     /// This method returns an `Option<Interval<T>>` that represents the intersection of the two intervals.
@@ -933,6 +994,58 @@ mod tests {
         let i = Interval::new(1i32, 5i32);
         let v: Vec<_> = i.iter(1).collect();
         assert_eq!(v, vec![1, 2, 3, 4]); // half-open
+    }
+
+    #[test]
+    fn test_union_overlap_merges() {
+        let a = Interval::new(1i32, 5i32);
+        let b = Interval::new(3i32, 8i32);
+        assert_eq!(a.union(&b), Some(Interval::new(1, 8)));
+        assert_eq!(b.union(&a), Some(Interval::new(1, 8)));
+    }
+
+    #[test]
+    fn test_union_adjacent_merges_half_open() {
+        let a = Interval::new(1i32, 5i32);
+        let b = Interval::new(5i32, 7i32);
+        // Adjacent half-open intervals should coalesce
+        assert_eq!(a.union(&b), Some(Interval::new(1, 7)));
+        assert_eq!(b.union(&a), Some(Interval::new(1, 7)));
+    }
+
+    #[test]
+    fn test_union_disjoint_returns_none() {
+        let a = Interval::new(1i32, 3i32);
+        let b = Interval::new(4i32, 6i32);
+        assert_eq!(a.union(&b), None);
+        assert_eq!(b.union(&a), None);
+    }
+
+    #[test]
+    fn test_union_with_empty_returns_other() {
+        let empty = Interval::new(2i32, 2i32);
+        let non_empty = Interval::new(1i32, 3i32);
+        // Empty behaves as identity for union
+        assert_eq!(empty.union(&non_empty), Some(non_empty));
+        assert_eq!(non_empty.union(&empty), Some(non_empty));
+    }
+
+    #[test]
+    fn test_union_both_empty_same_point_returns_empty() {
+        let a = Interval::new(5i32, 5i32);
+        let b = Interval::new(5i32, 5i32);
+        // Both empty at same anchor coalesce to the same empty interval
+        assert_eq!(a.union(&b), Some(Interval::new(5, 5)));
+        assert_eq!(b.union(&a), Some(Interval::new(5, 5)));
+    }
+
+    #[test]
+    fn test_union_both_empty_different_points_returns_none() {
+        let a = Interval::new(5i32, 5i32);
+        let b = Interval::new(6i32, 6i32);
+        // Disjoint empties cannot be unified
+        assert_eq!(a.union(&b), None);
+        assert_eq!(b.union(&a), None);
     }
 
     #[test]
