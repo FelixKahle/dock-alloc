@@ -19,10 +19,8 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-pub mod constraints;
 pub mod domain;
 pub mod lens;
 pub mod occ;
 pub mod quay;
-pub mod scheduling_read;
 pub mod search;

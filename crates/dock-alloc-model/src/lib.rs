@@ -61,11 +61,7 @@ use dock_alloc_core::domain::{
 };
 use num_traits::{PrimInt, Signed};
 use std::fmt::Display;
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-    hash::Hash,
-};
+use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
 /// Unique identifier for a request.
 ///
@@ -1063,7 +1059,7 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    entries: HashSet<ProblemEntry<T, C>>,
+    entries: HashMap<RequestId, ProblemEntry<T, C>>,
     quay_length: SpaceLength,
 }
 
@@ -1073,93 +1069,27 @@ where
     C: PrimInt + Signed,
 {
     /// Creates a new `Problem` instance with the provided entries and quay length.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_core::domain::{SpaceLength, SpacePosition, TimePoint, TimeDelta, TimeInterval, SpaceInterval, Cost};
-    /// use dock_alloc_model::{Request, RequestId, ProblemEntry, Problem};
-    /// use std::collections::HashSet;
-    ///
-    /// let req = Request::new(
-    ///     RequestId::new(1),
-    ///     SpaceLength::new(100),
-    ///     TimeDelta::new(10),
-    ///     SpacePosition::new(50),
-    ///     Cost::new(5),
-    ///     Cost::new(2),
-    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(100)),
-    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(200)),
-    /// );
-    /// let entry = ProblemEntry::Unassigned(req);
-    /// let mut entries = HashSet::new();
-    /// entries.insert(entry);
-    /// let problem = Problem::new(entries, SpaceLength::new(200));
-    /// assert_eq!(problem.quay_length(), SpaceLength::new(200));
-    /// ```
     #[inline]
-    pub fn new(entries: HashSet<ProblemEntry<T, C>>, quay_length: SpaceLength) -> Self {
+    fn new(entries: HashMap<RequestId, ProblemEntry<T, C>>, quay_length: SpaceLength) -> Self {
         Problem {
             entries,
             quay_length,
         }
     }
 
-    /// Returns a reference to the set of problem entries.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_core::domain::{SpaceLength, SpacePosition, TimePoint, TimeDelta, TimeInterval, SpaceInterval, Cost};
-    /// use dock_alloc_model::{Request, RequestId, ProblemEntry, Problem};
-    /// use std::collections::HashSet;
-    ///
-    /// let req = Request::new(
-    ///     RequestId::new(1),
-    ///     SpaceLength::new(100),
-    ///     TimeDelta::new(10),
-    ///     SpacePosition::new(50),
-    ///     Cost::new(5),
-    ///     Cost::new(2),
-    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(100)),
-    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(200)),
-    /// );
-    /// let entry = ProblemEntry::Unassigned(req);
-    /// let mut entries = HashSet::new();
-    /// entries.insert(entry);
-    /// let problem = Problem::new(entries.clone(), SpaceLength::new(200));
-    /// assert_eq!(problem.entries(), &entries);
-    /// ```
+    /// Returns a reference to the entries in the problem.
     #[inline]
-    pub fn entries(&self) -> &HashSet<ProblemEntry<T, C>> {
+    pub fn entries(&self) -> &HashMap<RequestId, ProblemEntry<T, C>> {
         &self.entries
     }
 
+    /// Returns a reference to the problem entry for the given request ID, if it exists.
+    #[inline]
+    pub fn entry(&self, id: RequestId) -> Option<&ProblemEntry<T, C>> {
+        self.entries.get(&id)
+    }
+
     /// Returns the length of the quay.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_core::domain::{SpaceLength, SpacePosition, TimePoint, TimeDelta, TimeInterval, SpaceInterval, Cost};
-    /// use dock_alloc_model::{Request, RequestId, ProblemEntry, Problem};
-    /// use std::collections::HashSet;
-    ///
-    /// let req = Request::new(
-    ///     RequestId::new(1),
-    ///     SpaceLength::new(100),
-    ///     TimeDelta::new(10),
-    ///     SpacePosition::new(50),
-    ///     Cost::new(5),
-    ///     Cost::new(2),
-    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(100)),
-    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(200)),
-    /// );
-    /// let entry = ProblemEntry::Unassigned(req);
-    /// let mut entries = HashSet::new();
-    /// entries.insert(entry);
-    /// let problem = Problem::new(entries, SpaceLength::new(200));
-    /// assert_eq!(problem.quay_length(), SpaceLength::new(200));
-    /// ```
     #[inline]
     pub fn quay_length(&self) -> SpaceLength {
         self.quay_length
@@ -1167,6 +1097,56 @@ where
 }
 
 pub type BerthAllocationProblem = Problem<i64, i64>;
+
+pub struct ProblemBuilder<T = i64, C = i64>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    entries: HashMap<RequestId, ProblemEntry<T, C>>,
+    quay_length: SpaceLength,
+}
+
+impl<T, C> ProblemBuilder<T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    /// Creates a new `ProblemBuilder` instance with the specified quay length.
+    pub fn new(quay_length: SpaceLength) -> Self {
+        Self {
+            entries: HashMap::new(),
+            quay_length,
+        }
+    }
+
+    /// Sets the quay length for the problem.
+    pub fn quay_length(&mut self, length: SpaceLength) -> &mut Self {
+        self.quay_length = length;
+        self
+    }
+
+    /// Adds an unassigned request to the problem.
+    pub fn add_unassigned_request(&mut self, request: Request<T, C>) -> &mut Self {
+        self.entries
+            .insert(request.id(), ProblemEntry::Unassigned(request));
+        self
+    }
+
+    /// Adds a pre-assigned assignment to the problem.
+    pub fn add_preassigned(&mut self, assignment: Assignment<T, C>) -> &mut Self {
+        self.entries.insert(
+            assignment.request().id(),
+            ProblemEntry::PreAssigned(assignment),
+        );
+        self
+    }
+
+    /// Builds and returns the `Problem` instance.
+    pub fn build(&self) -> Problem<T, C> {
+        Problem::new(self.entries.clone(), self.quay_length)
+    }
+}
 
 /// Statistics about a solution to the berth allocation problem.
 ///

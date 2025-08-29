@@ -60,18 +60,22 @@ impl SpaceIntervalSet {
     pub fn is_empty(&self) -> bool {
         self.intervals.is_empty()
     }
+
     #[inline]
     pub fn as_slice(&self) -> &[SpaceInterval] {
         &self.intervals
     }
+
     #[inline]
     pub fn clear(&mut self) {
         self.intervals.clear()
     }
+
     #[inline]
     pub fn reserve(&mut self, additional: usize) {
         self.intervals.reserve(additional)
     }
+
     #[inline]
     pub fn into_vec(self) -> Vec<SpaceInterval> {
         self.intervals
@@ -166,7 +170,6 @@ impl SpaceIntervalSet {
         result_set
     }
 
-    /// Insert `new_interval` while maintaining invariants (O(log n + k)).
     #[inline]
     pub fn push_coalesced(&mut self, new_interval: SpaceInterval) {
         if new_interval.start() >= new_interval.end() {
@@ -644,6 +647,7 @@ where
     pub fn slice_keys(&self) -> &[TimePoint<T>] {
         &self.slice_keys
     }
+
     #[inline]
     pub fn berth(&self) -> &BerthOccupancy<T, Q> {
         self.berth
@@ -766,7 +770,7 @@ where
         overlay: Option<&'a BerthOccupancyOverlay<T>>,
     ) -> Self
     where
-        Q: crate::quay::Quay + Clone + PartialEq,
+        Q: Quay + Clone + PartialEq,
         BerthOccupancy<T, Q>: TimelineSlices<T, Q>,
     {
         let mut all_slice_keys = Vec::<TimePoint<T>>::new();
@@ -895,18 +899,22 @@ mod tests {
     fn pos(x: usize) -> SpacePosition {
         SpacePosition::new(x)
     }
+
     #[inline]
     fn len(x: usize) -> SpaceLength {
         SpaceLength::new(x)
     }
+
     #[inline]
     fn si(a: usize, b: usize) -> SpaceInterval {
         SpaceInterval::new(pos(a), pos(b))
     }
+
     #[inline]
     fn tp(t: T) -> TimePoint<T> {
         TimePoint::new(t)
     }
+
     #[inline]
     fn ti(a: T, b: T) -> TimeInterval<T> {
         TimeInterval::new(tp(a), tp(b))
