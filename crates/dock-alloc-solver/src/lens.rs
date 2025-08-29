@@ -560,7 +560,7 @@ impl<T: PrimInt + Signed> BerthOccupancyOverlay<T> {
         T: Zero + Copy,
         Q: QuayRead + QuayWrite + Clone + PartialEq,
     {
-        if let Some(predecessor_key) = berth.predecessor_key(time_window.start()) {
+        if let Some(predecessor_key) = berth.slice_predecessor_key(time_window.start()) {
             self.add_occupy(predecessor_key, space_interval);
         }
         for key in berth.keys_in_open_iter(time_window.start(), time_window.end()) {
@@ -577,49 +577,12 @@ impl<T: PrimInt + Signed> BerthOccupancyOverlay<T> {
         T: Zero + Copy,
         Q: QuayRead + QuayWrite + Clone + PartialEq,
     {
-        if let Some(predecessor_key) = berth.predecessor_key(time_window.start()) {
+        if let Some(predecessor_key) = berth.slice_predecessor_key(time_window.start()) {
             self.add_free(predecessor_key, space_interval);
         }
         for key in berth.keys_in_open_iter(time_window.start(), time_window.end()) {
             self.add_free(key, space_interval);
         }
-    }
-}
-
-pub trait TimelineSlices<T: PrimInt + Signed, Q: QuayRead> {
-    type KeyIter<'a>: Iterator<Item = TimePoint<T>>
-    where
-        Self: 'a;
-    fn predecessor_key(&self, time_point: TimePoint<T>) -> Option<TimePoint<T>>;
-    fn keys_in_open_iter(&self, start: TimePoint<T>, end: TimePoint<T>) -> Self::KeyIter<'_>;
-    fn quay_at(&self, key: TimePoint<T>) -> &Q;
-}
-
-impl<T, Q> TimelineSlices<T, Q> for BerthOccupancy<T, Q>
-where
-    T: PrimInt + Signed + Zero + Copy,
-    Q: QuayRead + QuayWrite + Clone + PartialEq,
-{
-    type KeyIter<'a>
-        = std::vec::IntoIter<TimePoint<T>>
-    where
-        Self: 'a;
-
-    #[inline]
-    fn predecessor_key(&self, time_point: TimePoint<T>) -> Option<TimePoint<T>> {
-        self.slice_predecessor_key(time_point)
-    }
-
-    #[inline]
-    fn keys_in_open_iter(&self, start: TimePoint<T>, end: TimePoint<T>) -> Self::KeyIter<'_> {
-        let mut keys_vec = Vec::new();
-        self.slice_keys_in_open(start, end, &mut keys_vec);
-        keys_vec.into_iter()
-    }
-
-    #[inline]
-    fn quay_at(&self, key: TimePoint<T>) -> &Q {
-        self.snapshot_at(key).expect("slice key must exist")
     }
 }
 
@@ -636,7 +599,7 @@ where
 {
     pub fn new(berth: &'a BerthOccupancy<T, Q>, time_window: TimeInterval<T>) -> Self {
         let mut slice_keys = Vec::<TimePoint<T>>::new();
-        if let Some(predecessor_key) = berth.predecessor_key(time_window.start()) {
+        if let Some(predecessor_key) = berth.slice_predecessor_key(time_window.start()) {
             slice_keys.push(predecessor_key);
         }
         slice_keys.extend(berth.keys_in_open_iter(time_window.start(), time_window.end()));
@@ -659,7 +622,7 @@ where
         overlay: Option<&BerthOccupancyOverlay<T>>,
     ) -> bool {
         for &key in &self.slice_keys {
-            let quay_snapshot = self.berth.quay_at(key);
+            let quay_snapshot = self.berth.snapshot_at(key).expect("slice key must exist");
 
             if let Some(overlay_ref) = overlay
                 && overlay_ref.occupied_overlaps_at(key, space_interval)
@@ -705,7 +668,7 @@ where
         let mut temp_set = SpaceIntervalSet::new();
 
         for &key in &self.slice_keys {
-            let quay_snapshot = self.berth.quay_at(key);
+            let quay_snapshot = self.berth.snapshot_at(key).expect("slice key must exist");
 
             let base_free_intervals = if overlay.is_some() {
                 SpaceIntervalSet::from_iter(
@@ -771,17 +734,16 @@ where
     ) -> Self
     where
         Q: Quay + Clone + PartialEq,
-        BerthOccupancy<T, Q>: TimelineSlices<T, Q>,
     {
         let mut all_slice_keys = Vec::<TimePoint<T>>::new();
-        if let Some(predecessor_key) = berth.predecessor_key(search_time.start()) {
+        if let Some(predecessor_key) = berth.slice_predecessor_key(search_time.start()) {
             all_slice_keys.push(predecessor_key);
         }
         all_slice_keys.extend(berth.keys_in_open_iter(search_time.start(), search_time.end()));
 
         let mut free_runs_per_key: Vec<SpaceIntervalSet> = Vec::with_capacity(all_slice_keys.len());
         for &key in &all_slice_keys {
-            let quay_snapshot = berth.quay_at(key);
+            let quay_snapshot = berth.snapshot_at(key).expect("slice key must exist");
             let base_free_intervals = if overlay.is_some() {
                 SpaceIntervalSet::from_iter(
                     quay_snapshot.iter_free_intervals(SpaceLength::new(1), search_space),

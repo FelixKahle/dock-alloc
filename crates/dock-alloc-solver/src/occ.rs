@@ -355,6 +355,19 @@ where
             .range((Included(start_time), Excluded(end_time)))
             .map(|(time_point, _)| *time_point)
     }
+
+    pub fn keys_in_open_iter(
+        &self,
+        start_time: TimePoint<T>,
+        end_time: TimePoint<T>,
+    ) -> impl Iterator<Item = TimePoint<T>> + '_
+    where
+        T: PrimInt + Signed,
+    {
+        self.timeline
+            .range((Excluded(start_time), Excluded(end_time)))
+            .map(|(time_point, _)| *time_point)
+    }
 }
 
 impl<T, C, Q> From<&Problem<T, C>> for BerthOccupancy<T, Q>
@@ -365,19 +378,18 @@ where
 {
     fn from(problem: &Problem<T, C>) -> Self {
         let mut berth_occupancy = BerthOccupancy::<T, Q>::new(problem.quay_length());
-        for entry in problem.entries().values() {
-            if let dock_alloc_model::ProblemEntry::PreAssigned(asg) = *entry {
-                let req = asg.request();
-                let len = req.length();
-                let proc = req.processing_duration();
-                let t0 = asg.start_time();
-                let t1 = t0 + proc;
-                let time = TimeInterval::new(t0, t1);
-                let s0 = asg.start_position();
-                let s1 = SpacePosition::new(s0.value() + len.value());
-                let space = SpaceInterval::new(s0, s1);
-                berth_occupancy.occupy(time, space);
-            }
+        for fixed in problem.preassigned().values() {
+            let a = fixed.assignment();
+            let req = a.request();
+            let len = req.length();
+            let proc = req.processing_duration();
+            let t0 = a.start_time();
+            let t1 = t0 + proc;
+            let time = TimeInterval::new(t0, t1);
+            let s0 = a.start_position();
+            let s1 = SpacePosition::new(s0.value() + len.value());
+            let space = SpaceInterval::new(s0, s1);
+            berth_occupancy.occupy(time, space);
         }
         berth_occupancy
     }

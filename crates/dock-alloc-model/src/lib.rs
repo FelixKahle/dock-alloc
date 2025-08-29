@@ -513,6 +513,7 @@ where
         self.start_time
     }
 }
+
 impl<T> Display for Assignment<T>
 where
     T: PrimInt + Signed + Display,
@@ -528,31 +529,41 @@ where
     }
 }
 
-/// An entry in the problem, which can be either an unassigned
-/// request or a pre-assigned assignment.
-///
-/// This enum encapsulates the two possible states of a problem entry,
-/// either being an unassigned request or a pre-assigned assignment.
-/// The solver must respect pre-assigned assignments and only assign unassigned requests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum ProblemEntry<T = i64, C = i64>
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Tentative<T = i64, C = i64>(Assignment<T, C>)
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed;
+
+impl<T, C> Tentative<T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    Unassigned(Request<T, C>),
-    PreAssigned(Assignment<T, C>),
+    pub fn new(a: Assignment<T, C>) -> Self {
+        Self(a)
+    }
+    pub fn assignment(&self) -> &Assignment<T, C> {
+        &self.0
+    }
 }
 
-impl<T> Display for ProblemEntry<T>
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Fixed<T = i64, C = i64>(Assignment<T, C>)
 where
-    T: PrimInt + Signed + Display,
+    T: PrimInt + Signed,
+    C: PrimInt + Signed;
+
+impl<T, C> Fixed<T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProblemEntry::Unassigned(request) => write!(f, "Unassigned({})", request),
-            ProblemEntry::PreAssigned(assignment) => write!(f, "PreAssigned({})", assignment),
-        }
+    pub fn new(a: Assignment<T, C>) -> Self {
+        Self(a)
+    }
+    pub fn assignment(&self) -> &Assignment<T, C> {
+        &self.0
     }
 }
 
@@ -747,16 +758,16 @@ impl<T: PrimInt + Signed + Display + Debug> std::error::Error for ProblemBuildEr
 
 /// A berth allocation problem instance.
 ///
-/// This struct encapsulates the details of a berth allocation problem,
-/// including the set of problem entries (requests and pre-assigned assignments)
-/// and the length of the quay.
+/// Internally stores **unassigned** requests and **preassigned** (fixed) assignments
+/// in separate maps to make invariants explicit.
 #[derive(Debug, Clone)]
 pub struct Problem<T = i64, C = i64>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    entries: HashMap<RequestId, ProblemEntry<T, C>>,
+    unassigned: HashMap<RequestId, Request<T, C>>,
+    preassigned: HashMap<RequestId, Fixed<T, C>>,
     quay_length: SpaceLength,
 }
 
@@ -766,26 +777,36 @@ where
     C: PrimInt + Signed,
 {
     #[inline]
-    fn new(entries: HashMap<RequestId, ProblemEntry<T, C>>, quay_length: SpaceLength) -> Self {
-        Problem {
-            entries,
+    fn new(
+        unassigned: HashMap<RequestId, Request<T, C>>,
+        preassigned: HashMap<RequestId, Fixed<T, C>>,
+        quay_length: SpaceLength,
+    ) -> Self {
+        Self {
+            unassigned,
+            preassigned,
             quay_length,
         }
     }
 
     #[inline]
-    pub fn entries(&self) -> &HashMap<RequestId, ProblemEntry<T, C>> {
-        &self.entries
+    pub fn unassigned(&self) -> &HashMap<RequestId, Request<T, C>> {
+        &self.unassigned
     }
 
     #[inline]
-    pub fn entry(&self, id: RequestId) -> Option<&ProblemEntry<T, C>> {
-        self.entries.get(&id)
+    pub fn preassigned(&self) -> &HashMap<RequestId, Fixed<T, C>> {
+        &self.preassigned
     }
 
     #[inline]
     pub fn quay_length(&self) -> SpaceLength {
         self.quay_length
+    }
+
+    #[inline]
+    pub fn total_requests(&self) -> usize {
+        self.unassigned.len() + self.preassigned.len()
     }
 }
 
@@ -796,7 +817,8 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    entries: HashMap<RequestId, ProblemEntry<T, C>>,
+    unassigned: HashMap<RequestId, Request<T, C>>,
+    preassigned: HashMap<RequestId, Fixed<T, C>>,
     quay_length: SpaceLength,
 }
 
@@ -807,7 +829,8 @@ where
 {
     pub fn new(quay_length: SpaceLength) -> Self {
         Self {
-            entries: HashMap::new(),
+            unassigned: HashMap::new(),
+            preassigned: HashMap::new(),
             quay_length,
         }
     }
@@ -822,10 +845,10 @@ where
         request: Request<T, C>,
     ) -> Result<&mut Self, ProblemBuildError<T>> {
         let id = request.id();
-        if self.entries.contains_key(&id) {
+        if self.unassigned.contains_key(&id) || self.preassigned.contains_key(&id) {
             return Err(ProblemBuildError::DuplicateRequestId(id));
         }
-        self.entries.insert(id, ProblemEntry::Unassigned(request));
+        self.unassigned.insert(id, request);
         Ok(self)
     }
 
@@ -840,16 +863,17 @@ where
 
     pub fn add_preassigned(
         &mut self,
-        assignment: Assignment<T, C>,
+        fixed: Fixed<T, C>,
     ) -> Result<&mut Self, ProblemBuildError<T>> {
-        let r = assignment.request();
+        let a = fixed.assignment();
+        let r = a.request();
         let id = r.id();
 
-        if self.entries.contains_key(&id) {
+        if self.unassigned.contains_key(&id) || self.preassigned.contains_key(&id) {
             return Err(ProblemBuildError::DuplicateRequestId(id));
         }
 
-        let (tspan, sspan) = Self::assignment_spans(&assignment);
+        let (tspan, sspan) = Self::assignment_spans(a);
         let tw = r.feasible_time_window();
         if !tw.contains_interval(&tspan) {
             return Err(ProblemBuildError::AssignmentOutsideTimeWindow(
@@ -870,24 +894,26 @@ where
             ));
         }
 
-        for entry in self.entries.values() {
-            if let ProblemEntry::PreAssigned(other) = *entry {
-                let (ot, os) = Self::assignment_spans(&other);
-                if tspan.intersects(&ot) && sspan.intersects(&os) {
-                    return Err(ProblemBuildError::PreassignedOverlap(
-                        PreassignedOverlapError::new(id, other.request().id()),
-                    ));
-                }
+        // Preassigned overlap check (only among fixed ones)
+        for (&other_id, other_fixed) in &self.preassigned {
+            let (ot, os) = Self::assignment_spans(other_fixed.assignment());
+            if tspan.intersects(&ot) && sspan.intersects(&os) {
+                return Err(ProblemBuildError::PreassignedOverlap(
+                    PreassignedOverlapError::new(id, other_id),
+                ));
             }
         }
 
-        self.entries
-            .insert(id, ProblemEntry::PreAssigned(assignment));
+        self.preassigned.insert(id, fixed);
         Ok(self)
     }
 
     pub fn build(&self) -> Problem<T, C> {
-        Problem::new(self.entries.clone(), self.quay_length)
+        Problem::new(
+            self.unassigned.clone(),
+            self.preassigned.clone(),
+            self.quay_length,
+        )
     }
 }
 
@@ -1037,8 +1063,8 @@ mod builder_tests {
         let r = req_ok(1, 4, 5, 10, 20, 0, 20);
         let a = Assignment::new(r, SpacePosition::new(0), TimePoint::new(16)); // [16,21) leaks past 20
         assert!(matches!(
-            b.add_preassigned(a),
-            Err(ProblemBuildError::AssignmentOutsideTimeWindow { .. })
+            b.add_preassigned(Fixed::new(a)),
+            Err(ProblemBuildError::AssignmentOutsideTimeWindow(_))
         ));
     }
 
@@ -1048,8 +1074,8 @@ mod builder_tests {
         let r = req_ok(1, 6, 2, 0, 10, 5, 12);
         let a = Assignment::new(r, SpacePosition::new(7), TimePoint::new(1)); // [7,13) leaks past 12
         assert!(matches!(
-            b.add_preassigned(a),
-            Err(ProblemBuildError::AssignmentOutsideSpaceWindow { .. })
+            b.add_preassigned(Fixed::new(a)),
+            Err(ProblemBuildError::AssignmentOutsideSpaceWindow(_))
         ));
     }
 
@@ -1059,8 +1085,8 @@ mod builder_tests {
         let r = req_ok(1, 6, 2, 0, 10, 0, 20);
         let a = Assignment::new(r, SpacePosition::new(6), TimePoint::new(1)); // [6,12) > quay 10
         assert!(matches!(
-            b.add_preassigned(a),
-            Err(ProblemBuildError::AssignmentExceedsQuay { .. })
+            b.add_preassigned(Fixed::new(a)),
+            Err(ProblemBuildError::AssignmentExceedsQuay(_))
         ));
     }
 
@@ -1069,16 +1095,16 @@ mod builder_tests {
         let mut b = ProblemBuilder::<i64, i64>::new(SpaceLength::new(20));
         let r1 = req_ok(1, 4, 5, 0, 20, 0, 20);
         let r2 = req_ok(2, 4, 5, 0, 20, 0, 20);
-        b.add_preassigned(Assignment::new(
+        b.add_preassigned(Fixed::new(Assignment::new(
             r1,
             SpacePosition::new(5),
             TimePoint::new(2),
-        ))
+        )))
         .unwrap(); // t[2,7), s[5,9)
         let a2 = Assignment::new(r2, SpacePosition::new(7), TimePoint::new(4)); // t[4,9), s[7,11) -> intersects both axes
         assert!(matches!(
-            b.add_preassigned(a2),
-            Err(ProblemBuildError::PreassignedOverlap { .. })
+            b.add_preassigned(Fixed::new(a2)),
+            Err(ProblemBuildError::PreassignedOverlap(_))
         ));
     }
 
@@ -1088,13 +1114,15 @@ mod builder_tests {
         let r1 = req_ok(1, 4, 3, 0, 10, 0, 20);
         let r2 = req_ok(2, 4, 3, 0, 10, 0, 20);
         b.add_unassigned_request(r1).unwrap();
-        b.add_preassigned(Assignment::new(
+        b.add_preassigned(Fixed::new(Assignment::new(
             r2,
             SpacePosition::new(10),
             TimePoint::new(0),
-        ))
+        )))
         .unwrap();
         let p = b.build();
-        assert_eq!(p.entries().len(), 2);
+        assert_eq!(p.total_requests(), 2);
+        assert_eq!(p.unassigned().len(), 1);
+        assert_eq!(p.preassigned().len(), 1);
     }
 }
