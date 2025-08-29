@@ -38,12 +38,17 @@ pub struct BerthOccupancyChangePayload<T: PrimInt + Signed> {
 }
 
 impl<T: PrimInt + Signed> BerthOccupancyChangePayload<T> {
+    #[inline]
     pub fn new(time: TimeInterval<T>, space: SpaceInterval) -> Self {
         Self { time, space }
     }
+
+    #[inline]
     pub fn time(&self) -> &TimeInterval<T> {
         &self.time
     }
+
+    #[inline]
     pub fn space(&self) -> &SpaceInterval {
         &self.space
     }
@@ -69,6 +74,7 @@ impl<T: PrimInt + Signed> From<(TimeInterval<T>, SpaceInterval)>
 impl<T: PrimInt + Signed> From<(&TimeInterval<T>, &SpaceInterval)>
     for BerthOccupancyChangePayload<T>
 {
+    #[inline]
     fn from(v: (&TimeInterval<T>, &SpaceInterval)) -> Self {
         Self::new(*v.0, *v.1)
     }
@@ -102,6 +108,7 @@ pub struct RequestEdit<T: PrimInt + Signed> {
     time: TimeInterval<T>,
     space: SpaceInterval,
 }
+
 impl<T: PrimInt + Signed> RequestEdit<T> {
     pub fn new(id: RequestId, time: TimeInterval<T>, space: SpaceInterval) -> Self {
         Self { id, time, space }
@@ -116,6 +123,7 @@ impl<T: PrimInt + Signed> RequestEdit<T> {
         self.space
     }
 }
+
 impl<T: PrimInt + Signed + Display> Display for RequestEdit<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -131,6 +139,7 @@ pub enum AssignEdit<T: PrimInt + Signed> {
     Set(RequestEdit<T>),
     Clear(RequestId),
 }
+
 impl<T: PrimInt + Signed> AssignEdit<T> {
     pub fn request_id(&self) -> RequestId {
         match self {
@@ -139,6 +148,7 @@ impl<T: PrimInt + Signed> AssignEdit<T> {
         }
     }
 }
+
 impl<T: PrimInt + Signed + Display> Display for AssignEdit<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -153,6 +163,7 @@ pub struct Footprint<T: PrimInt + Signed> {
     time: TimeInterval<T>,
     space: SpaceInterval,
 }
+
 impl<T: PrimInt + Signed> Default for Footprint<T> {
     fn default() -> Self {
         Self {
@@ -161,6 +172,7 @@ impl<T: PrimInt + Signed> Default for Footprint<T> {
         }
     }
 }
+
 impl<T: PrimInt + Signed> Footprint<T> {
     #[inline]
     fn new(time: TimeInterval<T>, space: SpaceInterval) -> Self {
@@ -190,6 +202,7 @@ fn time_hull<T: PrimInt + Signed>(a: &TimeInterval<T>, b: &TimeInterval<T>) -> T
     };
     TimeInterval::new(start, end)
 }
+
 #[inline]
 fn space_hull(a: &SpaceInterval, b: &SpaceInterval) -> SpaceInterval {
     let start = if a.start().value() <= b.start().value() {
@@ -215,11 +228,13 @@ impl<T: PrimInt + Signed> From<&[BerthOccupancyChangeOperation<T>]> for Footprin
             .unwrap_or_default()
     }
 }
+
 impl<T: PrimInt + Signed> From<&BerthOccupancyChangePayload<T>> for Footprint<T> {
     fn from(op: &BerthOccupancyChangePayload<T>) -> Self {
         Footprint::new(*op.time(), *op.space())
     }
 }
+
 impl<T: PrimInt + Signed> From<&BerthOccupancyChangeOperation<T>> for Footprint<T> {
     fn from(op: &BerthOccupancyChangeOperation<T>) -> Self {
         match op {
@@ -237,6 +252,7 @@ pub struct Plan<T: PrimInt + Signed> {
     version: Version,
     footprint: Footprint<T>,
 }
+
 impl<T: PrimInt + Signed> Plan<T> {
     pub fn new(
         operations: Vec<BerthOccupancyChangeOperation<T>>,
@@ -365,19 +381,15 @@ where
     }
 
     #[inline]
-    pub fn entry(&self, id: RequestId) -> Result<ProblemEntry<T, C>, PlanError> {
-        self.problem
-            .entries()
-            .get(&id)
-            .copied()
-            .ok_or(PlanError::UnknownRequest(id))
+    pub fn entry(&self, id: RequestId) -> Result<&ProblemEntry<T, C>, PlanError> {
+        self.problem.entry(id).ok_or(PlanError::UnknownRequest(id))
     }
 
     #[inline]
-    pub fn request(&self, id: RequestId) -> Result<Request<T, C>, PlanError> {
+    pub fn request(&self, id: RequestId) -> Result<&Request<T, C>, PlanError> {
         Ok(match self.entry(id)? {
             ProblemEntry::Unassigned(r) => r,
-            ProblemEntry::PreAssigned(a) => *a.request(),
+            ProblemEntry::PreAssigned(a) => a.request(),
         })
     }
 
@@ -385,7 +397,7 @@ where
     pub fn baseline_assignment(
         &self,
         id: RequestId,
-    ) -> Result<Option<Assignment<T, C>>, PlanError> {
+    ) -> Result<Option<&Assignment<T, C>>, PlanError> {
         Ok(match self.entry(id)? {
             ProblemEntry::Unassigned(_) => None,
             ProblemEntry::PreAssigned(a) => Some(a),
@@ -494,7 +506,6 @@ where
     }
 
     pub fn remove(&mut self, job: RequestId) -> Result<RemoveOutcome, PlanError> {
-        // idempotent
         if self
             .edits
             .iter()
@@ -727,6 +738,7 @@ mod tests {
             TimeInterval::new(TimePoint::new(t0), TimePoint::new(t1)),
             SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
         )
+        .unwrap()
     }
 
     fn mk_ctx<'a>(
@@ -735,8 +747,6 @@ mod tests {
     ) -> ProposeCtx<'a, i64, i64, BTreeMapQuay> {
         ProposeCtx::new(berth, problem)
     }
-
-    // ---------- tests ----------
 
     #[test]
     fn test_footprint_from_operations_hull() {
@@ -764,7 +774,7 @@ mod tests {
         let req = mk_req(1, 4, 3, 0, 10, 0, 20);
         let problem = {
             let mut pb = ProblemBuilder::new(quay_length);
-            pb.add_unassigned_request(req);
+            pb.add_unassigned_request(req).unwrap();
             pb.build()
         };
 
@@ -801,7 +811,7 @@ mod tests {
         let req = mk_req(1, 4, 3, 0, 20, 0, 20);
         let problem = {
             let mut pb = ProblemBuilder::new(quay_length);
-            pb.add_unassigned_request(req);
+            pb.add_unassigned_request(req).unwrap();
             pb.build()
         };
 
@@ -841,7 +851,7 @@ mod tests {
 
         let problem = {
             let mut pb = ProblemBuilder::new(quay_length);
-            pb.add_preassigned(asg); // treated as "locked"
+            pb.add_preassigned(asg).unwrap();
             pb.build()
         };
 
@@ -860,7 +870,7 @@ mod tests {
         let req = mk_req(1, 2, 1, 0, 10, 0, 10);
         let problem = {
             let mut pb = ProblemBuilder::new(quay_length);
-            pb.add_unassigned_request(req);
+            pb.add_unassigned_request(req).unwrap();
             pb.build()
         };
 
@@ -879,7 +889,7 @@ mod tests {
         let req = mk_req(1, 4, 3, 0, 10, 0, 12);
         let problem = {
             let mut pb = ProblemBuilder::new(quay_length);
-            pb.add_unassigned_request(req);
+            pb.add_unassigned_request(req).unwrap();
             pb.build()
         };
 
@@ -915,7 +925,7 @@ mod tests {
         let req = mk_req(1, 2, 2, 0, 10, 0, 10);
         let problem = {
             let mut pb = ProblemBuilder::new(quay_length);
-            pb.add_unassigned_request(req);
+            pb.add_unassigned_request(req).unwrap();
             pb.build()
         };
 
@@ -955,7 +965,7 @@ mod tests {
         let req = mk_req(1, 2, 1, 0, 10, 0, 10);
         let problem = {
             let mut pb = ProblemBuilder::new(quay_length);
-            pb.add_unassigned_request(req);
+            pb.add_unassigned_request(req).unwrap();
             pb.build()
         };
 
@@ -976,7 +986,7 @@ mod tests {
         let req = mk_req(1, 4, 3, 0, 50, 0, 20);
         let problem = {
             let mut pb = ProblemBuilder::new(quay_length);
-            pb.add_unassigned_request(req);
+            pb.add_unassigned_request(req).unwrap();
             pb.build()
         };
 

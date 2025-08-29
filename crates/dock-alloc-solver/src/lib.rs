@@ -20,6 +20,7 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 pub mod domain;
+pub mod framework;
 pub mod lens;
 pub mod occ;
 pub mod quay;

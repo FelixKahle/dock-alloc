@@ -19,10 +19,11 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use crate::quay::{QuayRead, QuayWrite};
+use crate::quay::{Quay, QuayRead, QuayWrite};
 use dock_alloc_core::domain::{
     SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
 };
+use dock_alloc_model::Problem;
 use num_traits::{PrimInt, Signed, Zero};
 use std::collections::BTreeMap;
 use std::ops::Bound::{Excluded, Included, Unbounded};
@@ -30,7 +31,7 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BerthOccupancy<T, Q>
 where
-    T: PrimInt + Signed + Zero + Copy,
+    T: PrimInt + Signed,
     Q: QuayRead + QuayWrite + Clone + PartialEq,
 {
     quay_length: SpaceLength,
@@ -39,7 +40,7 @@ where
 
 impl<T, Q> BerthOccupancy<T, Q>
 where
-    T: PrimInt + Signed + Zero + Copy,
+    T: PrimInt + Signed,
     Q: QuayRead + QuayWrite + Clone + PartialEq,
 {
     #[inline]
@@ -291,7 +292,7 @@ where
     #[inline]
     pub fn slice_predecessor_key(&self, time_point: TimePoint<T>) -> Option<TimePoint<T>>
     where
-        T: PrimInt + Signed + Zero + Copy,
+        T: PrimInt + Signed,
     {
         self.timeline
             .range(..=time_point)
@@ -306,7 +307,7 @@ where
         end_time: TimePoint<T>,
         out: &mut Vec<TimePoint<T>>,
     ) where
-        T: PrimInt + Signed + Zero + Copy,
+        T: PrimInt + Signed,
     {
         if start_time >= end_time {
             return;
@@ -326,7 +327,7 @@ where
         end_time: TimePoint<T>,
     ) -> impl Iterator<Item = TimePoint<T>> + '_
     where
-        T: PrimInt + Signed + Zero + Copy,
+        T: PrimInt + Signed,
     {
         let predecessor_iter = self
             .timeline
@@ -353,6 +354,32 @@ where
         self.timeline
             .range((Included(start_time), Excluded(end_time)))
             .map(|(time_point, _)| *time_point)
+    }
+}
+
+impl<T, C, Q> From<&Problem<T, C>> for BerthOccupancy<T, Q>
+where
+    T: PrimInt + Signed + Zero + Copy,
+    C: PrimInt + Signed + Zero + Copy,
+    Q: Quay,
+{
+    fn from(problem: &Problem<T, C>) -> Self {
+        let mut berth_occupancy = BerthOccupancy::<T, Q>::new(problem.quay_length());
+        for entry in problem.entries().values() {
+            if let dock_alloc_model::ProblemEntry::PreAssigned(asg) = *entry {
+                let req = asg.request();
+                let len = req.length();
+                let proc = req.processing_duration();
+                let t0 = asg.start_time();
+                let t1 = t0 + proc;
+                let time = TimeInterval::new(t0, t1);
+                let s0 = asg.start_position();
+                let s1 = SpacePosition::new(s0.value() + len.value());
+                let space = SpaceInterval::new(s0, s1);
+                berth_occupancy.occupy(time, space);
+            }
+        }
+        berth_occupancy
     }
 }
 
