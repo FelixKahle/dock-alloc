@@ -34,11 +34,6 @@ impl Version {
     pub fn value(self) -> u64 {
         self.0
     }
-
-    #[inline]
-    pub fn increment(&mut self) {
-        self.0 += 1;
-    }
 }
 
 impl Display for Version {

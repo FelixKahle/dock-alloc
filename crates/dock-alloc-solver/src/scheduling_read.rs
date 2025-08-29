@@ -19,9 +19,59 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use dock_alloc_core::domain::{SpaceLength, SpacePosition, TimeDelta, TimePoint};
+use dock_alloc_core::domain::{
+    SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
+};
 use dock_alloc_model::{Assignment, Problem, ProblemEntry, Request, RequestId};
 use num_traits::{PrimInt, Signed};
+use std::fmt::Display;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct AssignmentView<T: PrimInt + Signed> {
+    start_pos: SpacePosition,
+    start_time: TimePoint<T>,
+}
+
+impl<T: PrimInt + Signed + Display> Display for AssignmentView<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "AssignmentView(start_pos: {}, start_time: {})",
+            self.start_pos, self.start_time
+        )
+    }
+}
+
+impl<T: PrimInt + Signed> AssignmentView<T> {
+    #[inline]
+    pub fn new(start_pos: SpacePosition, start_time: TimePoint<T>) -> Self {
+        Self {
+            start_pos,
+            start_time,
+        }
+    }
+    #[inline]
+    pub fn start_pos(&self) -> SpacePosition {
+        self.start_pos
+    }
+    #[inline]
+    pub fn start_time(&self) -> TimePoint<T> {
+        self.start_time
+    }
+}
+
+pub trait SchedulingRead<T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    fn request_length(&self, id: RequestId) -> SpaceLength;
+    fn request_processing_duration(&self, id: RequestId) -> TimeDelta<T>;
+    fn request_feasible_time_window(&self, id: RequestId) -> TimeInterval<T>;
+    fn request_feasible_space_window(&self, id: RequestId) -> SpaceInterval;
+    fn current_assignment_of_request(&self, id: RequestId) -> Option<AssignmentView<T>>;
+    fn is_request_locked(&self, id: RequestId) -> bool;
+}
 
 pub trait ModelAccess<T: PrimInt + Signed, C: PrimInt + Signed> {
     fn request(&self, id: RequestId) -> &Request<T, C>;
@@ -52,8 +102,10 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> InMemoryModel<T, C> {
             }
         }
         requests.sort_by_key(|r| r.id());
+
         let mut assigns = vec![None; requests.len()];
         let mut locked = vec![false; requests.len()];
+
         for entry in problem.entries() {
             if let ProblemEntry::PreAssigned(a) = *entry {
                 let r = *a.request();
@@ -80,24 +132,48 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> InMemoryModel<T, C> {
     }
 
     #[inline]
-    pub fn request_len(&self, id: RequestId) -> SpaceLength {
-        self.request(id).length()
-    }
-
-    #[inline]
-    pub fn request_proc(&self, id: RequestId) -> TimeDelta<T> {
-        self.request(id).processing_duration()
-    }
-
-    #[inline]
-    pub fn request_arrival(&self, id: RequestId) -> TimePoint<T> {
-        self.request(id).arrival_time()
+    pub fn request_arrival_time(&self, id: RequestId) -> TimePoint<T> {
+        self.requests[self.idx(id)].arrival_time()
     }
 }
 
 impl<T: PrimInt + Signed, C: PrimInt + Signed> From<&Problem<T, C>> for InMemoryModel<T, C> {
     fn from(problem: &Problem<T, C>) -> Self {
         Self::from_problem(problem)
+    }
+}
+
+impl<T: PrimInt + Signed, C: PrimInt + Signed> SchedulingRead<T, C> for InMemoryModel<T, C> {
+    #[inline]
+    fn request_length(&self, id: RequestId) -> SpaceLength {
+        self.requests[self.idx(id)].length()
+    }
+
+    #[inline]
+    fn request_processing_duration(&self, id: RequestId) -> TimeDelta<T> {
+        self.requests[self.idx(id)].processing_duration()
+    }
+
+    #[inline]
+    fn request_feasible_time_window(&self, id: RequestId) -> TimeInterval<T> {
+        self.requests[self.idx(id)].feasible_time_window()
+    }
+
+    #[inline]
+    fn request_feasible_space_window(&self, id: RequestId) -> SpaceInterval {
+        self.requests[self.idx(id)].feasible_space_window()
+    }
+
+    #[inline]
+    fn current_assignment_of_request(&self, id: RequestId) -> Option<AssignmentView<T>> {
+        self.assigns[self.idx(id)]
+            .as_ref()
+            .map(|a| AssignmentView::new(a.start_position(), a.start_time()))
+    }
+
+    #[inline]
+    fn is_request_locked(&self, id: RequestId) -> bool {
+        self.locked[self.idx(id)]
     }
 }
 
@@ -125,8 +201,8 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> ModelAccess<T, C> for InMemoryMod
 
 impl<T, C> ModelMut<T, C> for InMemoryModel<T, C>
 where
-    T: num_traits::PrimInt + num_traits::Signed,
-    C: num_traits::PrimInt + num_traits::Signed,
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
 {
     #[inline]
     fn set_assignment(

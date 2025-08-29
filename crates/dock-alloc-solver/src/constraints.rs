@@ -19,10 +19,37 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use crate::model_access::ModelAccess;
 use dock_alloc_core::domain::{SpaceInterval, TimeInterval};
 use dock_alloc_model::RequestId;
 use num_traits::{PrimInt, Signed};
+
+use crate::scheduling_read::ModelAccess;
+
+pub trait ConstraintSystem<T, C, M>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+    M: ModelAccess<T, C>,
+{
+    type Violation: Clone + Eq + core::fmt::Debug + core::fmt::Display + 'static;
+
+    // Effective windows (may narrow model’s feasible windows)
+    fn job_time_window(&self, id: RequestId) -> TimeInterval<T>;
+    fn job_space_window(&self, id: RequestId) -> SpaceInterval;
+
+    // Policy gates
+    fn allowed_remove(&self, id: RequestId) -> Result<(), Self::Violation>;
+    fn allowed_job_edit(
+        &self,
+        id: RequestId,
+        time: &TimeInterval<T>,
+        space: &SpaceInterval,
+    ) -> Result<(), Self::Violation>;
+
+    // Map planner physics failures
+    fn map_overlap(&self) -> Self::Violation;
+    fn map_slot_stale(&self) -> Self::Violation;
+}
 
 pub struct ConstraintsView<'a, T, C, M>
 where
@@ -31,7 +58,7 @@ where
     M: ModelAccess<T, C>,
 {
     model: &'a M,
-    _phantom: std::marker::PhantomData<(T, C)>,
+    _phantom: core::marker::PhantomData<(T, C)>,
 }
 
 impl<'a, T, C, M> ConstraintsView<'a, T, C, M>
@@ -40,31 +67,83 @@ where
     C: PrimInt + Signed,
     M: ModelAccess<T, C>,
 {
-    #[inline]
     pub fn new(model: &'a M) -> Self {
         Self {
             model,
-            _phantom: std::marker::PhantomData,
+            _phantom: Default::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DefaultViolation {
+    Locked,
+    TimeWindow,
+    SpaceWindow,
+    Overlap,
+    SlotStale,
+}
+
+impl core::fmt::Display for DefaultViolation {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        use DefaultViolation::*;
+        match self {
+            Locked => write!(f, "locked"),
+            TimeWindow => write!(f, "time-window"),
+            SpaceWindow => write!(f, "space-window"),
+            Overlap => write!(f, "overlap"),
+            SlotStale => write!(f, "slot-stale"),
+        }
+    }
+}
+
+impl<'a, T, C, M> ConstraintSystem<T, C, M> for ConstraintsView<'a, T, C, M>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+    M: ModelAccess<T, C>,
+{
+    type Violation = DefaultViolation;
+
+    fn job_time_window(&self, id: RequestId) -> TimeInterval<T> {
+        self.model.request(id).feasible_time_window()
+    }
+    fn job_space_window(&self, id: RequestId) -> SpaceInterval {
+        self.model.request(id).feasible_space_window()
+    }
+
+    fn allowed_remove(&self, id: RequestId) -> Result<(), Self::Violation> {
+        if self.model.is_locked(id) {
+            Err(DefaultViolation::Locked)
+        } else {
+            Ok(())
         }
     }
 
-    #[inline]
-    pub fn allowed_job_edit(
+    fn allowed_job_edit(
         &self,
         id: RequestId,
-        _time: &TimeInterval<T>,
-        _space: &SpaceInterval,
-    ) -> bool {
-        !self.model.is_locked(id)
+        time: &TimeInterval<T>,
+        space: &SpaceInterval,
+    ) -> Result<(), Self::Violation> {
+        if self.model.is_locked(id) {
+            return Err(DefaultViolation::Locked);
+        }
+        let tw = self.job_time_window(id);
+        let sw = self.job_space_window(id);
+        if time.start() < tw.start() || time.end() > tw.end() {
+            return Err(DefaultViolation::TimeWindow);
+        }
+        if space.start() < sw.start() || space.end() > sw.end() {
+            return Err(DefaultViolation::SpaceWindow);
+        }
+        Ok(())
     }
 
-    #[inline]
-    pub fn job_time_window(&self, id: RequestId) -> TimeInterval<T> {
-        self.model.request(id).feasible_time_window()
+    fn map_overlap(&self) -> Self::Violation {
+        DefaultViolation::Overlap
     }
-
-    #[inline]
-    pub fn job_space_window(&self, id: RequestId) -> SpaceInterval {
-        self.model.request(id).feasible_space_window()
+    fn map_slot_stale(&self) -> Self::Violation {
+        DefaultViolation::SlotStale
     }
 }
