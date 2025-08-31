@@ -25,9 +25,10 @@ use crate::{
     occ::BerthOccupancy,
     quay::Quay,
 };
+use core::marker::PhantomData;
 use dock_alloc_core::domain::SpacePosition;
 use dock_alloc_core::domain::{SpaceInterval, TimeInterval, TimePoint};
-use dock_alloc_model::{Assignment, Problem, Request, RequestId, Tentative};
+use dock_alloc_model::{Assignment, Problem, Request, RequestId};
 use num_traits::{PrimInt, Signed};
 use std::{collections::HashSet, fmt::Display, hash::Hash};
 
@@ -71,6 +72,7 @@ impl<T: PrimInt + Signed> From<(TimeInterval<T>, SpaceInterval)>
         Self::new(v.0, v.1)
     }
 }
+
 impl<T: PrimInt + Signed> From<(&TimeInterval<T>, &SpaceInterval)>
     for BerthOccupancyChangePayload<T>
 {
@@ -85,6 +87,7 @@ pub enum BerthOccupancyChangeOperation<T: PrimInt + Signed> {
     Free(BerthOccupancyChangePayload<T>),
     Occupy(BerthOccupancyChangePayload<T>),
 }
+
 impl<T: PrimInt + Signed> BerthOccupancyChangeOperation<T> {
     pub fn payload(&self) -> &BerthOccupancyChangePayload<T> {
         match self {
@@ -93,6 +96,7 @@ impl<T: PrimInt + Signed> BerthOccupancyChangeOperation<T> {
         }
     }
 }
+
 impl<T: PrimInt + Signed + Display> Display for BerthOccupancyChangeOperation<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -345,38 +349,89 @@ impl Display for PlanError {
 
 impl std::error::Error for PlanError {}
 
-pub struct ProposeCtx<'a, T, C, Q>
-where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
-    Q: Quay,
-{
-    berth: &'a BerthOccupancy<T, Q>,
-    problem: &'a Problem<T, C>,
-    stamp: Version,
+pub struct Planner;
+
+impl Planner {
+    #[inline]
+    pub fn scope<T, C, Q, R>(
+        berth: &BerthOccupancy<T, Q>,
+        problem: &Problem<T, C>,
+        f: impl for<'brand> FnOnce(ProposeCtx<'brand, T, C, Q>) -> R,
+    ) -> R
+    where
+        T: PrimInt + Signed,
+        C: PrimInt + Signed,
+        Q: Quay,
+    {
+        f(ProposeCtx {
+            berth,
+            problem,
+            stamp: Version::default(),
+            _brand: PhantomData,
+        })
+    }
 }
 
-impl<'a, T, C, Q> ProposeCtx<'a, T, C, Q>
+#[derive(Clone, Copy)]
+pub struct MovableHandle<'brand> {
+    id: RequestId,
+    _b: PhantomData<&'brand ()>,
+}
+
+#[derive(Clone, Copy)]
+pub struct FixedHandle<'brand> {
+    id: RequestId,
+    _b: PhantomData<&'brand ()>,
+}
+
+impl<'brand> MovableHandle<'brand> {
+    #[inline]
+    pub fn id(self) -> RequestId {
+        self.id
+    }
+}
+
+impl<'brand> FixedHandle<'brand> {
+    #[inline]
+    pub fn id(self) -> RequestId {
+        self.id
+    }
+}
+
+pub struct ProposeCtx<'brand, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
     Q: Quay,
 {
-    pub fn new(berth: &'a BerthOccupancy<T, Q>, problem: &'a Problem<T, C>) -> Self {
+    berth: &'brand BerthOccupancy<T, Q>,
+    problem: &'brand Problem<T, C>,
+    stamp: Version,
+    _brand: PhantomData<&'brand mut &'brand ()>,
+}
+
+impl<'brand, T, C, Q> ProposeCtx<'brand, T, C, Q>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+    Q: Quay,
+{
+    pub fn new(berth: &'brand BerthOccupancy<T, Q>, problem: &'brand Problem<T, C>) -> Self {
         Self {
             berth,
             problem,
             stamp: Version::default(),
+            _brand: PhantomData,
         }
     }
 
     #[inline]
-    pub fn berth(&self) -> &'a BerthOccupancy<T, Q> {
+    pub fn berth(&self) -> &'brand BerthOccupancy<T, Q> {
         self.berth
     }
 
     #[inline]
-    pub fn problem(&self) -> &'a Problem<T, C> {
+    pub fn problem(&self) -> &'brand Problem<T, C> {
         self.problem
     }
 
@@ -425,38 +480,93 @@ where
     pub fn job_space_window(&self, id: RequestId) -> Result<SpaceInterval, PlanError> {
         Ok(self.request(id)?.feasible_space_window())
     }
+
+    #[inline]
+    pub fn movable_handle(&self, id: RequestId) -> Result<MovableHandle<'brand>, PlanError> {
+        if self.problem.unassigned().contains_key(&id) {
+            Ok(MovableHandle {
+                id,
+                _b: PhantomData,
+            })
+        } else if self.problem.preassigned().contains_key(&id) {
+            Err(PlanError::Locked(id))
+        } else {
+            Err(PlanError::UnknownRequest(id))
+        }
+    }
+
+    #[inline]
+    pub fn fixed_handle(&self, id: RequestId) -> Result<FixedHandle<'brand>, PlanError> {
+        if self.problem.preassigned().contains_key(&id) {
+            Ok(FixedHandle {
+                id,
+                _b: PhantomData,
+            })
+        } else {
+            Err(PlanError::UnknownRequest(id))
+        }
+    }
 }
 
-pub struct Explorer<'a, T, C, Q>
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Tentative<'brand, T = i64, C = i64>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    a: Assignment<T, C>,
+    _b: PhantomData<&'brand ()>,
+}
+
+impl<'brand, T, C> Tentative<'brand, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    #[inline]
+    pub fn assignment(&self) -> &Assignment<T, C> {
+        &self.a
+    }
+
+    // crate-private constructor: only Explorer (this crate) can create them
+    fn new_branded(a: Assignment<T, C>) -> Self {
+        Self { a, _b: PhantomData }
+    }
+}
+
+pub struct Explorer<'brand, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
     Q: Quay,
 {
-    ctx: &'a ProposeCtx<'a, T, C, Q>,
-    overlay: &'a BerthOccupancyOverlay<T>,
+    ctx: &'brand ProposeCtx<'brand, T, C, Q>,
+    overlay: &'brand BerthOccupancyOverlay<T>,
 }
 
-impl<'a, T, C, Q> Explorer<'a, T, C, Q>
+impl<'brand, T, C, Q> Explorer<'brand, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
     Q: Quay,
 {
     #[inline]
-    pub fn new(ctx: &'a ProposeCtx<'a, T, C, Q>, overlay: &'a BerthOccupancyOverlay<T>) -> Self {
+    pub fn new(
+        ctx: &'brand ProposeCtx<'brand, T, C, Q>,
+        overlay: &'brand BerthOccupancyOverlay<T>,
+    ) -> Self {
         Self { ctx, overlay }
     }
 
     pub fn iter_tentatives(
-        &'a self,
-        job: RequestId,
-    ) -> Result<impl Iterator<Item = Tentative<T, C>> + 'a, PlanError> {
+        &'brand self,
+        mh: MovableHandle<'brand>,
+    ) -> Result<impl Iterator<Item = Tentative<'brand, T, C>> + 'brand, PlanError> {
+        let job = mh.id();
+        let req = *self.ctx.request(job)?;
         if self.ctx.is_locked(job)? {
             return Err(PlanError::Locked(job));
         }
-
-        let req = *self.ctx.request(job)?;
         let len = req.length();
         let proc = req.processing_duration();
         let tw = self.ctx.job_time_window(job)?;
@@ -466,7 +576,7 @@ where
             FreePlacementIter::new(self.ctx.berth, tw, proc, len, sw, Some(self.overlay)).map(
                 move |(t0, space)| {
                     let s0 = space.start();
-                    Tentative::new(Assignment::new(req, s0, t0))
+                    Tentative::new_branded(Assignment::new(req, s0, t0))
                 },
             ),
         )
@@ -478,13 +588,13 @@ where
     }
 }
 
-pub struct PlanBuilder<'a, T, C, Q>
+pub struct PlanBuilder<'brand, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
     Q: Quay,
 {
-    ctx: &'a ProposeCtx<'a, T, C, Q>,
+    ctx: &'brand ProposeCtx<'brand, T, C, Q>,
     overlay: BerthOccupancyOverlay<T>,
     ops: Vec<BerthOccupancyChangeOperation<T>>,
     edits: Vec<AssignEdit<T>>,
@@ -495,13 +605,14 @@ pub enum RemoveOutcome {
     Removed,
 }
 
-impl<'a, T, C, Q> PlanBuilder<'a, T, C, Q>
+impl<'brand, T, C, Q> PlanBuilder<'brand, T, C, Q>
 where
     T: PrimInt + Signed + Hash,
     C: PrimInt + Signed,
     Q: Quay,
 {
-    pub fn new(ctx: &'a ProposeCtx<'a, T, C, Q>) -> Self {
+    #[inline]
+    pub fn new(ctx: &'brand ProposeCtx<'brand, T, C, Q>) -> Self {
         Self {
             ctx,
             overlay: BerthOccupancyOverlay::new(),
@@ -511,15 +622,21 @@ where
     }
 
     #[inline]
-    pub fn explorer(&'a self) -> Explorer<'a, T, C, Q> {
+    pub fn explorer(&'brand self) -> Explorer<'brand, T, C, Q> {
         Explorer::new(self.ctx, &self.overlay)
     }
 
-    pub fn remove(&mut self, t: &Tentative<T, C>) -> Result<RemoveOutcome, PlanError> {
-        let a = t.assignment();
-        let id = a.request().id();
+    pub fn remove(
+        &mut self,
+        tentative: &Tentative<'brand, T, C>,
+    ) -> Result<RemoveOutcome, PlanError> {
+        let assignemt = tentative.assignment();
+        let id = assignemt.request().id();
 
-        // If we've already scheduled a Clear for this id, do nothing.
+        if self.ctx.is_locked(id)? {
+            return Err(PlanError::Locked(id));
+        }
+
         if self
             .edits
             .iter()
@@ -528,27 +645,21 @@ where
             return Ok(RemoveOutcome::Noop);
         }
 
-        // If there is no baseline assignment to clear, it's a no-op.
         let Some(asg) = self.ctx.baseline_assignment(id)? else {
             return Ok(RemoveOutcome::Noop);
         };
 
-        // Defense-in-depth: keep this unless Tentative is unforgeable and tied to ctx.
-        if self.ctx.is_locked(id)? {
-            return Err(PlanError::Locked(id));
-        }
+        let request = self.ctx.request(id)?;
+        let length = request.length();
+        let processing_duration = request.processing_duration();
 
-        let req = self.ctx.request(id)?;
-        let len = req.length();
-        let proc = req.processing_duration();
+        let start_position = asg.start_position();
+        let end_position = SpacePosition::new(start_position.value() + length.value());
+        let space = SpaceInterval::new(start_position, end_position);
 
-        let s0 = asg.start_position();
-        let s1 = SpacePosition::new(s0.value() + len.value());
-        let space = SpaceInterval::new(s0, s1);
-
-        let t0 = asg.start_time();
-        let t1 = TimePoint::new(t0.value() + proc.value());
-        let time = TimeInterval::new(t0, t1);
+        let start_time = asg.start_time();
+        let end_time = TimePoint::new(start_time.value() + processing_duration.value());
+        let time = TimeInterval::new(start_time, end_time);
 
         self.ops.push(BerthOccupancyChangeOperation::Free(
             BerthOccupancyChangePayload::new(time, space),
@@ -559,33 +670,32 @@ where
         Ok(RemoveOutcome::Removed)
     }
 
-    pub fn move_into_slot(&mut self, t: &Tentative<T, C>) -> Result<(), PlanError> {
-        let a = t.assignment();
-        let id = a.request().id();
+    pub fn move_into_slot(
+        &mut self,
+        move_handle: MovableHandle<'brand>,
+        t: &Tentative<'brand, T, C>,
+    ) -> Result<(), PlanError> {
+        let assignment = t.assignment();
+        let id = move_handle.id();
 
-        if self.ctx.is_locked(id)? {
-            return Err(PlanError::Locked(id));
-        }
+        let request = self.ctx.request(id)?;
+        let length = request.length();
+        let processing_duration = request.processing_duration();
 
-        let req = self.ctx.request(id)?;
-        let len = req.length();
-        let proc = req.processing_duration();
+        let start_position = assignment.start_position();
+        let end_position = SpacePosition::new(start_position.value() + length.value());
+        let space = SpaceInterval::new(start_position, end_position);
 
-        let s0 = a.start_position();
-        let s1 = SpacePosition::new(s0.value() + len.value());
-        let space = SpaceInterval::new(s0, s1);
+        let start_time = assignment.start_time();
+        let end_time = TimePoint::new(start_time.value() + processing_duration.value());
+        let time = TimeInterval::new(start_time, end_time);
 
-        let t0 = a.start_time();
-        let t1 = TimePoint::new(t0.value() + proc.value());
-        let time = TimeInterval::new(t0, t1);
-
-        // feasible windows
-        let tw = self.ctx.job_time_window(id)?;
-        let sw = self.ctx.job_space_window(id)?;
-        if time.start() < tw.start()
-            || time.end() > tw.end()
-            || space.start() < sw.start()
-            || space.end() > sw.end()
+        let time_window = self.ctx.job_time_window(id)?;
+        let space_window = self.ctx.job_space_window(id)?;
+        if time.start() < time_window.start()
+            || time.end() > time_window.end()
+            || space.start() < space_window.start()
+            || space.end() > space_window.end()
         {
             return Err(PlanError::SlotStale(id));
         }
@@ -727,7 +837,7 @@ mod tests {
     use dock_alloc_core::domain::{
         Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
     };
-    use dock_alloc_model::{Assignment, Fixed, ProblemBuilder, Request, RequestId, Tentative};
+    use dock_alloc_model::{Assignment, Fixed, ProblemBuilder, Request, RequestId};
 
     // ---------- helpers ----------
 
@@ -751,6 +861,12 @@ mod tests {
             SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
         )
         .unwrap()
+    }
+
+    fn unchecked_for_tests<'brand, T: PrimInt + Signed, C: PrimInt + Signed>(
+        a: Assignment<T, C>,
+    ) -> Tentative<'brand, T, C> {
+        Tentative::new_branded(a)
     }
 
     fn mk_ctx<'a>(
@@ -792,13 +908,10 @@ mod tests {
 
         let ctx = mk_ctx(&berth, &problem);
         let overlay = BerthOccupancyOverlay::new();
-        let explorer = Explorer::new(&ctx, &overlay);
 
-        let tents: Vec<_> = explorer
-            .iter_tentatives(RequestId::new(1))
-            .expect("iter_tentatives ok")
-            .take(3)
-            .collect();
+        let explorer = Explorer::new(&ctx, &overlay);
+        let mh = ctx.movable_handle(RequestId::new(1)).unwrap();
+        let tents: Vec<_> = explorer.iter_tentatives(mh).unwrap().take(3).collect();
 
         assert!(
             !tents.is_empty(),
@@ -835,7 +948,7 @@ mod tests {
 
         let id = RequestId::new(1);
         let req = *ctx.request(id).expect("request exists"); // Request is Copy
-        let dummy_tent = Tentative::new(Assignment::new(
+        let dummy_tent = unchecked_for_tests(Assignment::new(
             req,
             SpacePosition::new(0),
             TimePoint::new(0),
@@ -846,14 +959,16 @@ mod tests {
             Ok(super::RemoveOutcome::Noop)
         ));
 
-        // Move via tentative
-        let t = builder
-            .explorer()
-            .iter_tentatives(RequestId::new(1))
+        // Move via tentative (use a standalone Explorer to avoid borrowing builder)
+        let overlay = BerthOccupancyOverlay::new();
+        let explorer = Explorer::new(&ctx, &overlay);
+        let t = explorer
+            .iter_tentatives(ctx.movable_handle(RequestId::new(1)).unwrap())
             .expect("iter_tentatives ok")
             .next()
             .expect("tentative");
-        builder.move_into_slot(&t).expect("move_into_slot");
+        let mh = ctx.movable_handle(RequestId::new(1)).unwrap();
+        builder.move_into_slot(mh, &t).expect("move_into_slot");
 
         let plan = builder.finish().expect("finish must validate");
         assert!(!plan.is_empty());
@@ -878,7 +993,7 @@ mod tests {
         let ctx = mk_ctx(&berth, &problem);
         let mut builder = PlanBuilder::new(&ctx);
 
-        let tent = Tentative::new(Assignment::new(
+        let tent = unchecked_for_tests(Assignment::new(
             req,
             SpacePosition::new(0),
             TimePoint::new(0),
@@ -902,7 +1017,7 @@ mod tests {
         let ctx = mk_ctx(&berth, &problem);
         let mut builder = PlanBuilder::new(&ctx);
 
-        let tent = Tentative::new(Assignment::new(
+        let tent = unchecked_for_tests(Assignment::new(
             req,
             SpacePosition::new(0),
             TimePoint::new(0),
@@ -927,20 +1042,28 @@ mod tests {
         let mut builder = PlanBuilder::new(&ctx);
 
         // time window violation (proc=3, starts at 9, tw=[0,10])
-        let bad_time = Tentative::new(Assignment::new(
+        let bad_time = unchecked_for_tests(Assignment::new(
             req,
             SpacePosition::new(0),
             TimePoint::new(9),
         ));
-        assert!(builder.move_into_slot(&bad_time).is_err());
+        assert!(
+            builder
+                .move_into_slot(ctx.movable_handle(RequestId::new(1)).unwrap(), &bad_time)
+                .is_err()
+        );
 
         // space window violation (len=4, start at 10 -> end 14 > sw.end=12)
-        let bad_space = Tentative::new(Assignment::new(
+        let bad_space = unchecked_for_tests(Assignment::new(
             req,
             SpacePosition::new(10),
             TimePoint::new(0),
         ));
-        assert!(builder.move_into_slot(&bad_space).is_err());
+        assert!(
+            builder
+                .move_into_slot(ctx.movable_handle(RequestId::new(1)).unwrap(), &bad_space)
+                .is_err()
+        );
     }
 
     #[test]

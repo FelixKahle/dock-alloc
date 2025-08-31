@@ -57,6 +57,8 @@ use std::{
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
+pub trait DomainType: PrimInt + Signed {}
+
 /// Represents a point in time.
 ///
 /// A `TimePoint` is a wrapper around a primitive integer type that

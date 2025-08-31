@@ -530,25 +530,6 @@ where
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Tentative<T = i64, C = i64>(Assignment<T, C>)
-where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed;
-
-impl<T, C> Tentative<T, C>
-where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
-{
-    pub fn new(a: Assignment<T, C>) -> Self {
-        Self(a)
-    }
-    pub fn assignment(&self) -> &Assignment<T, C> {
-        &self.0
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Fixed<T = i64, C = i64>(Assignment<T, C>)
 where
     T: PrimInt + Signed,

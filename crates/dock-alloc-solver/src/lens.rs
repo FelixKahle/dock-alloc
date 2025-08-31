@@ -451,6 +451,7 @@ impl core::ops::Deref for SpaceIntervalSet {
         &self.intervals
     }
 }
+
 impl<'a> IntoIterator for &'a SpaceIntervalSet {
     type Item = &'a SpaceInterval;
     type IntoIter = core::slice::Iter<'a, SpaceInterval>;
@@ -459,6 +460,7 @@ impl<'a> IntoIterator for &'a SpaceIntervalSet {
         self.intervals.iter()
     }
 }
+
 impl<'a> IntoIterator for &'a mut SpaceIntervalSet {
     type Item = &'a mut SpaceInterval;
     type IntoIter = core::slice::IterMut<'a, SpaceInterval>;
@@ -512,31 +514,32 @@ impl<T: PrimInt + Signed> BerthOccupancyOverlay<T> {
     }
 
     #[inline]
-    pub fn free_keys(&self) -> impl Iterator<Item = TimePoint<T>> + '_ {
+    pub fn free_timepoints(&self) -> impl Iterator<Item = TimePoint<T>> + '_ {
         self.free_by_time.keys().copied()
     }
+
     #[inline]
-    pub fn occ_keys(&self) -> impl Iterator<Item = TimePoint<T>> + '_ {
+    pub fn occupied_timepoints(&self) -> impl Iterator<Item = TimePoint<T>> + '_ {
         self.occupied_by_time.keys().copied()
     }
 
     #[inline]
     pub fn adjust_runs(
         &self,
-        time_key: TimePoint<T>,
+        timepoint: TimePoint<T>,
         base_set: SpaceIntervalSet,
         bounds: SpaceInterval,
         min_length: SpaceLength,
     ) -> SpaceIntervalSet {
         let mut result_set = base_set;
-        if let Some(free_set_for_key) = self.free_by_time.get(&time_key) {
-            let clamped_free_intervals = free_set_for_key.clamped_linear(bounds);
+        if let Some(free_set) = self.free_by_time.get(&timepoint) {
+            let clamped_free_intervals = free_set.clamped_linear(bounds);
             if !clamped_free_intervals.is_empty() {
                 result_set = result_set.union(&clamped_free_intervals);
             }
         }
-        if let Some(occupied_set_for_key) = self.occupied_by_time.get(&time_key) {
-            let clamped_occupied_intervals = occupied_set_for_key.clamped_linear(bounds);
+        if let Some(occupied_set) = self.occupied_by_time.get(&timepoint) {
+            let clamped_occupied_intervals = occupied_set.clamped_linear(bounds);
             if !clamped_occupied_intervals.is_empty() {
                 result_set = result_set.subtract(&clamped_occupied_intervals);
             }
@@ -545,9 +548,9 @@ impl<T: PrimInt + Signed> BerthOccupancyOverlay<T> {
     }
 
     #[inline]
-    fn occupied_overlaps_at(&self, time_key: TimePoint<T>, space_interval: SpaceInterval) -> bool {
+    fn occupied_overlaps_at(&self, timepoint: TimePoint<T>, space_interval: SpaceInterval) -> bool {
         self.occupied_by_time
-            .get(&time_key)
+            .get(&timepoint)
             .is_some_and(|set| set.overlaps(space_interval))
     }
 
@@ -560,11 +563,12 @@ impl<T: PrimInt + Signed> BerthOccupancyOverlay<T> {
         T: Zero + Copy,
         Q: QuayRead + QuayWrite + Clone + PartialEq,
     {
-        if let Some(predecessor_key) = berth.slice_predecessor_key(time_window.start()) {
-            self.add_occupy(predecessor_key, space_interval);
+        if let Some(predecessor_timepoint) = berth.slice_predecessor_timepoint(time_window.start())
+        {
+            self.add_occupy(predecessor_timepoint, space_interval);
         }
-        for key in berth.keys_in_open_iter(time_window.start(), time_window.end()) {
-            self.add_occupy(key, space_interval);
+        for timepoint in berth.iter_timepoints(time_window) {
+            self.add_occupy(timepoint, space_interval);
         }
     }
 
@@ -577,11 +581,12 @@ impl<T: PrimInt + Signed> BerthOccupancyOverlay<T> {
         T: Zero + Copy,
         Q: QuayRead + QuayWrite + Clone + PartialEq,
     {
-        if let Some(predecessor_key) = berth.slice_predecessor_key(time_window.start()) {
-            self.add_free(predecessor_key, space_interval);
+        if let Some(predecessor_timepoint) = berth.slice_predecessor_timepoint(time_window.start())
+        {
+            self.add_free(predecessor_timepoint, space_interval);
         }
-        for key in berth.keys_in_open_iter(time_window.start(), time_window.end()) {
-            self.add_free(key, space_interval);
+        for timepoint in berth.iter_timepoints(time_window) {
+            self.add_free(timepoint, space_interval);
         }
     }
 }
@@ -589,7 +594,7 @@ impl<T: PrimInt + Signed> BerthOccupancyOverlay<T> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AvailabilityView<'a, T: PrimInt + Signed, Q: Quay> {
     berth: &'a BerthOccupancy<T, Q>,
-    slice_keys: Vec<TimePoint<T>>,
+    slice_timepoints: Vec<TimePoint<T>>,
 }
 
 impl<'a, T, Q> AvailabilityView<'a, T, Q>
@@ -598,17 +603,21 @@ where
     Q: QuayRead + QuayWrite + Clone + PartialEq,
 {
     pub fn new(berth: &'a BerthOccupancy<T, Q>, time_window: TimeInterval<T>) -> Self {
-        let mut slice_keys = Vec::<TimePoint<T>>::new();
-        if let Some(predecessor_key) = berth.slice_predecessor_key(time_window.start()) {
-            slice_keys.push(predecessor_key);
+        let mut slice_timepoints = Vec::<TimePoint<T>>::new();
+        if let Some(predecessor_timepoint) = berth.slice_predecessor_timepoint(time_window.start())
+        {
+            slice_timepoints.push(predecessor_timepoint);
         }
-        slice_keys.extend(berth.keys_in_open_iter(time_window.start(), time_window.end()));
-        Self { berth, slice_keys }
+        slice_timepoints.extend(berth.iter_timepoints(time_window));
+        Self {
+            berth,
+            slice_timepoints,
+        }
     }
 
     #[inline]
-    pub fn slice_keys(&self) -> &[TimePoint<T>] {
-        &self.slice_keys
+    pub fn slice_timepoints(&self) -> &[TimePoint<T>] {
+        &self.slice_timepoints
     }
 
     #[inline]
@@ -621,11 +630,14 @@ where
         space_interval: SpaceInterval,
         overlay: Option<&BerthOccupancyOverlay<T>>,
     ) -> bool {
-        for &key in &self.slice_keys {
-            let quay_snapshot = self.berth.snapshot_at(key).expect("slice key must exist");
+        for &timepoint in &self.slice_timepoints {
+            let quay_snapshot = self
+                .berth
+                .snapshot_at(timepoint)
+                .expect("slice timepoint must exist");
 
             if let Some(overlay_ref) = overlay
-                && overlay_ref.occupied_overlaps_at(key, space_interval)
+                && overlay_ref.occupied_overlaps_at(timepoint, space_interval)
             {
                 return false;
             }
@@ -639,7 +651,7 @@ where
                     quay_snapshot.iter_free_intervals(SpaceLength::new(1), space_interval),
                 );
                 let adjusted_free_intervals = overlay_ref.adjust_runs(
-                    key,
+                    timepoint,
                     base_free_intervals,
                     space_interval,
                     SpaceLength::new(1),
@@ -659,7 +671,7 @@ where
         search_space: SpaceInterval,
         overlay: Option<&BerthOccupancyOverlay<T>>,
     ) -> Vec<SpaceInterval> {
-        if self.slice_keys.is_empty() {
+        if self.slice_timepoints.is_empty() {
             return Vec::new();
         }
 
@@ -667,8 +679,11 @@ where
         let mut accumulator_set = SpaceIntervalSet::new();
         let mut temp_set = SpaceIntervalSet::new();
 
-        for &key in &self.slice_keys {
-            let quay_snapshot = self.berth.snapshot_at(key).expect("slice key must exist");
+        for &timepoint in &self.slice_timepoints {
+            let quay_snapshot = self
+                .berth
+                .snapshot_at(timepoint)
+                .expect("slice timepoint must exist");
 
             let base_free_intervals = if overlay.is_some() {
                 SpaceIntervalSet::from_iter(
@@ -681,7 +696,12 @@ where
             };
 
             let current_slice_free_runs = if let Some(overlay_ref) = overlay {
-                overlay_ref.adjust_runs(key, base_free_intervals, search_space, required_length)
+                overlay_ref.adjust_runs(
+                    timepoint,
+                    base_free_intervals,
+                    search_space,
+                    required_length,
+                )
             } else {
                 base_free_intervals.filter_min_length(required_length)
             };
@@ -709,10 +729,10 @@ where
     T: PrimInt + Signed + Zero + Copy,
 {
     processing_duration: TimeDelta<T>,
-    all_slice_keys: Vec<TimePoint<T>>,
-    free_runs_per_key: Vec<SpaceIntervalSet>,
-    potential_start_time_keys: Vec<TimePoint<T>>,
-    start_time_key_to_index_map: Vec<usize>,
+    all_slice_timepoints: Vec<TimePoint<T>>,
+    free_runs_per_timepoint: Vec<SpaceIntervalSet>,
+    potential_start_time_timepoints: Vec<TimePoint<T>>,
+    start_timepoint_key_to_index_map: Vec<usize>,
     start_time_index: usize,
     run_index: usize,
     current_start_time: Option<TimePoint<T>>,
@@ -735,15 +755,19 @@ where
     where
         Q: Quay + Clone + PartialEq,
     {
-        let mut all_slice_keys = Vec::<TimePoint<T>>::new();
-        if let Some(predecessor_key) = berth.slice_predecessor_key(search_time.start()) {
-            all_slice_keys.push(predecessor_key);
+        let mut all_slice_timepoints = Vec::<TimePoint<T>>::new();
+        if let Some(predecessor_timepoint) = berth.slice_predecessor_timepoint(search_time.start())
+        {
+            all_slice_timepoints.push(predecessor_timepoint);
         }
-        all_slice_keys.extend(berth.keys_in_open_iter(search_time.start(), search_time.end()));
+        all_slice_timepoints.extend(berth.iter_timepoints(search_time));
 
-        let mut free_runs_per_key: Vec<SpaceIntervalSet> = Vec::with_capacity(all_slice_keys.len());
-        for &key in &all_slice_keys {
-            let quay_snapshot = berth.snapshot_at(key).expect("slice key must exist");
+        let mut free_runs_per_timepoint: Vec<SpaceIntervalSet> =
+            Vec::with_capacity(all_slice_timepoints.len());
+        for &timepoint in &all_slice_timepoints {
+            let quay_snapshot = berth
+                .snapshot_at(timepoint)
+                .expect("slice timepoint must exist");
             let base_free_intervals = if overlay.is_some() {
                 SpaceIntervalSet::from_iter(
                     quay_snapshot.iter_free_intervals(SpaceLength::new(1), search_space),
@@ -754,29 +778,34 @@ where
                 )
             };
             let free_runs = if let Some(overlay_ref) = overlay {
-                overlay_ref.adjust_runs(key, base_free_intervals, search_space, required_length)
+                overlay_ref.adjust_runs(
+                    timepoint,
+                    base_free_intervals,
+                    search_space,
+                    required_length,
+                )
             } else {
                 base_free_intervals.filter_min_length(required_length)
             };
-            free_runs_per_key.push(free_runs);
+            free_runs_per_timepoint.push(free_runs);
         }
 
-        let mut potential_start_time_keys = Vec::<TimePoint<T>>::new();
-        let mut start_time_key_to_index_map = Vec::<usize>::new();
-        for (index, &key) in all_slice_keys.iter().enumerate() {
-            let end_time = key + processing_duration;
-            if key >= search_time.start() && end_time <= search_time.end() {
-                potential_start_time_keys.push(key);
-                start_time_key_to_index_map.push(index);
+        let mut potential_start_timepoints = Vec::<TimePoint<T>>::new();
+        let mut start_timepoint_key_to_index_map = Vec::<usize>::new();
+        for (index, &timepoint) in all_slice_timepoints.iter().enumerate() {
+            let end_time = timepoint + processing_duration;
+            if timepoint >= search_time.start() && end_time <= search_time.end() {
+                potential_start_timepoints.push(timepoint);
+                start_timepoint_key_to_index_map.push(index);
             }
         }
 
         Self {
             processing_duration,
-            all_slice_keys,
-            free_runs_per_key,
-            potential_start_time_keys,
-            start_time_key_to_index_map,
+            all_slice_timepoints,
+            free_runs_per_timepoint,
+            potential_start_time_timepoints: potential_start_timepoints,
+            start_timepoint_key_to_index_map,
             start_time_index: 0,
             run_index: 0,
             current_start_time: None,
@@ -787,24 +816,24 @@ where
 
     #[inline]
     fn next_runs_for_next_t0(&mut self) -> bool {
-        while self.start_time_index < self.potential_start_time_keys.len() {
-            let start_time = self.potential_start_time_keys[self.start_time_index];
-            let start_index = self.start_time_key_to_index_map[self.start_time_index];
+        while self.start_time_index < self.potential_start_time_timepoints.len() {
+            let start_time = self.potential_start_time_timepoints[self.start_time_index];
+            let start_index = self.start_timepoint_key_to_index_map[self.start_time_index];
             self.start_time_index += 1;
 
             let end_time = start_time + self.processing_duration;
-            self.intersection_buffer_a = self.free_runs_per_key[start_index].clone();
+            self.intersection_buffer_a = self.free_runs_per_timepoint[start_index].clone();
 
             let mut intersection_index = start_index + 1;
-            while intersection_index < self.all_slice_keys.len()
-                && self.all_slice_keys[intersection_index] < end_time
+            while intersection_index < self.all_slice_timepoints.len()
+                && self.all_slice_timepoints[intersection_index] < end_time
             {
                 if self.intersection_buffer_a.is_empty() {
                     break;
                 }
                 self.intersection_buffer_b.clear();
                 self.intersection_buffer_a.intersection_into(
-                    &self.free_runs_per_key[intersection_index],
+                    &self.free_runs_per_timepoint[intersection_index],
                     &mut self.intersection_buffer_b,
                 );
                 core::mem::swap(
@@ -921,23 +950,6 @@ mod tests {
     }
 
     #[test]
-    fn timeline_slices_predecessor_and_interior_keys() {
-        let quay_length = len(10);
-        let mut berth = BO::new(quay_length);
-
-        berth.occupy(ti(5, 10), si(2, 4));
-
-        assert_eq!(berth.slice_predecessor_key(tp(5)), Some(tp(5)));
-        assert_eq!(berth.slice_predecessor_key(tp(6)), Some(tp(5)));
-        assert_eq!(berth.slice_predecessor_key(tp(0)), Some(tp(0)));
-        assert_eq!(berth.slice_predecessor_key(tp(-1)), None);
-
-        let mut keys = Vec::new();
-        berth.slice_keys_in_open(tp(4), tp(12), &mut keys);
-        assert_eq!(keys, vec![tp(5), tp(10)]);
-    }
-
-    #[test]
     fn availability_is_free_without_overlay() {
         let quay_length = len(10);
         let berth = BO::new(quay_length);
@@ -1034,7 +1046,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_applies_to_predecessor_slice_key() {
+    fn overlay_applies_to_predecessor_slice_timepoint() {
         let quay_length = len(10);
         let berth = BO::new(quay_length);
 
@@ -1071,7 +1083,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_key_population() {
+    fn overlay_timepoint_population() {
         let quay_length = len(12);
         let mut berth = BO::new(quay_length);
 
@@ -1079,13 +1091,13 @@ mod tests {
         let mut ov = BerthOccupancyOverlay::new();
 
         ov.occupy(&berth, ti(2, 9), si(3, 7));
-        let keys_occ: Vec<T> = ov.occ_keys().map(|tp| tp.value()).collect();
-        assert_eq!(keys_occ, vec![0, 5]);
+        let occupied_timepoints: Vec<T> = ov.occupied_timepoints().map(|tp| tp.value()).collect();
+        assert_eq!(occupied_timepoints, vec![0, 5]);
 
         let mut ov2 = BerthOccupancyOverlay::new();
         ov2.free(&berth, ti(6, 12), si(2, 8));
-        let keys_free: Vec<T> = ov2.free_keys().map(|tp| tp.value()).collect();
-        assert_eq!(keys_free, vec![5, 10]);
+        let free_timepoints: Vec<T> = ov2.free_timepoints().map(|tp| tp.value()).collect();
+        assert_eq!(free_timepoints, vec![5, 10]);
     }
 
     #[test]
@@ -1177,7 +1189,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_free_then_occupy_precedence_same_key() {
+    fn overlay_free_then_occupy_precedence_same_timepoint() {
         // Base fully occupied; overlay frees [2,7), but also occupies [4,6) → occupy wins inside
         let quay_length = len(10);
         let mut berth = BO::new(quay_length);
@@ -1244,7 +1256,7 @@ mod tests {
     }
 
     #[test]
-    fn free_placement_iter_multiple_t0s_with_slice_keys() {
+    fn free_placement_iter_multiple_start_times_with_slice_timepoints() {
         // Ensure we get multiple t0 values when there are multiple slice keys.
         let quay_length = len(10);
         let mut berth = BO::new(quay_length);
