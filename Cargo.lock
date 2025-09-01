@@ -187,6 +187,7 @@ dependencies = [
  "dock_alloc_model",
  "num-traits",
  "rand",
+ "rand_chacha",
  "rayon",
 ]
 

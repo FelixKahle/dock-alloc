@@ -407,7 +407,7 @@ impl Planner {
         func: impl for<'brand> FnOnce(ProposeCtx<'brand, T, C, Q>) -> R,
     ) -> R
     where
-        T: PrimInt + Signed,
+        T: PrimInt + Signed + Hash,
         C: PrimInt + Signed,
         Q: QuayRead,
     {
@@ -468,17 +468,22 @@ where
 
 impl<'brand, T, C, Q> ProposeCtx<'brand, T, C, Q>
 where
-    T: PrimInt + Signed,
+    T: PrimInt + Signed + Hash,
     C: PrimInt + Signed,
     Q: QuayRead,
 {
-    fn new(berth: &'brand BerthOccupancy<T, Q>, problem: &'brand Problem<T, C>) -> Self {
+    pub fn new(berth: &'brand BerthOccupancy<T, Q>, problem: &'brand Problem<T, C>) -> Self {
         Self {
             berth,
             problem,
             stamp: Version::default(),
             _brand: PhantomData,
         }
+    }
+
+    #[inline]
+    pub fn builder(&'brand self) -> PlanBuilder<'brand, T, C, Q> {
+        PlanBuilder::new(self)
     }
 
     #[inline]
@@ -710,7 +715,7 @@ where
 
 impl<'ctx, 'ovl, 'ed, T, C, Q> Explorer<'ctx, 'ovl, 'ed, T, C, Q>
 where
-    T: PrimInt + Signed,
+    T: PrimInt + Signed + Hash,
     C: PrimInt + Signed,
     Q: QuayRead,
 {
@@ -839,6 +844,17 @@ where
     staging: Staging<T>,
 }
 
+impl<'brand, T, C, Q> From<&'brand ProposeCtx<'brand, T, C, Q>> for PlanBuilder<'brand, T, C, Q>
+where
+    T: PrimInt + Signed + Hash,
+    C: PrimInt + Signed,
+    Q: QuayRead,
+{
+    fn from(ctx: &'brand ProposeCtx<'brand, T, C, Q>) -> Self {
+        Self::new(ctx)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RemoveResult<T: PrimInt + Signed> {
     Noop,
@@ -869,6 +885,11 @@ where
             edits: Vec::new(),
             staging: Staging::default(),
         }
+    }
+
+    #[inline]
+    pub fn ctx(&self) -> &'brand ProposeCtx<'brand, T, C, Q> {
+        self.ctx
     }
 
     #[inline]
@@ -2168,5 +2189,78 @@ mod tests {
         });
         assert!(ex.0, "old placement should be undone and free again");
         assert!(!ex.1, "new placement should be occupied");
+    }
+
+    #[test]
+    fn iter_free_slots_in_time_narrowing_blocks_when_proc_wont_fit() {
+        use crate::quay::BTreeMapQuay;
+        // empty berth; req needs 3 time units; time_hint is [5,6) → cannot fit
+        let quay_length = SpaceLength::new(10);
+        let berth = BerthOccupancy::<i64, BTreeMapQuay>::new(quay_length);
+
+        let req = mk_req(1, 2, 3, 0, 10, 0, 10);
+        let problem = {
+            let mut pb = ProblemBuilder::new(quay_length);
+            pb.add_unassigned_request(req).unwrap();
+            pb.build()
+        };
+        let ctx = ProposeCtx::new(&berth, &problem);
+
+        let overlay = BerthOccupancyOverlay::new();
+        let edits: Vec<AssignEdit<i64>> = Vec::new();
+        let ex = Explorer::new(&ctx, &overlay, &edits);
+
+        let mh = ctx.movable_handle(RequestId::new(1)).unwrap();
+        let count = ex
+            .iter_free_slots_in(
+                mh,
+                Some(TimeInterval::new(TimePoint::new(5), TimePoint::new(6))),
+                None,
+            )
+            .unwrap()
+            .count();
+        assert_eq!(
+            count, 0,
+            "no slots should exist when processing time can't fit into the time hint"
+        );
+    }
+
+    #[test]
+    fn iter_free_slots_in_space_hint_clamps_runs() {
+        use crate::quay::BTreeMapQuay;
+
+        let quay_length = SpaceLength::new(20);
+        let berth = BerthOccupancy::<i64, BTreeMapQuay>::new(quay_length);
+
+        let req = mk_req(1, 2, 3, 0, 10, 0, 20);
+        let problem = {
+            let mut pb = ProblemBuilder::new(quay_length);
+            pb.add_unassigned_request(req).unwrap();
+            pb.build()
+        };
+        let ctx = ProposeCtx::new(&berth, &problem);
+
+        let overlay = BerthOccupancyOverlay::new();
+        let edits: Vec<AssignEdit<i64>> = Vec::new();
+        let ex = Explorer::new(&ctx, &overlay, &edits);
+
+        let mh = ctx.movable_handle(RequestId::new(1)).unwrap();
+        let mut it = ex
+            .iter_free_slots_in(
+                mh,
+                None,
+                Some(SpaceInterval::new(
+                    SpacePosition::new(4),
+                    SpacePosition::new(6),
+                )),
+            )
+            .unwrap();
+
+        let slot = it.next().expect("expected at least one slot");
+        assert_eq!(
+            slot.free_run(),
+            SpaceInterval::new(SpacePosition::new(4), SpacePosition::new(6)),
+            "run must be clamped to hint"
+        );
     }
 }

@@ -36,11 +36,11 @@ where
 {
     type Error;
 
-    fn propose(
+    fn propose<'brand>(
         &self,
         iter: usize,
         rng: &mut R,
-        ctx: &ProposeCtx<'_, T, C, Q>,
+        ctx: &'brand ProposeCtx<'brand, T, C, Q>,
     ) -> ProposeResult<T, Self::Error>;
 }
 
