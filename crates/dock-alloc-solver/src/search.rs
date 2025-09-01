@@ -30,15 +30,19 @@ use dock_alloc_core::domain::{SpaceInterval, TimeInterval, TimePoint};
 use dock_alloc_core::domain::{SpaceLength, SpacePosition};
 use dock_alloc_model::{Assignment, Problem, Request, RequestId};
 use num_traits::{PrimInt, Signed};
-use std::{collections::HashSet, fmt::Display, hash::Hash};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+    hash::Hash,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct BerthOccupancyChangePayload<T: PrimInt + Signed> {
+pub struct OccupancyRect<T: PrimInt + Signed> {
     time: TimeInterval<T>,
     space: SpaceInterval,
 }
 
-impl<T: PrimInt + Signed> BerthOccupancyChangePayload<T> {
+impl<T: PrimInt + Signed> OccupancyRect<T> {
     #[inline]
     pub fn new(time: TimeInterval<T>, space: SpaceInterval) -> Self {
         Self { time, space }
@@ -55,41 +59,90 @@ impl<T: PrimInt + Signed> BerthOccupancyChangePayload<T> {
     }
 }
 
-impl<T: PrimInt + Signed + Display> Display for BerthOccupancyChangePayload<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "BerthOccupancyChange(time: {}, space: {})",
-            self.time, self.space
-        )
-    }
-}
-
-impl<T: PrimInt + Signed> From<(TimeInterval<T>, SpaceInterval)>
-    for BerthOccupancyChangePayload<T>
-{
-    fn from(v: (TimeInterval<T>, SpaceInterval)) -> Self {
-        Self::new(v.0, v.1)
-    }
-}
-
-impl<T: PrimInt + Signed> From<(&TimeInterval<T>, &SpaceInterval)>
-    for BerthOccupancyChangePayload<T>
-{
-    #[inline]
+impl<T: PrimInt + Signed> From<(&TimeInterval<T>, &SpaceInterval)> for OccupancyRect<T> {
     fn from(v: (&TimeInterval<T>, &SpaceInterval)) -> Self {
         Self::new(*v.0, *v.1)
     }
 }
 
+impl<T: PrimInt + Signed> From<(TimeInterval<T>, SpaceInterval)> for OccupancyRect<T> {
+    fn from(v: (TimeInterval<T>, SpaceInterval)) -> Self {
+        Self::new(v.0, v.1)
+    }
+}
+
+impl<T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<T, C>> for OccupancyRect<T> {
+    fn from(asg: &Assignment<T, C>) -> Self {
+        let len = asg.request().length();
+        let sp = asg.start_position();
+        let space = SpaceInterval::new(sp, SpacePosition::new(sp.value() + len.value()));
+        let dur = asg.request().processing_duration();
+        let tp = asg.start_time();
+        let time = TimeInterval::new(tp, TimePoint::new(tp.value() + dur.value()));
+        Self::new(time, space)
+    }
+}
+
+impl<T: PrimInt + Signed> From<&RequestEdit<T>> for OccupancyRect<T> {
+    fn from(re: &RequestEdit<T>) -> Self {
+        Self::new(re.time(), re.space())
+    }
+}
+
+impl<T: PrimInt + Signed + Display> Display for OccupancyRect<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "OccupancyRect(time: {}, space: {})",
+            self.time, self.space
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Staging<T: PrimInt + Signed> {
+    set_by_req: HashMap<RequestId, OccupancyRect<T>>,
+    clear_by_req: HashMap<RequestId, OccupancyRect<T>>,
+}
+
+impl<T: PrimInt + Signed> Default for Staging<T> {
+    fn default() -> Self {
+        Self {
+            set_by_req: HashMap::new(),
+            clear_by_req: HashMap::new(),
+        }
+    }
+}
+
+impl<T: PrimInt + Signed> Staging<T> {
+    #[inline]
+    fn put_set(&mut self, req: RequestId, rect: OccupancyRect<T>) -> Option<OccupancyRect<T>> {
+        self.set_by_req.insert(req, rect)
+    }
+
+    #[inline]
+    fn remove_set(&mut self, req: RequestId) -> Option<OccupancyRect<T>> {
+        self.set_by_req.remove(&req)
+    }
+
+    #[inline]
+    fn put_clear(&mut self, req: RequestId, rect: OccupancyRect<T>) -> Option<OccupancyRect<T>> {
+        self.clear_by_req.insert(req, rect)
+    }
+    #[inline]
+    fn remove_clear(&mut self, req: RequestId) -> Option<OccupancyRect<T>> {
+        self.clear_by_req.remove(&req)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BerthOccupancyChangeOperation<T: PrimInt + Signed> {
-    Free(BerthOccupancyChangePayload<T>),
-    Occupy(BerthOccupancyChangePayload<T>),
+    Free(OccupancyRect<T>),
+    Occupy(OccupancyRect<T>),
 }
 
 impl<T: PrimInt + Signed> BerthOccupancyChangeOperation<T> {
-    pub fn payload(&self) -> &BerthOccupancyChangePayload<T> {
+    pub fn rect(&self) -> &OccupancyRect<T> {
         match self {
             BerthOccupancyChangeOperation::Free(p) => p,
             BerthOccupancyChangeOperation::Occupy(p) => p,
@@ -114,15 +167,22 @@ pub struct RequestEdit<T: PrimInt + Signed> {
 }
 
 impl<T: PrimInt + Signed> RequestEdit<T> {
+    #[inline]
     pub fn new(id: RequestId, time: TimeInterval<T>, space: SpaceInterval) -> Self {
         Self { id, time, space }
     }
+
+    #[inline]
     pub fn id(&self) -> RequestId {
         self.id
     }
+
+    #[inline]
     pub fn time(&self) -> TimeInterval<T> {
         self.time
     }
+
+    #[inline]
     pub fn space(&self) -> SpaceInterval {
         self.space
     }
@@ -211,7 +271,7 @@ fn space_hull(a: &SpaceInterval, b: &SpaceInterval) -> SpaceInterval {
 impl<T: PrimInt + Signed> From<&[BerthOccupancyChangeOperation<T>]> for Footprint<T> {
     fn from(ops: &[BerthOccupancyChangeOperation<T>]) -> Self {
         ops.iter()
-            .map(|op| op.payload())
+            .map(|op| op.rect())
             .map(|d| (*d.time(), *d.space()))
             .reduce(|(t1, s1), (t2, s2)| (time_hull(&t1, &t2), space_hull(&s1, &s2)))
             .map(|(time, space)| Footprint::new(time, space))
@@ -219,8 +279,8 @@ impl<T: PrimInt + Signed> From<&[BerthOccupancyChangeOperation<T>]> for Footprin
     }
 }
 
-impl<T: PrimInt + Signed> From<&BerthOccupancyChangePayload<T>> for Footprint<T> {
-    fn from(op: &BerthOccupancyChangePayload<T>) -> Self {
+impl<T: PrimInt + Signed> From<&OccupancyRect<T>> for Footprint<T> {
+    fn from(op: &OccupancyRect<T>) -> Self {
         Footprint::new(*op.time(), *op.space())
     }
 }
@@ -738,6 +798,7 @@ where
     overlay: BerthOccupancyOverlay<T>,
     ops: Vec<BerthOccupancyChangeOperation<T>>,
     edits: Vec<AssignEdit<T>>,
+    staging: Staging<T>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -755,53 +816,6 @@ impl<T: PrimInt + Signed + Display> std::fmt::Display for RemoveResult<T> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct OccupancyRect<T: PrimInt + Signed> {
-    time: TimeInterval<T>,
-    space: SpaceInterval,
-}
-
-impl<T: PrimInt + Signed> OccupancyRect<T> {
-    #[inline]
-    fn new(time: TimeInterval<T>, space: SpaceInterval) -> Self {
-        Self { time, space }
-    }
-
-    #[inline]
-    #[allow(dead_code)]
-    fn time(&self) -> &TimeInterval<T> {
-        &self.time
-    }
-
-    #[inline]
-    #[allow(dead_code)]
-    fn space(&self) -> &SpaceInterval {
-        &self.space
-    }
-}
-
-impl<T: PrimInt + Signed> From<(&TimeInterval<T>, &SpaceInterval)> for OccupancyRect<T> {
-    fn from(v: (&TimeInterval<T>, &SpaceInterval)) -> Self {
-        Self::new(*v.0, *v.1)
-    }
-}
-
-impl<T: PrimInt + Signed> From<(TimeInterval<T>, SpaceInterval)> for OccupancyRect<T> {
-    fn from(v: (TimeInterval<T>, SpaceInterval)) -> Self {
-        Self::new(v.0, v.1)
-    }
-}
-
-impl<T: PrimInt + Signed + Display> Display for OccupancyRect<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "OccupancyRect(time: {}, space: {})",
-            self.time, self.space
-        )
-    }
-}
-
 impl<'brand, T, C, Q> PlanBuilder<'brand, T, C, Q>
 where
     T: PrimInt + Signed + Hash,
@@ -815,6 +829,7 @@ where
             overlay: BerthOccupancyOverlay::new(),
             ops: Vec::new(),
             edits: Vec::new(),
+            staging: Staging::default(),
         }
     }
 
@@ -852,22 +867,14 @@ where
             .any(|e| matches!(e, AssignEdit::Clear(cid) if *cid == id))
         {
             if let Some(baseline) = self.ctx.baseline_assignment(id)? {
-                let req = self.ctx.request(id)?;
-                let len = req.length();
-                let dur = req.processing_duration();
-
-                let sp = baseline.start_position();
-                let se = SpacePosition::new(sp.value() + len.value());
-                let space = SpaceInterval::new(sp, se);
-
-                let tp = baseline.start_time();
-                let te = TimePoint::new(tp.value() + dur.value());
-                let time = TimeInterval::new(tp, te);
-
-                if AvailabilityView::new(self.ctx.berth, time)
-                    .is_free_under(space, Some(&self.overlay))
+                let rect = OccupancyRect::from(baseline);
+                if AvailabilityView::new(self.ctx.berth, *rect.time())
+                    .is_free_under(*rect.space(), Some(&self.overlay))
                 {
-                    return Ok(RemoveResult::Freed(FreeSlot::new(time.start(), space)));
+                    return Ok(RemoveResult::Freed(FreeSlot::new(
+                        rect.time().start(),
+                        *rect.space(),
+                    )));
                 }
             }
             return Ok(RemoveResult::Noop);
@@ -907,25 +914,8 @@ where
         let slot_end_time = TimePoint::new(slot_start_time.value() + processing_duration.value());
         let target_time_interval = TimeInterval::new(slot_start_time, slot_end_time);
 
-        // No-op if equals baseline.
-        if let Some(baseline) = self.ctx.baseline_assignment(request_id)? {
-            let baseline_start_pos = baseline.start_position();
-            let baseline_end_pos =
-                SpacePosition::new(baseline_start_pos.value() + request_length.value());
-            let baseline_space = SpaceInterval::new(baseline_start_pos, baseline_end_pos);
+        let _ = self.ensure_baseline_cleared_if_any(request_id)?;
 
-            let baseline_start_t = baseline.start_time();
-            let baseline_end_t =
-                TimePoint::new(baseline_start_t.value() + processing_duration.value());
-            let baseline_time = TimeInterval::new(baseline_start_t, baseline_end_t);
-
-            if baseline_space == target_space_interval && baseline_time == target_time_interval {
-                let _ = self.cancel_planned(request_id);
-                let _ = self.revert_cleared_baseline(request_id);
-                return Ok(());
-            }
-        }
-        self.ensure_baseline_cleared_if_any(request_id)?;
         let feasible_time_window = self.ctx.job_time_window(request_id)?;
         let feasible_space_window = self.ctx.job_space_window(request_id)?;
         if target_time_interval.start() < feasible_time_window.start()
@@ -935,21 +925,44 @@ where
         {
             return Err(PlanError::SlotStale(request_id));
         }
+
         if !AvailabilityView::new(self.ctx.berth, target_time_interval)
             .is_free_under(target_space_interval, Some(&self.overlay))
         {
             return Err(PlanError::Overlap);
         }
 
-        self.ops.push(BerthOccupancyChangeOperation::Occupy(
-            BerthOccupancyChangePayload::new(target_time_interval, target_space_interval),
-        ));
+        if let Some(prev) = self.staging.remove_set(request_id) {
+            if let Some(i) = self
+                .edits
+                .iter()
+                .position(|e| matches!(e, AssignEdit::Set(x) if x.id() == request_id))
+            {
+                self.edits.swap_remove(i);
+            }
+            if let Some(i) = self
+                .ops
+                .iter()
+                .position(|op| matches!(op, BerthOccupancyChangeOperation::Occupy(r) if *r == prev))
+            {
+                self.ops.swap_remove(i);
+            }
+            self.undo_occupy(prev.time, prev.space);
+        }
+
+        let rect = OccupancyRect::from((target_time_interval, target_space_interval));
+        self.staging.put_set(request_id, rect);
+        self.apply_occupy(target_time_interval, target_space_interval);
+        self.ops
+            .push(BerthOccupancyChangeOperation::Occupy(OccupancyRect::new(
+                target_time_interval,
+                target_space_interval,
+            )));
         self.edits.push(AssignEdit::Set(RequestEdit::new(
             request_id,
             target_time_interval,
             target_space_interval,
         )));
-        self.rebuild_overlay();
 
         Ok(())
     }
@@ -957,33 +970,31 @@ where
     pub fn finish(self) -> Result<Plan<T>, PlanError> {
         let mut tmp = BerthOccupancyOverlay::new();
         for op in &self.ops {
-            let p = op.payload();
+            let r = op.rect();
             match op {
                 BerthOccupancyChangeOperation::Free(_) => {
-                    tmp.free(self.ctx.berth, *p.time(), *p.space());
+                    tmp.free(self.ctx.berth, *r.time(), *r.space());
                 }
                 BerthOccupancyChangeOperation::Occupy(_) => {
-                    if !AvailabilityView::new(self.ctx.berth, *p.time())
-                        .is_free_under(*p.space(), Some(&tmp))
+                    if !AvailabilityView::new(self.ctx.berth, *r.time())
+                        .is_free_under(*r.space(), Some(&tmp))
                     {
                         return Err(PlanError::Overlap);
                     }
-                    tmp.occupy(self.ctx.berth, *p.time(), *p.space());
+                    tmp.occupy(self.ctx.berth, *r.time(), *r.space());
                 }
             }
         }
 
-        let mut occupy_rects: HashSet<OccupancyRect<T>> = HashSet::new();
-        let mut free_rects: HashSet<OccupancyRect<T>> = HashSet::new();
+        let mut occupy_rects = HashSet::new();
+        let mut free_rects = HashSet::new();
         for op in &self.ops {
-            let p = op.payload();
-            let k = OccupancyRect::from((p.time(), p.space()));
             match op {
-                BerthOccupancyChangeOperation::Occupy(_) => {
-                    occupy_rects.insert(k);
+                BerthOccupancyChangeOperation::Occupy(r) => {
+                    occupy_rects.insert(*r);
                 }
-                BerthOccupancyChangeOperation::Free(_) => {
-                    free_rects.insert(k);
+                BerthOccupancyChangeOperation::Free(r) => {
+                    free_rects.insert(*r);
                 }
             }
         }
@@ -1003,7 +1014,7 @@ where
                     {
                         return Err(PlanError::SlotStale(re.id()));
                     }
-                    let k = OccupancyRect::from((&re.time(), &re.space()));
+                    let k = OccupancyRect::from(re);
                     if !occupy_rects.contains(&k) {
                         return Err(PlanError::SlotStale(re.id()));
                     }
@@ -1013,19 +1024,8 @@ where
                     let Some(asg) = self.ctx.baseline_assignment(*id)? else {
                         return Err(PlanError::NoBaselineAssignment(*id));
                     };
-                    let request = self.ctx.request(*id)?;
-                    let length = request.length();
-                    let processing_duration = request.processing_duration();
 
-                    let start_position = asg.start_position();
-                    let end_position = SpacePosition::new(start_position.value() + length.value());
-                    let space = SpaceInterval::new(start_position, end_position);
-
-                    let start_time = asg.start_time();
-                    let end_time = TimePoint::new(start_time.value() + processing_duration.value());
-                    let time = TimeInterval::new(start_time, end_time);
-
-                    let k = OccupancyRect::from((&time, &space));
+                    let k: OccupancyRect<T> = OccupancyRect::from(asg);
                     if !free_rects.contains(&k) {
                         return Err(PlanError::SlotStale(*id));
                     }
@@ -1049,20 +1049,20 @@ where
     }
 
     #[inline]
-    fn rebuild_overlay(&mut self) {
-        let mut ovl = BerthOccupancyOverlay::new();
-        for op in &self.ops {
-            let p = op.payload();
-            match op {
-                BerthOccupancyChangeOperation::Free(_) => {
-                    ovl.free(self.ctx.berth, *p.time(), *p.space());
-                }
-                BerthOccupancyChangeOperation::Occupy(_) => {
-                    ovl.occupy(self.ctx.berth, *p.time(), *p.space());
-                }
-            }
-        }
-        self.overlay = ovl;
+    fn apply_occupy(&mut self, time: TimeInterval<T>, space: SpaceInterval) {
+        self.overlay.occupy(self.ctx.berth, time, space);
+    }
+    #[inline]
+    fn undo_occupy(&mut self, time: TimeInterval<T>, space: SpaceInterval) {
+        self.overlay.undo_occupy(self.ctx.berth, time, space);
+    }
+    #[inline]
+    fn apply_free(&mut self, time: TimeInterval<T>, space: SpaceInterval) {
+        self.overlay.free(self.ctx.berth, time, space);
+    }
+    #[inline]
+    fn undo_free(&mut self, time: TimeInterval<T>, space: SpaceInterval) {
+        self.overlay.undo_free(self.ctx.berth, time, space);
     }
 
     fn ensure_baseline_cleared_if_any(
@@ -1076,92 +1076,47 @@ where
         {
             return Ok(RemoveResult::Noop);
         }
-
         let Some(baseline) = self.ctx.baseline_assignment(request_id)? else {
             return Ok(RemoveResult::Noop);
         };
-
-        let req = self.ctx.request(request_id)?;
-        let len = req.length();
-        let dur = req.processing_duration();
-
-        let sp = baseline.start_position();
-        let se = SpacePosition::new(sp.value() + len.value());
-        let space = SpaceInterval::new(sp, se);
-
-        let tp = baseline.start_time();
-        let te = TimePoint::new(tp.value() + dur.value());
-        let time = TimeInterval::new(tp, te);
-
-        self.ops.push(BerthOccupancyChangeOperation::Free(
-            BerthOccupancyChangePayload::new(time, space),
-        ));
+        let rect: OccupancyRect<T> = OccupancyRect::from(baseline);
+        self.ops.push(BerthOccupancyChangeOperation::Free(rect));
         self.edits.push(AssignEdit::Clear(request_id));
-        self.rebuild_overlay();
-
-        Ok(RemoveResult::Freed(FreeSlot::new(time.start(), space)))
-    }
-
-    fn revert_cleared_baseline(&mut self, request_id: RequestId) -> bool {
-        let Some(clear_idx) = self
-            .edits
-            .iter()
-            .position(|e| matches!(e, AssignEdit::Clear(id) if *id == request_id))
-        else {
-            return false;
-        };
-
-        let Some(baseline) = self.ctx.baseline_assignment(request_id).ok().flatten() else {
-            self.edits.swap_remove(clear_idx);
-            return true;
-        };
-
-        let req = self.ctx.request(request_id).expect("request exists");
-        let len = req.length();
-        let dur = req.processing_duration();
-
-        let sp = baseline.start_position();
-        let se = SpacePosition::new(sp.value() + len.value());
-        let space = SpaceInterval::new(sp, se);
-
-        let tp = baseline.start_time();
-        let te = TimePoint::new(tp.value() + dur.value());
-        let time = TimeInterval::new(tp, te);
-
-        self.edits.swap_remove(clear_idx);
-
-        if let Some(op_idx) = self.ops.iter().position(|op| {
-            matches!(op, BerthOccupancyChangeOperation::Free(_))
-                && op.payload().time() == &time
-                && op.payload().space() == &space
-        }) {
-            self.ops.swap_remove(op_idx);
+        if let Some(prev) = self.staging.remove_clear(request_id) {
+            self.undo_free(prev.time, prev.space);
         }
 
-        self.rebuild_overlay();
-        true
+        self.staging.put_clear(request_id, rect);
+        self.apply_free(*rect.time(), *rect.space());
+
+        Ok(RemoveResult::Freed(FreeSlot::new(
+            rect.time().start(),
+            *rect.space(),
+        )))
     }
 
     fn cancel_planned(&mut self, id: RequestId) -> RemoveResult<T> {
-        let Some((idx, time, space)) = self.edits.iter().enumerate().find_map(|(i, e)| match e {
-            AssignEdit::Set(re) if re.id() == id => Some((i, re.time(), re.space())),
-            _ => None,
-        }) else {
-            return RemoveResult::Noop;
-        };
+        if let Some(rect) = self.staging.remove_set(id) {
+            if let Some(i) = self
+                .edits
+                .iter()
+                .position(|e| matches!(e, AssignEdit::Set(x) if x.id() == id))
+            {
+                self.edits.swap_remove(i);
+            }
+            if let Some(i) = self
+                .ops
+                .iter()
+                .position(|op| matches!(op, BerthOccupancyChangeOperation::Occupy(r) if *r == rect))
+            {
+                self.ops.swap_remove(i);
+            }
+            self.undo_occupy(rect.time, rect.space);
 
-        self.edits.swap_remove(idx);
-
-        if let Some(op_idx) = self.ops.iter().position(|op| {
-            matches!(op, BerthOccupancyChangeOperation::Occupy(_))
-                && op.payload().time() == &time
-                && op.payload().space() == &space
-        }) {
-            self.ops.swap_remove(op_idx);
+            return RemoveResult::Freed(FreeSlot::new(rect.time.start(), rect.space));
         }
 
-        self.rebuild_overlay();
-        RemoveResult::Freed(FreeSlot::new(time.start(), space))
+        RemoveResult::Noop
     }
 }
 
@@ -1217,8 +1172,8 @@ mod tests {
         let s_b = SpaceInterval::new(SpacePosition::new(2), SpacePosition::new(9));
 
         let ops = vec![
-            BerthOccupancyChangeOperation::Free(BerthOccupancyChangePayload::new(t_a, s_a)),
-            BerthOccupancyChangeOperation::Occupy(BerthOccupancyChangePayload::new(t_b, s_b)),
+            BerthOccupancyChangeOperation::Free(OccupancyRect::new(t_a, s_a)),
+            BerthOccupancyChangeOperation::Occupy(OccupancyRect::new(t_b, s_b)),
         ];
         let fp = Footprint::from(ops.as_slice());
         assert_eq!(fp.time().start().value(), 0);
@@ -1479,9 +1434,11 @@ mod tests {
 
         let space = SpaceInterval::new(SpacePosition::new(2), SpacePosition::new(6));
         let time = TimeInterval::new(TimePoint::new(1), TimePoint::new(4));
-        builder.ops.push(BerthOccupancyChangeOperation::Occupy(
-            BerthOccupancyChangePayload::new(time, space),
-        ));
+        builder
+            .ops
+            .push(BerthOccupancyChangeOperation::Occupy(OccupancyRect::new(
+                time, space,
+            )));
 
         assert!(builder.finish().is_err());
     }

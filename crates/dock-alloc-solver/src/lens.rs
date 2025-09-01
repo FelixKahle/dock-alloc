@@ -572,6 +572,38 @@ impl<T: PrimInt + Signed> BerthOccupancyOverlay<T> {
         }
     }
 
+    #[inline]
+    pub fn remove_occupy(&mut self, time: TimePoint<T>, space: SpaceInterval) {
+        if space.start() >= space.end() {
+            return;
+        }
+        let mut should_remove_key = false;
+        if let Some(set) = self.occupied_by_time.get_mut(&time) {
+            let new_set = set.subtract(&SpaceIntervalSet::from_vec(vec![space]));
+            should_remove_key = new_set.is_empty();
+            *set = new_set;
+        }
+        if should_remove_key {
+            self.occupied_by_time.remove(&time);
+        }
+    }
+
+    pub fn undo_occupy<Q>(
+        &mut self,
+        berth: &BerthOccupancy<T, Q>,
+        time_window: TimeInterval<T>,
+        space_interval: SpaceInterval,
+    ) where
+        Q: QuayRead + QuayWrite + Clone + PartialEq,
+    {
+        if let Some(pred) = berth.slice_predecessor_timepoint(time_window.start()) {
+            self.remove_occupy(pred, space_interval);
+        }
+        for tp in berth.iter_timepoints(time_window) {
+            self.remove_occupy(tp, space_interval);
+        }
+    }
+
     pub fn free<Q>(
         &mut self,
         berth: &BerthOccupancy<T, Q>,
@@ -587,6 +619,39 @@ impl<T: PrimInt + Signed> BerthOccupancyOverlay<T> {
         }
         for timepoint in berth.iter_timepoints(time_window) {
             self.add_free(timepoint, space_interval);
+        }
+    }
+
+    #[inline]
+    pub fn remove_free(&mut self, time: TimePoint<T>, space: SpaceInterval) {
+        if space.start() >= space.end() {
+            return;
+        }
+
+        let mut should_remove_key = false;
+        if let Some(set) = self.free_by_time.get_mut(&time) {
+            let new_set = set.subtract(&SpaceIntervalSet::from_vec(vec![space]));
+            should_remove_key = new_set.is_empty();
+            *set = new_set;
+        }
+        if should_remove_key {
+            self.free_by_time.remove(&time);
+        }
+    }
+
+    pub fn undo_free<Q>(
+        &mut self,
+        berth: &BerthOccupancy<T, Q>,
+        time_window: TimeInterval<T>,
+        space_interval: SpaceInterval,
+    ) where
+        Q: QuayRead + QuayWrite + Clone + PartialEq,
+    {
+        if let Some(pred) = berth.slice_predecessor_timepoint(time_window.start()) {
+            self.remove_free(pred, space_interval);
+        }
+        for tp in berth.iter_timepoints(time_window) {
+            self.remove_free(tp, space_interval);
         }
     }
 }
