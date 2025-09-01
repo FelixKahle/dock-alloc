@@ -630,8 +630,7 @@ impl<T: PrimInt + Signed + Display> Display for FreeSlot<T> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Explorer<'ctx, 'ovl, T, C, Q>
+pub struct Explorer<'ctx, 'ovl, 'ed, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
@@ -639,9 +638,10 @@ where
 {
     ctx: &'ctx ProposeCtx<'ctx, T, C, Q>,
     overlay: &'ovl BerthOccupancyOverlay<T>,
+    edits: &'ed [AssignEdit<T>],
 }
 
-impl<'ctx, 'ovl, T, C, Q> Display for Explorer<'ctx, 'ovl, T, C, Q>
+impl<'ctx, 'ovl, 'ed, T, C, Q> Display for Explorer<'ctx, 'ovl, 'ed, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
@@ -652,15 +652,53 @@ where
     }
 }
 
-impl<'ctx, 'ovl, T, C, Q> Explorer<'ctx, 'ovl, T, C, Q>
+impl<'ctx, 'ovl, 'ed, T, C, Q> Explorer<'ctx, 'ovl, 'ed, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
     Q: Quay,
 {
-    #[inline]
-    fn new(ctx: &'ctx ProposeCtx<'ctx, T, C, Q>, overlay: &'ovl BerthOccupancyOverlay<T>) -> Self {
-        Self { ctx, overlay }
+    pub fn new(
+        ctx: &'ctx ProposeCtx<'ctx, T, C, Q>,
+        overlay: &'ovl BerthOccupancyOverlay<T>,
+        edits: &'ed [AssignEdit<T>],
+    ) -> Self {
+        Self {
+            ctx,
+            overlay,
+            edits,
+        }
+    }
+
+    pub fn iter_tentatives(&self) -> impl Iterator<Item = Tentative<'ctx, T, C>> + '_ {
+        let baseline = self
+            .ctx
+            .problem()
+            .preassigned()
+            .iter()
+            .filter(move |(id, _)| {
+                !self.edits.iter().any(|e| {
+                    matches!(
+                        *e,
+                        AssignEdit::Clear(cid) if cid == **id
+                    )
+                })
+            })
+            .map(|(_, fx)| Tentative::new_branded(*fx.assignment()));
+
+        let sets = self.edits.iter().filter_map(move |e| match *e {
+            AssignEdit::Set(re) => {
+                let req = *self.ctx.request(re.id()).ok()?;
+                Some(Tentative::new_branded(Assignment::new(
+                    req,
+                    re.space().start(),
+                    re.time().start(),
+                )))
+            }
+            _ => None,
+        });
+
+        baseline.chain(sets)
     }
 
     pub fn iter_free_slots(
@@ -681,7 +719,7 @@ where
             *self.ctx.job_space_window(id)?,
             Some(self.overlay),
         )
-        .map(|(start_time, free_run)| FreeSlot::new(start_time, free_run)))
+        .map(|(t, run)| FreeSlot::new(t, run)))
     }
 
     #[inline]
@@ -703,16 +741,16 @@ where
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum RemoveOutcome {
+pub enum RemoveResult<T: PrimInt + Signed> {
     Noop,
-    Removed,
+    Freed(FreeSlot<T>),
 }
 
-impl std::fmt::Display for RemoveOutcome {
+impl<T: PrimInt + Signed + Display> std::fmt::Display for RemoveResult<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RemoveOutcome::Noop => write!(f, "Noop"),
-            RemoveOutcome::Removed => write!(f, "Removed"),
+            RemoveResult::Noop => write!(f, "Noop"),
+            RemoveResult::Freed(slot) => write!(f, "Freed({})", slot),
         }
     }
 }
@@ -781,60 +819,65 @@ where
     }
 
     #[inline]
-    pub fn explorer(&self) -> Explorer<'brand, '_, T, C, Q> {
-        Explorer::new(self.ctx, &self.overlay)
+    pub fn explorer(&self) -> Explorer<'brand, '_, '_, T, C, Q> {
+        Explorer::new(self.ctx, &self.overlay, &self.edits)
+    }
+
+    #[inline]
+    pub fn with_explorer<F, R>(&self, f: F) -> R
+    where
+        F: for<'ovl, 'ed> FnOnce(Explorer<'brand, 'ovl, 'ed, T, C, Q>) -> R,
+    {
+        f(self.explorer())
     }
 
     pub fn remove(
         &mut self,
         tentative: &Tentative<'brand, T, C>,
-    ) -> Result<RemoveOutcome, PlanError> {
-        let tentative_assignment = tentative.assignment();
-        let request_id = tentative_assignment.request().id();
-        debug_assert_eq!(
-            tentative_assignment.request().id(),
-            request_id,
-            "handle/id mismatch"
-        );
+    ) -> Result<RemoveResult<T>, PlanError> {
+        let id = tentative.assignment().request().id();
 
-        if self.ctx.is_locked(request_id)? {
-            return Err(PlanError::Locked(request_id));
+        if self.ctx.is_locked(id)? {
+            return Err(PlanError::Locked(id));
+        }
+
+        match self.cancel_planned(id) {
+            RemoveResult::Freed(slot) => return Ok(RemoveResult::Freed(slot)),
+            RemoveResult::Noop => {}
         }
 
         if self
             .edits
             .iter()
-            .any(|edit| matches!(edit, AssignEdit::Clear(id) if *id == request_id))
+            .any(|e| matches!(e, AssignEdit::Clear(cid) if *cid == id))
         {
-            return Ok(RemoveOutcome::Noop);
+            if let Some(baseline) = self.ctx.baseline_assignment(id)? {
+                let req = self.ctx.request(id)?;
+                let len = req.length();
+                let dur = req.processing_duration();
+
+                let sp = baseline.start_position();
+                let se = SpacePosition::new(sp.value() + len.value());
+                let space = SpaceInterval::new(sp, se);
+
+                let tp = baseline.start_time();
+                let te = TimePoint::new(tp.value() + dur.value());
+                let time = TimeInterval::new(tp, te);
+
+                if AvailabilityView::new(self.ctx.berth, time)
+                    .is_free_under(space, Some(&self.overlay))
+                {
+                    return Ok(RemoveResult::Freed(FreeSlot::new(time.start(), space)));
+                }
+            }
+            return Ok(RemoveResult::Noop);
         }
 
-        let Some(baseline_assignment) = self.ctx.baseline_assignment(request_id)? else {
-            return Ok(RemoveOutcome::Noop);
-        };
+        if self.ctx.baseline_assignment(id)?.is_some() {
+            return self.ensure_baseline_cleared_if_any(id);
+        }
 
-        let request = self.ctx.request(request_id)?;
-        let request_length = request.length();
-        let processing_duration = request.processing_duration();
-
-        let baseline_start_position = baseline_assignment.start_position();
-        let baseline_end_position =
-            SpacePosition::new(baseline_start_position.value() + request_length.value());
-        let baseline_space = SpaceInterval::new(baseline_start_position, baseline_end_position);
-
-        let baseline_start_time = baseline_assignment.start_time();
-        let baseline_end_time =
-            TimePoint::new(baseline_start_time.value() + processing_duration.value());
-        let baseline_time = TimeInterval::new(baseline_start_time, baseline_end_time);
-
-        self.ops.push(BerthOccupancyChangeOperation::Free(
-            BerthOccupancyChangePayload::new(baseline_time, baseline_space),
-        ));
-        self.edits.push(AssignEdit::Clear(request_id));
-        self.overlay
-            .free(self.ctx.berth, baseline_time, baseline_space);
-
-        Ok(RemoveOutcome::Removed)
+        Ok(RemoveResult::Noop)
     }
 
     pub fn place_into_free_slot(
@@ -860,7 +903,6 @@ where
             return Err(PlanError::SlotStale(request_id));
         }
 
-        // Build time rectangle from slot start + processing duration.
         let slot_start_time = free_slot.start_time();
         let slot_end_time = TimePoint::new(slot_start_time.value() + processing_duration.value());
         let target_time_interval = TimeInterval::new(slot_start_time, slot_end_time);
@@ -883,11 +925,7 @@ where
                 return Ok(());
             }
         }
-
-        // If a baseline exists and wasn't cleared yet, clear it first (self-overlaps OK thereafter).
         self.ensure_baseline_cleared_if_any(request_id)?;
-
-        // Validate against request windows (defensive).
         let feasible_time_window = self.ctx.job_time_window(request_id)?;
         let feasible_space_window = self.ctx.job_space_window(request_id)?;
         if target_time_interval.start() < feasible_time_window.start()
@@ -897,15 +935,12 @@ where
         {
             return Err(PlanError::SlotStale(request_id));
         }
-
-        // Check availability under current overlay (should pass if `free_slot` came from this overlay).
         if !AvailabilityView::new(self.ctx.berth, target_time_interval)
             .is_free_under(target_space_interval, Some(&self.overlay))
         {
             return Err(PlanError::Overlap);
         }
 
-        // Stage changes + update overlay.
         self.ops.push(BerthOccupancyChangeOperation::Occupy(
             BerthOccupancyChangePayload::new(target_time_interval, target_space_interval),
         ));
@@ -914,8 +949,7 @@ where
             target_time_interval,
             target_space_interval,
         )));
-        self.overlay
-            .occupy(self.ctx.berth, target_time_interval, target_space_interval);
+        self.rebuild_overlay();
 
         Ok(())
     }
@@ -1014,24 +1048,39 @@ where
         Ok(Plan::new(self.ops, self.edits, self.ctx.stamp))
     }
 
+    #[inline]
+    fn rebuild_overlay(&mut self) {
+        let mut ovl = BerthOccupancyOverlay::new();
+        for op in &self.ops {
+            let p = op.payload();
+            match op {
+                BerthOccupancyChangeOperation::Free(_) => {
+                    ovl.free(self.ctx.berth, *p.time(), *p.space());
+                }
+                BerthOccupancyChangeOperation::Occupy(_) => {
+                    ovl.occupy(self.ctx.berth, *p.time(), *p.space());
+                }
+            }
+        }
+        self.overlay = ovl;
+    }
+
     fn ensure_baseline_cleared_if_any(
         &mut self,
         request_id: RequestId,
-    ) -> Result<RemoveOutcome, PlanError> {
-        // already cleared?
+    ) -> Result<RemoveResult<T>, PlanError> {
         if self
             .edits
             .iter()
             .any(|edit| matches!(edit, AssignEdit::Clear(id) if *id == request_id))
         {
-            return Ok(RemoveOutcome::Noop);
+            return Ok(RemoveResult::Noop);
         }
 
         let Some(baseline) = self.ctx.baseline_assignment(request_id)? else {
-            return Ok(RemoveOutcome::Noop);
+            return Ok(RemoveResult::Noop);
         };
 
-        // compute exact baseline rectangle
         let req = self.ctx.request(request_id)?;
         let len = req.length();
         let dur = req.processing_duration();
@@ -1044,29 +1093,27 @@ where
         let te = TimePoint::new(tp.value() + dur.value());
         let time = TimeInterval::new(tp, te);
 
-        // stage free + clear and update overlay
         self.ops.push(BerthOccupancyChangeOperation::Free(
             BerthOccupancyChangePayload::new(time, space),
         ));
         self.edits.push(AssignEdit::Clear(request_id));
-        self.overlay.free(self.ctx.berth, time, space);
+        self.rebuild_overlay();
 
-        Ok(RemoveOutcome::Removed)
+        Ok(RemoveResult::Freed(FreeSlot::new(time.start(), space)))
     }
 
-    /// Undo a previously staged baseline Clear if caller returns to the same baseline slot.
-    fn revert_cleared_baseline(&mut self, request_id: RequestId) -> RemoveOutcome {
+    fn revert_cleared_baseline(&mut self, request_id: RequestId) -> bool {
         let Some(clear_idx) = self
             .edits
             .iter()
             .position(|e| matches!(e, AssignEdit::Clear(id) if *id == request_id))
         else {
-            return RemoveOutcome::Noop;
+            return false;
         };
 
         let Some(baseline) = self.ctx.baseline_assignment(request_id).ok().flatten() else {
             self.edits.swap_remove(clear_idx);
-            return RemoveOutcome::Removed;
+            return true;
         };
 
         let req = self.ctx.request(request_id).expect("request exists");
@@ -1081,10 +1128,8 @@ where
         let te = TimePoint::new(tp.value() + dur.value());
         let time = TimeInterval::new(tp, te);
 
-        // drop Clear
         self.edits.swap_remove(clear_idx);
 
-        // drop matching Free
         if let Some(op_idx) = self.ops.iter().position(|op| {
             matches!(op, BerthOccupancyChangeOperation::Free(_))
                 && op.payload().time() == &time
@@ -1093,17 +1138,16 @@ where
             self.ops.swap_remove(op_idx);
         }
 
-        // restore overlay
-        self.overlay.occupy(self.ctx.berth, time, space);
-        RemoveOutcome::Removed
+        self.rebuild_overlay();
+        true
     }
 
-    fn cancel_planned(&mut self, id: RequestId) -> RemoveOutcome {
+    fn cancel_planned(&mut self, id: RequestId) -> RemoveResult<T> {
         let Some((idx, time, space)) = self.edits.iter().enumerate().find_map(|(i, e)| match e {
             AssignEdit::Set(re) if re.id() == id => Some((i, re.time(), re.space())),
             _ => None,
         }) else {
-            return RemoveOutcome::Noop;
+            return RemoveResult::Noop;
         };
 
         self.edits.swap_remove(idx);
@@ -1116,8 +1160,8 @@ where
             self.ops.swap_remove(op_idx);
         }
 
-        self.overlay.free(self.ctx.berth, time, space);
-        RemoveOutcome::Removed
+        self.rebuild_overlay();
+        RemoveResult::Freed(FreeSlot::new(time.start(), space))
     }
 }
 
@@ -1197,8 +1241,9 @@ mod tests {
 
         let ctx = mk_ctx(&berth, &problem);
         let overlay = BerthOccupancyOverlay::new();
+        let edits = Vec::new();
 
-        let explorer = Explorer::new(&ctx, &overlay);
+        let explorer = Explorer::new(&ctx, &overlay, &edits);
         let mh = ctx.movable_handle(RequestId::new(1)).unwrap();
         let slots: Vec<_> = explorer.iter_free_slots(mh).unwrap().take(3).collect();
 
@@ -1244,7 +1289,6 @@ mod tests {
         let ctx = mk_ctx(&berth, &problem);
         let mut builder = PlanBuilder::new(&ctx);
 
-        // legacy remove() on unassigned is a Noop
         let id = RequestId::new(1);
         let req_copy = *ctx.request(id).expect("request exists");
         let dummy_tent = unchecked_for_tests(Assignment::new(
@@ -1254,18 +1298,17 @@ mod tests {
         ));
         assert!(matches!(
             builder.remove(&dummy_tent),
-            Ok(super::RemoveOutcome::Noop)
+            Ok(super::RemoveResult::Noop)
         ));
 
         let mh = ctx.movable_handle(RequestId::new(1)).unwrap();
-        let slot = {
-            let explorer = builder.explorer(); // &self borrow starts
+        let slot = builder.with_explorer(|explorer| {
             explorer
                 .iter_free_slots(mh)
                 .unwrap()
                 .next()
-                .expect("a free slot exists") // FreeSlot is Copy → owned value
-        };
+                .expect("a free slot exists")
+        });
         builder
             .place_into_free_slot(mh, slot, |run, _len| run.start())
             .unwrap();
@@ -1323,7 +1366,7 @@ mod tests {
             TimePoint::new(0),
         ));
         let outcome = builder.remove(&tent);
-        assert!(matches!(outcome, Ok(super::RemoveOutcome::Noop)));
+        assert!(matches!(outcome, Ok(super::RemoveResult::Noop)));
     }
 
     #[test]
@@ -1370,6 +1413,7 @@ mod tests {
         };
 
         let ctx = mk_ctx(&berth, &problem);
+        let edits = Vec::new();
 
         let mut overlay = BerthOccupancyOverlay::new();
         overlay.add_occupy(
@@ -1377,7 +1421,7 @@ mod tests {
             SpaceInterval::new(SpacePosition::new(2), SpacePosition::new(5)),
         );
 
-        let explorer = Explorer::new(&ctx, &overlay);
+        let explorer = Explorer::new(&ctx, &overlay, &edits);
         let rect = SpaceInterval::new(SpacePosition::new(2), SpacePosition::new(4));
         assert!(
             !explorer.is_free(
@@ -1440,5 +1484,281 @@ mod tests {
         ));
 
         assert!(builder.finish().is_err());
+    }
+
+    #[test]
+    fn test_remove_cancels_staged_set_and_yields_freed_then_explorer_recovers_slot() {
+        use crate::quay::BTreeMapQuay;
+
+        let quay_length = SpaceLength::new(30);
+        let berth = BerthOccupancy::<i64, BTreeMapQuay>::new(quay_length);
+
+        let req = mk_req(1, 5, 4, 0, 50, 0, 30);
+        let problem = {
+            let mut pb = ProblemBuilder::new(quay_length);
+            pb.add_unassigned_request(req).unwrap();
+            pb.build()
+        };
+        let ctx = mk_ctx(&berth, &problem);
+
+        let mut builder = PlanBuilder::new(&ctx);
+        let mh = ctx.movable_handle(RequestId::new(1)).unwrap();
+
+        // Place once (left-aligned)
+        let slot = builder.with_explorer(|ex| ex.iter_free_slots(mh).unwrap().next().unwrap());
+        let run = slot.free_run();
+        let chosen_space = SpaceInterval::new(
+            run.start(),
+            SpacePosition::new(run.start().value() + req.length().value()),
+        );
+        builder
+            .place_into_free_slot(mh, slot, |r, _| r.start())
+            .expect("initial placement must succeed");
+
+        // Remove the staged Set, get the freed slot back
+        let dummy_tent = unchecked_for_tests(Assignment::new(
+            *ctx.request(RequestId::new(1)).unwrap(),
+            chosen_space.start(),
+            slot.start_time(),
+        ));
+        let freed_slot = match builder.remove(&dummy_tent).expect("remove must succeed") {
+            RemoveResult::Freed(s) => s,
+            _ => panic!("expected Freed"),
+        };
+
+        // The explorer should enumerate some slot that can host the freed rectangle.
+        // Don't require equal start_time; allow coalesced/canonical starts.
+        let proc = req.processing_duration().value();
+        let freed_ok_according_to_iterator = builder.with_explorer(|ex| {
+            ex.iter_free_slots(mh).unwrap().take(256).any(|s| {
+                // space containment
+                s.free_run().start().value() <= freed_slot.free_run().start().value()
+                        && s.free_run().end().value() >= freed_slot.free_run().end().value()
+                        // time containment: the enumerated start can begin at or before freed start,
+                        // but must allow finishing at freed_start + proc
+                        && s.start_time().value() <= freed_slot.start_time().value()
+                        && s.start_time().value() + proc >= freed_slot.start_time().value()
+            })
+        });
+        assert!(
+            freed_ok_according_to_iterator,
+            "explorer should enumerate a slot that can host the freed rectangle (not necessarily same start_time)"
+        );
+
+        // Strong end-to-end witness: re-place exactly into the freed slot must succeed.
+        builder
+            .place_into_free_slot(mh, freed_slot, |run, _| run.start())
+            .expect("re-placing into the freed slot should succeed");
+    }
+
+    #[test]
+    fn test_iter_tentatives_includes_sets_and_excludes_cleared_preassigned() {
+        use crate::quay::BTreeMapQuay;
+
+        // Problem with one preassigned (locked) and one movable request.
+        let quay_length = SpaceLength::new(25);
+        let berth = BerthOccupancy::<i64, BTreeMapQuay>::new(quay_length);
+
+        let movable = mk_req(10, 5, 3, 0, 40, 0, 25);
+        let fixed_req = mk_req(20, 4, 2, 0, 40, 0, 25);
+        let fixed_asg = Assignment::new(fixed_req, SpacePosition::new(6), TimePoint::new(5));
+
+        let problem = {
+            let mut pb = ProblemBuilder::new(quay_length);
+            pb.add_unassigned_request(movable).unwrap();
+            pb.add_preassigned(Fixed::new(fixed_asg)).unwrap();
+            pb.build()
+        };
+
+        let ctx = mk_ctx(&berth, &problem);
+        let mut builder = PlanBuilder::new(&ctx);
+
+        // Place the movable request somewhere.
+        let mh = ctx.movable_handle(RequestId::new(10)).unwrap();
+        let slot = builder.with_explorer(|ex| ex.iter_free_slots(mh).unwrap().next().unwrap());
+        builder
+            .place_into_free_slot(mh, slot, |run, _len| run.start())
+            .unwrap();
+
+        // Tentatives now include the Set + (by default) the preassigned baseline.
+        // But we want to ensure that if the preassigned is *cleared* (via ensure_baseline_cleared_if_any),
+        // it disappears from the iterator, leaving only the Set.
+        let /* RemoveResult */ _ = builder
+            .ensure_baseline_cleared_if_any(RequestId::new(20))
+            .expect("clear baseline must succeed for the fixed id"); // returns Freed(..)
+
+        let tents: Vec<_> = builder.with_explorer(|ex| ex.iter_tentatives().collect());
+        assert_eq!(
+            tents.len(),
+            1,
+            "only the staged Set should remain after clearing the baseline"
+        );
+
+        let a = tents[0].assignment();
+        assert_eq!(a.request().id(), RequestId::new(10));
+        // Plausibility: staged Set should match the slot's start time.
+        assert_eq!(a.start_time().value(), slot.start_time().value());
+    }
+
+    #[test]
+    fn test_remove_noop_preserves_freedom_and_explorer_slots() {
+        use crate::quay::BTreeMapQuay;
+
+        let quay_length = SpaceLength::new(18);
+        let berth = BerthOccupancy::<i64, BTreeMapQuay>::new(quay_length);
+
+        let req = mk_req(1, 3, 2, 0, 30, 0, 18);
+        let problem = {
+            let mut pb = ProblemBuilder::new(quay_length);
+            pb.add_unassigned_request(req).unwrap();
+            pb.build()
+        };
+        let ctx = mk_ctx(&berth, &problem);
+        let mut builder = PlanBuilder::new(&ctx);
+        let mh = ctx.movable_handle(RequestId::new(1)).unwrap();
+
+        // Count some slots before a no-op remove.
+        let count_before =
+            builder.with_explorer(|ex| ex.iter_free_slots(mh).unwrap().take(16).count());
+
+        // Remove with nothing staged/baseline → Noop.
+        let dummy = unchecked_for_tests(Assignment::new(
+            *ctx.request(RequestId::new(1)).unwrap(),
+            SpacePosition::new(0),
+            TimePoint::new(0),
+        ));
+        let res = builder.remove(&dummy).expect("remove should not error");
+        assert!(matches!(res, RemoveResult::Noop));
+
+        // Slots should remain unchanged.
+        let count_after =
+            builder.with_explorer(|ex| ex.iter_free_slots(mh).unwrap().take(16).count());
+        assert_eq!(
+            count_before, count_after,
+            "no-op remove should not change free slots"
+        );
+    }
+
+    #[test]
+    fn test_is_free_reflects_remove_freed_region() {
+        use crate::quay::BTreeMapQuay;
+
+        let quay_length = SpaceLength::new(22);
+        let berth = BerthOccupancy::<i64, BTreeMapQuay>::new(quay_length);
+
+        let req = mk_req(1, 6, 4, 0, 50, 0, 22);
+        let problem = {
+            let mut pb = ProblemBuilder::new(quay_length);
+            pb.add_unassigned_request(req).unwrap();
+            pb.build()
+        };
+        let ctx = mk_ctx(&berth, &problem);
+
+        let mut builder = PlanBuilder::new(&ctx);
+        let mh = ctx.movable_handle(RequestId::new(1)).unwrap();
+
+        let slot = builder.with_explorer(|ex| ex.iter_free_slots(mh).unwrap().next().unwrap());
+        let run = slot.free_run();
+        let chosen_space = SpaceInterval::new(
+            run.start(),
+            SpacePosition::new(run.start().value() + req.length().value()),
+        );
+
+        builder
+            .place_into_free_slot(mh, slot, |r, _| r.start())
+            .unwrap();
+
+        // Now remove it and assert is_free on that exact time/space.
+        let dummy = unchecked_for_tests(Assignment::new(
+            *ctx.request(RequestId::new(1)).unwrap(),
+            chosen_space.start(),
+            slot.start_time(),
+        ));
+        let res = builder.remove(&dummy).unwrap();
+        let freed = match res {
+            RemoveResult::Freed(s) => s,
+            _ => panic!("expected Freed"),
+        };
+
+        // Recreate the time interval to check `is_free`.
+        let end_t = TimePoint::new(freed.start_time().value() + req.processing_duration().value());
+        let time = TimeInterval::new(freed.start_time(), end_t);
+        let rect = freed.free_run();
+
+        let ok = builder.with_explorer(|ex| ex.is_free(time, rect));
+        assert!(ok, "region reported by remove() must be free under overlay");
+    }
+
+    #[test]
+    fn test_overlap_detected_when_trying_to_place_into_occupied_rect() {
+        use crate::quay::BTreeMapQuay;
+
+        let quay_length = SpaceLength::new(40);
+        let berth = BerthOccupancy::<i64, BTreeMapQuay>::new(quay_length);
+
+        // Two movable requests with same windows/length so they conflict if placed identically.
+        let r1 = mk_req(1, 7, 4, 0, 60, 0, 40);
+        let r2 = mk_req(2, 7, 4, 0, 60, 0, 40);
+
+        let problem = {
+            let mut pb = ProblemBuilder::new(quay_length);
+            pb.add_unassigned_request(r1).unwrap();
+            pb.add_unassigned_request(r2).unwrap();
+            pb.build()
+        };
+        let ctx = mk_ctx(&berth, &problem);
+
+        let mut builder = PlanBuilder::new(&ctx);
+
+        // Place request 1 at some slot (left-aligned).
+        let mh1 = ctx.movable_handle(RequestId::new(1)).unwrap();
+        let slot1 = builder.with_explorer(|ex| ex.iter_free_slots(mh1).unwrap().next().unwrap());
+        let run1 = slot1.free_run();
+        let chosen_space1 = SpaceInterval::new(
+            run1.start(),
+            SpacePosition::new(run1.start().value() + r1.length().value()),
+        );
+        builder
+            .place_into_free_slot(mh1, slot1, |r, _| r.start())
+            .unwrap();
+
+        // Now attempt to place r2 into EXACTLY the same rect/time → must be Overlap.
+        let mh2 = ctx.movable_handle(RequestId::new(2)).unwrap();
+        let fake_slot_for_r2 = FreeSlot::new(slot1.start_time(), chosen_space1);
+        let err = builder.place_into_free_slot(mh2, fake_slot_for_r2, |r, _| r.start());
+        assert!(matches!(err, Err(PlanError::Overlap)));
+    }
+
+    #[test]
+    fn test_finish_after_clear_baseline_only_is_valid() {
+        use crate::quay::BTreeMapQuay;
+
+        // A plan that only clears a preassigned baseline (free + clear) should validate.
+        let quay_length = SpaceLength::new(20);
+        let berth = BerthOccupancy::<i64, BTreeMapQuay>::new(quay_length);
+
+        let fixed_req = mk_req(100, 4, 2, 0, 50, 0, 20);
+        let fixed_asg = Assignment::new(fixed_req, SpacePosition::new(3), TimePoint::new(7));
+
+        let problem = {
+            let mut pb = ProblemBuilder::new(quay_length);
+            pb.add_preassigned(Fixed::new(fixed_asg)).unwrap();
+            pb.build()
+        };
+        let ctx = mk_ctx(&berth, &problem);
+
+        let mut builder = PlanBuilder::new(&ctx);
+        // Use the internal helper to stage the free/clear pair.
+        let out = builder
+            .ensure_baseline_cleared_if_any(RequestId::new(100))
+            .expect("must be able to clear baseline");
+        assert!(matches!(out, RemoveResult::Freed(_)));
+
+        // Now finish() should validate (ops: 1 Free, edits: 1 Clear).
+        let plan = builder
+            .finish()
+            .expect("plan with only ‘clear baseline’ should be consistent");
+        assert_eq!(plan.operations().len(), 1);
+        assert_eq!(plan.edits().len(), 1);
     }
 }
