@@ -763,7 +763,7 @@ where
         h: MovableHandle<'ctx>,
     ) -> Result<impl Iterator<Item = FreeSlot<T>> + 'ctx + 'ovl, PlanError> {
         let id = h.id();
-        let req = *self.ctx.request(id)?;
+        let req = self.ctx.request(id)?;
         if self.ctx.is_locked(id)? {
             return Err(PlanError::Locked(id));
         }
@@ -774,6 +774,45 @@ where
             req.processing_duration(),
             req.length(),
             *self.ctx.job_space_window(id)?,
+            Some(self.overlay),
+        )
+        .map(|(t, run)| FreeSlot::new(t, run)))
+    }
+
+    pub fn iter_free_slots_in(
+        &self,
+        h: MovableHandle<'ctx>,
+        time_hint: Option<TimeInterval<T>>,
+        space_hint: Option<SpaceInterval>,
+    ) -> Result<impl Iterator<Item = FreeSlot<T>> + 'ctx + 'ovl, PlanError> {
+        let id = h.id();
+        let req = *self.ctx.request(id)?;
+        if self.ctx.is_locked(id)? {
+            return Err(PlanError::Locked(id));
+        }
+
+        let tw = *self.ctx.job_time_window(id)?;
+        let sw = *self.ctx.job_space_window(id)?;
+
+        let search_time = match time_hint {
+            Some(hint) => tw
+                .clamp(&hint)
+                .unwrap_or(TimeInterval::new(tw.end(), tw.end())),
+            None => tw,
+        };
+        let search_space = match space_hint {
+            Some(hint) => sw
+                .clamp(&hint)
+                .unwrap_or(SpaceInterval::new(sw.end(), sw.end())),
+            None => sw,
+        };
+
+        Ok(FreePlacementIter::new(
+            self.ctx.berth,
+            search_time,
+            req.processing_duration(),
+            req.length(),
+            search_space,
             Some(self.overlay),
         )
         .map(|(t, run)| FreeSlot::new(t, run)))
