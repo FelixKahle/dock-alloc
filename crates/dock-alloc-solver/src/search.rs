@@ -23,7 +23,7 @@ use crate::{
     domain::Version,
     lens::{AvailabilityView, BerthOccupancyOverlay, FreePlacementIter},
     occ::BerthOccupancy,
-    quay::{Quay, QuayRead},
+    quay::QuayRead,
 };
 use core::marker::PhantomData;
 use dock_alloc_core::domain::{SpaceInterval, TimeInterval, TimePoint};
@@ -46,6 +46,26 @@ impl<T: PrimInt + Signed> OccupancyRect<T> {
     #[inline]
     pub fn new(time: TimeInterval<T>, space: SpaceInterval) -> Self {
         Self { time, space }
+    }
+
+    #[inline]
+    pub fn start_time(&self) -> TimePoint<T> {
+        self.time.start()
+    }
+
+    #[inline]
+    pub fn end_time(&self) -> TimePoint<T> {
+        self.time.end()
+    }
+
+    #[inline]
+    pub fn start_pos(&self) -> SpacePosition {
+        self.space.start()
+    }
+
+    #[inline]
+    pub fn end_pos(&self) -> SpacePosition {
+        self.space.end()
     }
 
     #[inline]
@@ -344,39 +364,13 @@ impl<T: PrimInt + Signed> Plan<T> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct BerthOccupancySlot<T: PrimInt + Signed> {
-    start_time: TimePoint<T>,
-    space: SpaceInterval,
-}
-
-impl<T: PrimInt + Signed> BerthOccupancySlot<T> {
-    #[inline]
-    pub fn start_time(&self) -> TimePoint<T> {
-        self.start_time
-    }
-    #[inline]
-    pub fn space(&self) -> SpaceInterval {
-        self.space
-    }
-}
-
-impl<T: PrimInt + Signed + Display> Display for BerthOccupancySlot<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Slot(start_time: {}, space: {})",
-            self.start_time, self.space
-        )
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PlanError {
     UnknownRequest(RequestId),
     Locked(RequestId),
     SlotStale(RequestId),
     Overlap,
     NoBaselineAssignment(RequestId),
+    InconsistentPlan,
 }
 
 impl Display for PlanError {
@@ -389,6 +383,7 @@ impl Display for PlanError {
             PlanError::NoBaselineAssignment(id) => {
                 write!(f, "no baseline assignment to clear for request: {}", id)
             }
+            PlanError::InconsistentPlan => write!(f, "inconsistent plan state"),
         }
     }
 }
@@ -414,14 +409,9 @@ impl Planner {
     where
         T: PrimInt + Signed,
         C: PrimInt + Signed,
-        Q: Quay,
+        Q: QuayRead,
     {
-        func(ProposeCtx {
-            berth,
-            problem,
-            stamp: Version::default(),
-            _brand: PhantomData,
-        })
+        func(ProposeCtx::new(berth, problem))
     }
 }
 
@@ -482,7 +472,7 @@ where
     C: PrimInt + Signed,
     Q: QuayRead,
 {
-    pub fn new(berth: &'brand BerthOccupancy<T, Q>, problem: &'brand Problem<T, C>) -> Self {
+    fn new(berth: &'brand BerthOccupancy<T, Q>, problem: &'brand Problem<T, C>) -> Self {
         Self {
             berth,
             problem,
@@ -690,11 +680,17 @@ impl<T: PrimInt + Signed + Display> Display for FreeSlot<T> {
     }
 }
 
+impl<T: PrimInt + Signed> From<&OccupancyRect<T>> for FreeSlot<T> {
+    fn from(r: &OccupancyRect<T>) -> Self {
+        Self::new(r.start_time(), *r.space())
+    }
+}
+
 pub struct Explorer<'ctx, 'ovl, 'ed, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
-    Q: Quay,
+    Q: QuayRead,
 {
     ctx: &'ctx ProposeCtx<'ctx, T, C, Q>,
     overlay: &'ovl BerthOccupancyOverlay<T>,
@@ -705,7 +701,7 @@ impl<'ctx, 'ovl, 'ed, T, C, Q> Display for Explorer<'ctx, 'ovl, 'ed, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
-    Q: Quay,
+    Q: QuayRead,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Explorer")
@@ -716,7 +712,7 @@ impl<'ctx, 'ovl, 'ed, T, C, Q> Explorer<'ctx, 'ovl, 'ed, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
-    Q: Quay,
+    Q: QuayRead,
 {
     pub fn new(
         ctx: &'ctx ProposeCtx<'ctx, T, C, Q>,
@@ -730,23 +726,22 @@ where
         }
     }
 
-    pub fn iter_tentatives(&self) -> impl Iterator<Item = Tentative<'ctx, T, C>> + '_ {
-        let baseline = self
-            .ctx
+    fn iter_baseline_tents(&self) -> impl Iterator<Item = Tentative<'ctx, T, C>> + '_ {
+        self.ctx
             .problem()
             .preassigned()
             .iter()
             .filter(move |(id, _)| {
-                !self.edits.iter().any(|e| {
-                    matches!(
-                        *e,
-                        AssignEdit::Clear(cid) if cid == **id
-                    )
-                })
+                !self
+                    .edits
+                    .iter()
+                    .any(|e| matches!(e, AssignEdit::Clear(cid) if cid == *id))
             })
-            .map(|(_, fx)| Tentative::new_branded(*fx.assignment()));
+            .map(|(_, fx)| Tentative::new_branded(*fx.assignment()))
+    }
 
-        let sets = self.edits.iter().filter_map(move |e| match *e {
+    fn iter_set_tents(&self) -> impl Iterator<Item = Tentative<'ctx, T, C>> + '_ {
+        self.edits.iter().filter_map(move |e| match *e {
             AssignEdit::Set(re) => {
                 let req = *self.ctx.request(re.id()).ok()?;
                 Some(Tentative::new_branded(Assignment::new(
@@ -756,9 +751,11 @@ where
                 )))
             }
             _ => None,
-        });
+        })
+    }
 
-        baseline.chain(sets)
+    pub fn iter_tentatives(&self) -> impl Iterator<Item = Tentative<'ctx, T, C>> + '_ {
+        self.iter_baseline_tents().chain(self.iter_set_tents())
     }
 
     pub fn iter_free_slots(
@@ -788,11 +785,13 @@ where
     }
 }
 
+type EditRectSet<T> = (HashSet<OccupancyRect<T>>, HashSet<OccupancyRect<T>>);
+
 pub struct PlanBuilder<'brand, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
-    Q: Quay,
+    Q: QuayRead,
 {
     ctx: &'brand ProposeCtx<'brand, T, C, Q>,
     overlay: BerthOccupancyOverlay<T>,
@@ -820,7 +819,7 @@ impl<'brand, T, C, Q> PlanBuilder<'brand, T, C, Q>
 where
     T: PrimInt + Signed + Hash,
     C: PrimInt + Signed,
-    Q: Quay,
+    Q: QuayRead,
 {
     #[inline]
     pub fn new(ctx: &'brand ProposeCtx<'brand, T, C, Q>) -> Self {
@@ -834,16 +833,16 @@ where
     }
 
     #[inline]
-    pub fn explorer(&self) -> Explorer<'brand, '_, '_, T, C, Q> {
+    fn explorer(&self) -> Explorer<'brand, '_, '_, T, C, Q> {
         Explorer::new(self.ctx, &self.overlay, &self.edits)
     }
 
     #[inline]
-    pub fn with_explorer<F, R>(&self, f: F) -> R
+    pub fn with_explorer<F, R>(&self, func: F) -> R
     where
         F: for<'ovl, 'ed> FnOnce(Explorer<'brand, 'ovl, 'ed, T, C, Q>) -> R,
     {
-        f(self.explorer())
+        func(self.explorer())
     }
 
     pub fn remove(
@@ -861,21 +860,11 @@ where
             RemoveResult::Noop => {}
         }
 
-        if self
-            .edits
-            .iter()
-            .any(|e| matches!(e, AssignEdit::Clear(cid) if *cid == id))
-        {
-            if let Some(baseline) = self.ctx.baseline_assignment(id)? {
-                let rect = OccupancyRect::from(baseline);
-                if AvailabilityView::new(self.ctx.berth, *rect.time())
-                    .is_free_under(*rect.space(), Some(&self.overlay))
-                {
-                    return Ok(RemoveResult::Freed(FreeSlot::new(
-                        rect.time().start(),
-                        *rect.space(),
-                    )));
-                }
+        if self.is_cleared(id) {
+            if let Some(rect) = self.baseline_rect(id)?
+                && self.region_is_free(&rect)
+            {
+                return Ok(RemoveResult::Freed(FreeSlot::from(&rect)));
             }
             return Ok(RemoveResult::Noop);
         }
@@ -896,155 +885,31 @@ where
         let request_id = movable_handle.id();
         let _ = self.cancel_planned(request_id);
 
-        let request_ref = self.ctx.request(request_id)?;
-        let request_length = request_ref.length();
-        let processing_duration = request_ref.processing_duration();
-        let free_run_interval: SpaceInterval = free_slot.free_run();
-        let chosen_start_position: SpacePosition = place_fn(free_run_interval, request_length);
-        let chosen_end_position =
-            SpacePosition::new(chosen_start_position.value() + request_length.value());
-        let target_space_interval = SpaceInterval::new(chosen_start_position, chosen_end_position);
-        if target_space_interval.start() < free_run_interval.start()
-            || target_space_interval.end() > free_run_interval.end()
-        {
-            return Err(PlanError::SlotStale(request_id));
-        }
-
-        let slot_start_time = free_slot.start_time();
-        let slot_end_time = TimePoint::new(slot_start_time.value() + processing_duration.value());
-        let target_time_interval = TimeInterval::new(slot_start_time, slot_end_time);
+        let (target_time_interval, target_space_interval) =
+            self.compute_target_from_free_slot(request_id, free_slot, place_fn)?;
 
         let _ = self.ensure_baseline_cleared_if_any(request_id)?;
 
-        let feasible_time_window = self.ctx.job_time_window(request_id)?;
-        let feasible_space_window = self.ctx.job_space_window(request_id)?;
-        if target_time_interval.start() < feasible_time_window.start()
-            || target_time_interval.end() > feasible_time_window.end()
-            || target_space_interval.start() < feasible_space_window.start()
-            || target_space_interval.end() > feasible_space_window.end()
-        {
-            return Err(PlanError::SlotStale(request_id));
-        }
-
-        if !AvailabilityView::new(self.ctx.berth, target_time_interval)
-            .is_free_under(target_space_interval, Some(&self.overlay))
-        {
-            return Err(PlanError::Overlap);
-        }
-
-        if let Some(prev) = self.staging.remove_set(request_id) {
-            if let Some(i) = self
-                .edits
-                .iter()
-                .position(|e| matches!(e, AssignEdit::Set(x) if x.id() == request_id))
-            {
-                self.edits.swap_remove(i);
-            }
-            if let Some(i) = self
-                .ops
-                .iter()
-                .position(|op| matches!(op, BerthOccupancyChangeOperation::Occupy(r) if *r == prev))
-            {
-                self.ops.swap_remove(i);
-            }
-            self.undo_occupy(prev.time, prev.space);
-        }
-
-        let rect = OccupancyRect::from((target_time_interval, target_space_interval));
-        self.staging.put_set(request_id, rect);
-        self.apply_occupy(target_time_interval, target_space_interval);
-        self.ops
-            .push(BerthOccupancyChangeOperation::Occupy(OccupancyRect::new(
-                target_time_interval,
-                target_space_interval,
-            )));
-        self.edits.push(AssignEdit::Set(RequestEdit::new(
+        self.validate_target_within_windows(
             request_id,
             target_time_interval,
             target_space_interval,
-        )));
+        )?;
+        self.validate_free_under_overlay(target_time_interval, target_space_interval)?;
+
+        let rect = OccupancyRect::from((target_time_interval, target_space_interval));
+        self.stage_set(request_id, rect);
 
         Ok(())
     }
 
+    #[inline]
     pub fn finish(self) -> Result<Plan<T>, PlanError> {
-        let mut tmp = BerthOccupancyOverlay::new();
-        for op in &self.ops {
-            let r = op.rect();
-            match op {
-                BerthOccupancyChangeOperation::Free(_) => {
-                    tmp.free(self.ctx.berth, *r.time(), *r.space());
-                }
-                BerthOccupancyChangeOperation::Occupy(_) => {
-                    if !AvailabilityView::new(self.ctx.berth, *r.time())
-                        .is_free_under(*r.space(), Some(&tmp))
-                    {
-                        return Err(PlanError::Overlap);
-                    }
-                    tmp.occupy(self.ctx.berth, *r.time(), *r.space());
-                }
-            }
-        }
-
-        let mut occupy_rects = HashSet::new();
-        let mut free_rects = HashSet::new();
-        for op in &self.ops {
-            match op {
-                BerthOccupancyChangeOperation::Occupy(r) => {
-                    occupy_rects.insert(*r);
-                }
-                BerthOccupancyChangeOperation::Free(r) => {
-                    free_rects.insert(*r);
-                }
-            }
-        }
-
-        let mut set_rects: HashSet<OccupancyRect<T>> = HashSet::new();
-        let mut clear_rects: HashSet<OccupancyRect<T>> = HashSet::new();
-
-        for edit in &self.edits {
-            match edit {
-                AssignEdit::Set(re) => {
-                    let time_window = self.ctx.job_time_window(re.id())?;
-                    let sw = self.ctx.job_space_window(re.id())?;
-                    if re.time().start() < time_window.start()
-                        || re.time().end() > time_window.end()
-                        || re.space().start() < sw.start()
-                        || re.space().end() > sw.end()
-                    {
-                        return Err(PlanError::SlotStale(re.id()));
-                    }
-                    let k = OccupancyRect::from(re);
-                    if !occupy_rects.contains(&k) {
-                        return Err(PlanError::SlotStale(re.id()));
-                    }
-                    set_rects.insert(k);
-                }
-                AssignEdit::Clear(id) => {
-                    let Some(asg) = self.ctx.baseline_assignment(*id)? else {
-                        return Err(PlanError::NoBaselineAssignment(*id));
-                    };
-
-                    let k: OccupancyRect<T> = OccupancyRect::from(asg);
-                    if !free_rects.contains(&k) {
-                        return Err(PlanError::SlotStale(*id));
-                    }
-                    clear_rects.insert(k);
-                }
-            }
-        }
-
-        for k in &occupy_rects {
-            if !set_rects.contains(k) {
-                return Err(PlanError::SlotStale(RequestId::new(0)));
-            }
-        }
-        for k in &free_rects {
-            if !clear_rects.contains(k) {
-                return Err(PlanError::SlotStale(RequestId::new(0)));
-            }
-        }
-
+        self.validate_sequence_has_no_runtime_overlap()?;
+        let (occupy_rects, free_rects) = self.collect_op_rect_sets();
+        let (set_rects, clear_rects) =
+            self.collect_edit_rect_sets_and_validate(&occupy_rects, &free_rects)?;
+        self.ensure_rect_sets_match(&occupy_rects, &free_rects, &set_rects, &clear_rects)?;
         Ok(Plan::new(self.ops, self.edits, self.ctx.stamp))
     }
 
@@ -1052,14 +917,17 @@ where
     fn apply_occupy(&mut self, time: TimeInterval<T>, space: SpaceInterval) {
         self.overlay.occupy(self.ctx.berth, time, space);
     }
+
     #[inline]
     fn undo_occupy(&mut self, time: TimeInterval<T>, space: SpaceInterval) {
         self.overlay.undo_occupy(self.ctx.berth, time, space);
     }
+
     #[inline]
     fn apply_free(&mut self, time: TimeInterval<T>, space: SpaceInterval) {
         self.overlay.free(self.ctx.berth, time, space);
     }
+
     #[inline]
     fn undo_free(&mut self, time: TimeInterval<T>, space: SpaceInterval) {
         self.overlay.undo_free(self.ctx.berth, time, space);
@@ -1069,11 +937,7 @@ where
         &mut self,
         request_id: RequestId,
     ) -> Result<RemoveResult<T>, PlanError> {
-        if self
-            .edits
-            .iter()
-            .any(|edit| matches!(edit, AssignEdit::Clear(id) if *id == request_id))
-        {
+        if self.is_cleared(request_id) {
             return Ok(RemoveResult::Noop);
         }
         let Some(baseline) = self.ctx.baseline_assignment(request_id)? else {
@@ -1085,10 +949,8 @@ where
         if let Some(prev) = self.staging.remove_clear(request_id) {
             self.undo_free(prev.time, prev.space);
         }
-
         self.staging.put_clear(request_id, rect);
         self.apply_free(*rect.time(), *rect.space());
-
         Ok(RemoveResult::Freed(FreeSlot::new(
             rect.time().start(),
             *rect.space(),
@@ -1117,6 +979,187 @@ where
         }
 
         RemoveResult::Noop
+    }
+
+    #[inline]
+    fn is_cleared(&self, id: RequestId) -> bool {
+        self.edits
+            .iter()
+            .any(|e| matches!(e, AssignEdit::Clear(cid) if *cid == id))
+    }
+
+    #[inline]
+    fn baseline_rect(&self, request_id: RequestId) -> Result<Option<OccupancyRect<T>>, PlanError> {
+        Ok(self
+            .ctx
+            .baseline_assignment(request_id)?
+            .map(OccupancyRect::from))
+    }
+
+    #[inline]
+    fn region_is_free(&self, rect: &OccupancyRect<T>) -> bool {
+        AvailabilityView::new(self.ctx.berth, *rect.time())
+            .is_free_under(*rect.space(), Some(&self.overlay))
+    }
+
+    #[inline]
+    fn validate_target_within_windows(
+        &self,
+        request_id: RequestId,
+        time: TimeInterval<T>,
+        space: SpaceInterval,
+    ) -> Result<(), PlanError> {
+        let tw = self.ctx.job_time_window(request_id)?;
+        let sw = self.ctx.job_space_window(request_id)?;
+        if time.start() < tw.start()
+            || time.end() > tw.end()
+            || space.start() < sw.start()
+            || space.end() > sw.end()
+        {
+            return Err(PlanError::SlotStale(request_id));
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn validate_free_under_overlay(
+        &self,
+        time: TimeInterval<T>,
+        space: SpaceInterval,
+    ) -> Result<(), PlanError> {
+        if !AvailabilityView::new(self.ctx.berth, time).is_free_under(space, Some(&self.overlay)) {
+            return Err(PlanError::Overlap);
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn compute_target_from_free_slot<F>(
+        &self,
+        request_id: RequestId,
+        free_slot: FreeSlot<T>,
+        place_fn: F,
+    ) -> Result<(TimeInterval<T>, SpaceInterval), PlanError>
+    where
+        F: Fn(SpaceInterval, SpaceLength) -> SpacePosition,
+    {
+        let req = self.ctx.request(request_id)?;
+        let len = req.length();
+        let dur = req.processing_duration();
+
+        let run = free_slot.free_run();
+        let start_pos = place_fn(run, len);
+        let end_pos = SpacePosition::new(start_pos.value() + len.value());
+        let space = SpaceInterval::new(start_pos, end_pos);
+        if space.start() < run.start() || space.end() > run.end() {
+            return Err(PlanError::SlotStale(request_id));
+        }
+
+        let t0 = free_slot.start_time();
+        let t1 = TimePoint::new(t0.value() + dur.value());
+        let time = TimeInterval::new(t0, t1);
+
+        Ok((time, space))
+    }
+
+    #[inline]
+    fn stage_set(&mut self, request_id: RequestId, rect: OccupancyRect<T>) {
+        self.staging.put_set(request_id, rect);
+        self.apply_occupy(*rect.time(), *rect.space());
+        self.ops.push(BerthOccupancyChangeOperation::Occupy(rect));
+        self.edits.push(AssignEdit::Set(RequestEdit::new(
+            request_id,
+            *rect.time(),
+            *rect.space(),
+        )));
+    }
+
+    #[inline]
+    fn validate_sequence_has_no_runtime_overlap(&self) -> Result<(), PlanError> {
+        let mut tmp = BerthOccupancyOverlay::new();
+        for op in &self.ops {
+            let r = op.rect();
+            match op {
+                BerthOccupancyChangeOperation::Free(_) => {
+                    tmp.free(self.ctx.berth, *r.time(), *r.space());
+                }
+                BerthOccupancyChangeOperation::Occupy(_) => {
+                    if !AvailabilityView::new(self.ctx.berth, *r.time())
+                        .is_free_under(*r.space(), Some(&tmp))
+                    {
+                        return Err(PlanError::Overlap);
+                    }
+                    tmp.occupy(self.ctx.berth, *r.time(), *r.space());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn collect_op_rect_sets(&self) -> (HashSet<OccupancyRect<T>>, HashSet<OccupancyRect<T>>) {
+        let mut occ = HashSet::new();
+        let mut fre = HashSet::new();
+        for op in &self.ops {
+            match op {
+                BerthOccupancyChangeOperation::Occupy(r) => {
+                    occ.insert(*r);
+                }
+                BerthOccupancyChangeOperation::Free(r) => {
+                    fre.insert(*r);
+                }
+            }
+        }
+        (occ, fre)
+    }
+
+    #[inline]
+    fn collect_edit_rect_sets_and_validate(
+        &self,
+        occupy_rects: &HashSet<OccupancyRect<T>>,
+        free_rects: &HashSet<OccupancyRect<T>>,
+    ) -> Result<EditRectSet<T>, PlanError> {
+        let mut set_rects = HashSet::new();
+        let mut clear_rects = HashSet::new();
+
+        for edit in &self.edits {
+            match edit {
+                AssignEdit::Set(re) => {
+                    self.validate_target_within_windows(re.id(), re.time(), re.space())?;
+                    let k = OccupancyRect::from(re);
+                    if !occupy_rects.contains(&k) {
+                        return Err(PlanError::SlotStale(re.id()));
+                    }
+                    set_rects.insert(k);
+                }
+                AssignEdit::Clear(id) => {
+                    let Some(asg) = self.ctx.baseline_assignment(*id)? else {
+                        return Err(PlanError::NoBaselineAssignment(*id));
+                    };
+                    let k: OccupancyRect<T> = OccupancyRect::from(asg);
+                    if !free_rects.contains(&k) {
+                        return Err(PlanError::SlotStale(*id));
+                    }
+                    clear_rects.insert(k);
+                }
+            }
+        }
+
+        Ok((set_rects, clear_rects))
+    }
+
+    #[inline]
+    fn ensure_rect_sets_match(
+        &self,
+        occupy_rects: &HashSet<OccupancyRect<T>>,
+        free_rects: &HashSet<OccupancyRect<T>>,
+        set_rects: &HashSet<OccupancyRect<T>>,
+        clear_rects: &HashSet<OccupancyRect<T>>,
+    ) -> Result<(), PlanError> {
+        if occupy_rects != set_rects || free_rects != clear_rects {
+            return Err(PlanError::InconsistentPlan);
+        }
+        Ok(())
     }
 }
 
@@ -1717,5 +1760,374 @@ mod tests {
             .expect("plan with only ‘clear baseline’ should be consistent");
         assert_eq!(plan.operations().len(), 1);
         assert_eq!(plan.edits().len(), 1);
+    }
+
+    #[test]
+    fn test_is_cleared_true_false() {
+        use crate::quay::BTreeMapQuay;
+
+        let quay_length = SpaceLength::new(10);
+        let berth = BerthOccupancy::<i64, BTreeMapQuay>::new(quay_length);
+
+        // build problem with one preassigned so we can clear it
+        let fixed_req = mk_req(42, 2, 1, 0, 10, 0, 10);
+        let fixed_asg = Assignment::new(fixed_req, SpacePosition::new(1), TimePoint::new(2));
+        let problem = {
+            let mut pb = ProblemBuilder::new(quay_length);
+            pb.add_preassigned(Fixed::new(fixed_asg)).unwrap();
+            pb.build()
+        };
+
+        let ctx = mk_ctx(&berth, &problem);
+        let mut builder = PlanBuilder::new(&ctx);
+
+        // initially not cleared
+        assert!(!builder.is_cleared(RequestId::new(42)));
+
+        // stage clear
+        let _ = builder
+            .ensure_baseline_cleared_if_any(RequestId::new(42))
+            .unwrap();
+        assert!(builder.is_cleared(RequestId::new(42)));
+    }
+
+    #[test]
+    fn test_baseline_rect_some_and_none() {
+        use crate::quay::BTreeMapQuay;
+
+        let ql = SpaceLength::new(10);
+        let berth = BerthOccupancy::<i64, BTreeMapQuay>::new(ql);
+
+        // one preassigned, one unassigned
+        let fixed_req = mk_req(1, 2, 1, 0, 10, 0, 10);
+        let fixed_asg = Assignment::new(fixed_req, SpacePosition::new(0), TimePoint::new(0));
+        let mov_req = mk_req(2, 2, 1, 0, 10, 0, 10);
+
+        let problem = {
+            let mut pb = ProblemBuilder::new(ql);
+            pb.add_preassigned(Fixed::new(fixed_asg)).unwrap();
+            pb.add_unassigned_request(mov_req).unwrap();
+            pb.build()
+        };
+
+        let ctx = mk_ctx(&berth, &problem);
+        let builder = PlanBuilder::new(&ctx);
+
+        let rect1 = builder.baseline_rect(RequestId::new(1)).unwrap();
+        assert!(rect1.is_some());
+        let rect2 = builder.baseline_rect(RequestId::new(2)).unwrap();
+        assert!(rect2.is_none());
+    }
+
+    #[test]
+    fn test_validate_target_within_windows_rejects_out_of_bounds() {
+        use crate::quay::BTreeMapQuay;
+
+        let ql = SpaceLength::new(10);
+        let berth = BerthOccupancy::<i64, BTreeMapQuay>::new(ql);
+
+        let req = mk_req(7, 2, 2, 5, 20, 0, 10);
+        let problem = {
+            let mut pb = ProblemBuilder::new(ql);
+            pb.add_unassigned_request(req).unwrap();
+            pb.build()
+        };
+        let ctx = mk_ctx(&berth, &problem);
+        let builder = PlanBuilder::new(&ctx);
+
+        // time too early
+        let t_bad = TimeInterval::new(TimePoint::new(0), TimePoint::new(2));
+        let s_ok = SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(2));
+        let err = builder.validate_target_within_windows(RequestId::new(7), t_bad, s_ok);
+        assert!(matches!(err, Err(PlanError::SlotStale(id)) if id == RequestId::new(7)));
+
+        // space too wide
+        let t_ok = TimeInterval::new(TimePoint::new(5), TimePoint::new(7));
+        let s_bad = SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(11));
+        let err = builder.validate_target_within_windows(RequestId::new(7), t_ok, s_bad);
+        assert!(matches!(err, Err(PlanError::SlotStale(id)) if id == RequestId::new(7)));
+    }
+
+    #[test]
+    fn test_validate_free_under_overlay_detects_overlap() {
+        use crate::quay::BTreeMapQuay;
+
+        let ql = SpaceLength::new(10);
+        let berth = BerthOccupancy::<i64, BTreeMapQuay>::new(ql);
+        let req = mk_req(9, 2, 2, 0, 10, 0, 10);
+        let problem = {
+            let mut pb = ProblemBuilder::new(ql);
+            pb.add_unassigned_request(req).unwrap();
+            pb.build()
+        };
+        let ctx = mk_ctx(&berth, &problem);
+        let mut builder = PlanBuilder::new(&ctx);
+
+        // occupy a rect
+        let rect = OccupancyRect::new(
+            TimeInterval::new(TimePoint::new(1), TimePoint::new(3)),
+            SpaceInterval::new(SpacePosition::new(4), SpacePosition::new(6)),
+        );
+        builder.stage_set(RequestId::new(9), rect);
+
+        // now validating the same rect must fail as not free
+        let err = builder.validate_free_under_overlay(*rect.time(), *rect.space());
+        assert!(matches!(err, Err(PlanError::Overlap)));
+    }
+
+    #[test]
+    fn test_compute_target_from_free_slot_ok_and_outside_run() {
+        use crate::quay::BTreeMapQuay;
+
+        let ql = SpaceLength::new(20);
+        let berth = BerthOccupancy::<i64, BTreeMapQuay>::new(ql);
+        let req = mk_req(5, 4, 3, 0, 50, 0, 20);
+        let problem = {
+            let mut pb = ProblemBuilder::new(ql);
+            pb.add_unassigned_request(req).unwrap();
+            pb.build()
+        };
+        let ctx = mk_ctx(&berth, &problem);
+        let builder = PlanBuilder::new(&ctx);
+
+        let slot = FreeSlot::new(
+            TimePoint::new(10),
+            SpaceInterval::new(SpacePosition::new(6), SpacePosition::new(16)),
+        );
+
+        // place inside
+        let inside = builder
+            .compute_target_from_free_slot(RequestId::new(5), slot, |run, _len| run.start())
+            .unwrap();
+        assert_eq!(inside.0.start().value(), 10);
+        assert_eq!(inside.1.start().value(), 6);
+        assert_eq!(inside.1.end().value(), 10);
+
+        // attempt outside
+        let err = builder.compute_target_from_free_slot(RequestId::new(5), slot, |run, _len| {
+            SpacePosition::new(run.end().value() + 1)
+        });
+        assert!(matches!(err, Err(PlanError::SlotStale(id)) if id == RequestId::new(5)));
+    }
+
+    #[test]
+    fn test_stage_set_writes_ops_edits_and_overlay() {
+        use crate::quay::BTreeMapQuay;
+
+        let ql = SpaceLength::new(20);
+        let berth = BerthOccupancy::<i64, BTreeMapQuay>::new(ql);
+        let req = mk_req(3, 4, 3, 0, 50, 0, 20);
+        let problem = {
+            let mut pb = ProblemBuilder::new(ql);
+            pb.add_unassigned_request(req).unwrap();
+            pb.build()
+        };
+        let ctx = mk_ctx(&berth, &problem);
+        let mut builder = PlanBuilder::new(&ctx);
+
+        let rect = OccupancyRect::new(
+            TimeInterval::new(TimePoint::new(5), TimePoint::new(8)),
+            SpaceInterval::new(SpacePosition::new(2), SpacePosition::new(6)),
+        );
+        builder.stage_set(RequestId::new(3), rect);
+
+        assert_eq!(builder.ops.len(), 1);
+        assert!(matches!(
+            builder.ops[0],
+            BerthOccupancyChangeOperation::Occupy(_)
+        ));
+        assert_eq!(builder.edits.len(), 1);
+
+        // region is no longer free according to explorer
+        let blocked = builder.with_explorer(|ex| !ex.is_free(*rect.time(), *rect.space()));
+        assert!(blocked);
+    }
+
+    #[test]
+    fn test_validate_sequence_has_no_runtime_overlap_catches_conflict() {
+        use crate::quay::BTreeMapQuay;
+
+        let ql = SpaceLength::new(20);
+        let berth = BerthOccupancy::<i64, BTreeMapQuay>::new(ql);
+        // trivial problem
+        let problem = ProblemBuilder::new(ql).build();
+        let ctx = mk_ctx(&berth, &problem);
+        let mut builder = PlanBuilder::new(&ctx);
+
+        let rect = OccupancyRect::new(
+            TimeInterval::new(TimePoint::new(0), TimePoint::new(2)),
+            SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(5)),
+        );
+
+        // push two identical occupies -> second should overlap
+        builder
+            .ops
+            .push(BerthOccupancyChangeOperation::Occupy(rect));
+        builder
+            .ops
+            .push(BerthOccupancyChangeOperation::Occupy(rect));
+
+        let err = builder.validate_sequence_has_no_runtime_overlap();
+        assert!(matches!(err, Err(PlanError::Overlap)));
+    }
+
+    #[test]
+    fn test_collect_op_rect_sets_and_ensure_rect_sets_match() {
+        use crate::quay::BTreeMapQuay;
+
+        let ql = SpaceLength::new(20);
+        let berth = BerthOccupancy::<i64, BTreeMapQuay>::new(ql);
+        let problem = ProblemBuilder::new(ql).build();
+        let ctx = mk_ctx(&berth, &problem);
+        let mut builder = PlanBuilder::new(&ctx);
+
+        let occ = OccupancyRect::new(
+            TimeInterval::new(TimePoint::new(0), TimePoint::new(3)),
+            SpaceInterval::new(SpacePosition::new(1), SpacePosition::new(6)),
+        );
+        let fre = OccupancyRect::new(
+            TimeInterval::new(TimePoint::new(5), TimePoint::new(7)),
+            SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(12)),
+        );
+
+        builder.ops.push(BerthOccupancyChangeOperation::Occupy(occ));
+        builder.ops.push(BerthOccupancyChangeOperation::Free(fre));
+
+        let (occ_set, fre_set) = builder.collect_op_rect_sets();
+        assert!(occ_set.contains(&occ));
+        assert!(fre_set.contains(&fre));
+
+        // matching sets -> ok
+        let ok = builder.ensure_rect_sets_match(&occ_set, &fre_set, &occ_set, &fre_set);
+        assert!(ok.is_ok());
+
+        // mismatch -> error
+        let empty: HashSet<_> = HashSet::new();
+        let err = builder.ensure_rect_sets_match(&occ_set, &fre_set, &empty, &fre_set);
+        #[allow(clippy::match_like_matches_macro)]
+        match err {
+            Err(PlanError::InconsistentPlan) | Err(PlanError::SlotStale(_)) => {}
+            other => panic!("expected mismatch error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_collect_edit_rect_sets_and_validate_mismatch() {
+        use crate::quay::BTreeMapQuay;
+
+        let ql = SpaceLength::new(20);
+        let berth = BerthOccupancy::<i64, BTreeMapQuay>::new(ql);
+
+        // one movable, windows [0,10] time and [0,20] space
+        let req = mk_req(77, 4, 3, 0, 10, 0, 20);
+        let problem = {
+            let mut pb = ProblemBuilder::new(ql);
+            pb.add_unassigned_request(req).unwrap();
+            pb.build()
+        };
+        let ctx = mk_ctx(&berth, &problem);
+        let mut builder = PlanBuilder::new(&ctx);
+
+        // Edit points to some rect
+        let time = TimeInterval::new(TimePoint::new(1), TimePoint::new(4));
+        let space = SpaceInterval::new(SpacePosition::new(2), SpacePosition::new(6));
+        builder.edits.push(AssignEdit::Set(RequestEdit::new(
+            RequestId::new(77),
+            time,
+            space,
+        )));
+
+        // But occupy_rects is empty -> should trigger SlotStale(77)
+        let occ: HashSet<OccupancyRect<i64>> = HashSet::new();
+        let fre: HashSet<OccupancyRect<i64>> = HashSet::new();
+
+        let res = builder.collect_edit_rect_sets_and_validate(&occ, &fre);
+        assert!(matches!(res, Err(PlanError::SlotStale(id)) if id == RequestId::new(77)));
+    }
+
+    #[test]
+    fn test_free_slot_from_occupancy_rect_conversion() {
+        let rect = OccupancyRect::new(
+            TimeInterval::new(TimePoint::new(11), TimePoint::new(15)),
+            SpaceInterval::new(SpacePosition::new(7), SpacePosition::new(12)),
+        );
+        let slot: FreeSlot<i64> = FreeSlot::from(&rect);
+        assert_eq!(slot.start_time().value(), 11);
+        assert_eq!(slot.free_run().start().value(), 7);
+        assert_eq!(slot.free_run().end().value(), 12);
+    }
+
+    #[test]
+    fn test_occupancy_rect_accessors() {
+        let rect = OccupancyRect::new(
+            TimeInterval::new(TimePoint::new(2), TimePoint::new(5)),
+            SpaceInterval::new(SpacePosition::new(3), SpacePosition::new(9)),
+        );
+        assert_eq!(rect.start_time().value(), 2);
+        assert_eq!(rect.end_time().value(), 5);
+        assert_eq!(rect.start_pos().value(), 3);
+        assert_eq!(rect.end_pos().value(), 9);
+    }
+
+    #[test]
+    fn test_restage_same_request_replaces_overlay_and_ops() {
+        use crate::quay::BTreeMapQuay;
+        let ql = SpaceLength::new(20);
+        let berth = BerthOccupancy::<i64, BTreeMapQuay>::new(ql);
+        let req = Request::new(
+            RequestId::new(1),
+            SpaceLength::new(4),
+            TimeDelta::new(3),
+            SpacePosition::new(0),
+            Cost::new(0),
+            Cost::new(0),
+            TimeInterval::new(TimePoint::new(0), TimePoint::new(50)),
+            SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(20)),
+        )
+        .unwrap();
+        let problem = {
+            let mut pb = ProblemBuilder::new(ql);
+            pb.add_unassigned_request(req).unwrap();
+            pb.build()
+        };
+        let ctx = ProposeCtx::new(&berth, &problem);
+        let mut b = PlanBuilder::new(&ctx);
+        let mh = ctx.movable_handle(RequestId::new(1)).unwrap();
+
+        let s1 = FreeSlot::new(
+            TimePoint::new(5),
+            SpaceInterval::new(SpacePosition::new(2), SpacePosition::new(12)),
+        );
+        b.place_into_free_slot(mh, s1, |run, _| run.start())
+            .unwrap();
+        assert_eq!(b.ops.len(), 1);
+        assert!(matches!(b.ops[0], BerthOccupancyChangeOperation::Occupy(_)));
+
+        // Re-stage to a different slot; should cancel previous and keep exactly one occupy/edit.
+        let s2 = FreeSlot::new(
+            TimePoint::new(10),
+            SpaceInterval::new(SpacePosition::new(6), SpacePosition::new(16)),
+        );
+        b.place_into_free_slot(mh, s2, |run, _| run.start())
+            .unwrap();
+        assert_eq!(b.ops.len(), 1);
+        assert_eq!(b.edits.len(), 1);
+        // Region from s2 should now be blocked; s1’s old region should be free.
+        let rect1 = OccupancyRect::new(
+            TimeInterval::new(TimePoint::new(5), TimePoint::new(8)),
+            SpaceInterval::new(SpacePosition::new(2), SpacePosition::new(6)),
+        );
+        let rect2 = OccupancyRect::new(
+            TimeInterval::new(TimePoint::new(10), TimePoint::new(13)),
+            SpaceInterval::new(SpacePosition::new(6), SpacePosition::new(10)),
+        );
+        let ex = b.with_explorer(|ex| {
+            (
+                ex.is_free(*rect1.time(), *rect1.space()),
+                ex.is_free(*rect2.time(), *rect2.space()),
+            )
+        });
+        assert!(ex.0, "old placement should be undone and free again");
+        assert!(!ex.1, "new placement should be occupied");
     }
 }

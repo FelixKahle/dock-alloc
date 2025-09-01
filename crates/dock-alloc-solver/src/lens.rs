@@ -19,7 +19,7 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use crate::occ::BerthOccupancy;
-use crate::quay::{Quay, QuayRead, QuayWrite};
+use crate::quay::QuayRead;
 use dock_alloc_core::domain::{SpaceInterval, SpaceLength, TimeDelta, TimeInterval, TimePoint};
 use num_traits::{PrimInt, Signed, Zero};
 use std::collections::BTreeMap;
@@ -561,7 +561,7 @@ impl<T: PrimInt + Signed> BerthOccupancyOverlay<T> {
         space_interval: SpaceInterval,
     ) where
         T: Zero + Copy,
-        Q: QuayRead + QuayWrite + Clone + PartialEq,
+        Q: QuayRead + Clone + PartialEq,
     {
         if let Some(predecessor_timepoint) = berth.slice_predecessor_timepoint(time_window.start())
         {
@@ -594,7 +594,7 @@ impl<T: PrimInt + Signed> BerthOccupancyOverlay<T> {
         time_window: TimeInterval<T>,
         space_interval: SpaceInterval,
     ) where
-        Q: QuayRead + QuayWrite + Clone + PartialEq,
+        Q: QuayRead + Clone + PartialEq,
     {
         if let Some(pred) = berth.slice_predecessor_timepoint(time_window.start()) {
             self.remove_occupy(pred, space_interval);
@@ -611,7 +611,7 @@ impl<T: PrimInt + Signed> BerthOccupancyOverlay<T> {
         space_interval: SpaceInterval,
     ) where
         T: Zero + Copy,
-        Q: QuayRead + QuayWrite + Clone + PartialEq,
+        Q: QuayRead + Clone + PartialEq,
     {
         if let Some(predecessor_timepoint) = berth.slice_predecessor_timepoint(time_window.start())
         {
@@ -645,7 +645,7 @@ impl<T: PrimInt + Signed> BerthOccupancyOverlay<T> {
         time_window: TimeInterval<T>,
         space_interval: SpaceInterval,
     ) where
-        Q: QuayRead + QuayWrite + Clone + PartialEq,
+        Q: QuayRead + Clone + PartialEq,
     {
         if let Some(pred) = berth.slice_predecessor_timepoint(time_window.start()) {
             self.remove_free(pred, space_interval);
@@ -657,7 +657,7 @@ impl<T: PrimInt + Signed> BerthOccupancyOverlay<T> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AvailabilityView<'a, T: PrimInt + Signed, Q: Quay> {
+pub struct AvailabilityView<'a, T: PrimInt + Signed, Q: QuayRead> {
     berth: &'a BerthOccupancy<T, Q>,
     slice_timepoints: Vec<TimePoint<T>>,
 }
@@ -665,7 +665,7 @@ pub struct AvailabilityView<'a, T: PrimInt + Signed, Q: Quay> {
 impl<'a, T, Q> AvailabilityView<'a, T, Q>
 where
     T: PrimInt + Signed + Zero + Copy,
-    Q: QuayRead + QuayWrite + Clone + PartialEq,
+    Q: QuayRead + Clone + PartialEq,
 {
     pub fn new(berth: &'a BerthOccupancy<T, Q>, time_window: TimeInterval<T>) -> Self {
         let mut slice_timepoints = Vec::<TimePoint<T>>::new();
@@ -818,7 +818,7 @@ where
         overlay: Option<&'a BerthOccupancyOverlay<T>>,
     ) -> Self
     where
-        Q: Quay + Clone + PartialEq,
+        Q: QuayRead + Clone + PartialEq,
     {
         let mut all_slice_timepoints = Vec::<TimePoint<T>>::new();
         if let Some(predecessor_timepoint) = berth.slice_predecessor_timepoint(search_time.start())
@@ -1364,5 +1364,148 @@ mod tests {
             .map(|r| (r.start().value(), r.end().value()))
             .collect::<Vec<_>>();
         assert_eq!(runs, vec![(1, 3)]);
+    }
+
+    #[test]
+    fn covers_zero_length_and_empty_set_behavior() {
+        // zero-length queries should always be covered
+        let s = SpaceIntervalSet::from_vec(vec![si(2, 4)]);
+        assert!(s.covers(si(3, 3)));
+        assert!(s.covers(si(0, 0)));
+
+        // empty set never covers non-empty interval
+        let e = SpaceIntervalSet::new();
+        assert!(!e.covers(si(0, 1)));
+        // but zero-length still returns true by contract
+        assert!(e.covers(si(5, 5)));
+    }
+
+    #[test]
+    fn clamped_linear_matches_clamped_to_common_cases() {
+        // several shapes (subset, overlap on each side, disjoint)
+        let base = SpaceIntervalSet::from_vec(vec![si(0, 3), si(6, 9), si(12, 15)]);
+
+        // subset
+        let b = base.clamped_to(si(1, 8));
+        let l = base.clamped_linear(si(1, 8));
+        assert_eq!(b.as_slice(), l.as_slice());
+
+        // overlap on left edge only
+        let b = base.clamped_to(si(2, 4));
+        let l = base.clamped_linear(si(2, 4));
+        assert_eq!(b.as_slice(), l.as_slice());
+
+        // overlap on right edge only
+        let b = base.clamped_to(si(8, 13));
+        let l = base.clamped_linear(si(8, 13));
+        assert_eq!(b.as_slice(), l.as_slice());
+
+        // disjoint becomes empty
+        let b = base.clamped_to(si(20, 30));
+        let l = base.clamped_linear(si(20, 30));
+        assert!(b.is_empty() && l.is_empty());
+    }
+
+    #[test]
+    fn from_iter_coalesces_and_preserves_half_open() {
+        // note the touching [2,4) and [4,6) must coalesce to [2,6)
+        let s: SpaceIntervalSet = [si(2, 4), si(4, 6), si(8, 10)].into_iter().collect();
+        assert_eq!(s.as_slice(), &[si(2, 6), si(8, 10)]);
+    }
+
+    #[test]
+    fn intersection_into_clears_previous_contents() {
+        let a = SpaceIntervalSet::from_vec(vec![si(0, 2), si(4, 6)]);
+        let b = SpaceIntervalSet::from_vec(vec![si(8, 9)]);
+        let mut out = SpaceIntervalSet::from_vec(vec![si(100, 200)]); // pre-populated
+        a.intersection_into(&b, &mut out);
+        assert!(
+            out.is_empty(),
+            "no intersection should clear the result set"
+        );
+    }
+
+    #[test]
+    fn overlay_occupy_and_free_roundtrip_removes_timepoint_keys() {
+        let quay_length = len(10);
+        let berth = BO::new(quay_length);
+
+        // OCCUPY + UNDO
+        let mut ov1 = BerthOccupancyOverlay::new();
+        ov1.occupy(&berth, ti(2, 6), si(3, 5));
+        assert!(!ov1.occupied_timepoints().collect::<Vec<_>>().is_empty());
+        ov1.undo_occupy(&berth, ti(2, 6), si(3, 5));
+        assert!(
+            ov1.occupied_timepoints().next().is_none(),
+            "keys should be pruned after undo"
+        );
+
+        // FREE + UNDO
+        let mut ov2 = BerthOccupancyOverlay::new();
+        ov2.free(&berth, ti(2, 6), si(3, 5));
+        assert!(!ov2.free_timepoints().collect::<Vec<_>>().is_empty());
+        ov2.undo_free(&berth, ti(2, 6), si(3, 5));
+        assert!(
+            ov2.free_timepoints().next().is_none(),
+            "keys should be pruned after undo"
+        );
+    }
+
+    #[test]
+    fn free_placement_iter_respects_processing_window_boundaries() {
+        let quay_length = len(10);
+        let berth = BO::new(quay_length);
+
+        // duration longer than window ⇒ no t0
+        let it =
+            FreePlacementIter::new(&berth, ti(0, 2), TimeDelta::new(3), len(1), si(0, 10), None);
+        assert!(it.take(1).next().is_none());
+
+        // duration exactly equals window ⇒ single t0 at start
+        let it =
+            FreePlacementIter::new(&berth, ti(0, 3), TimeDelta::new(3), len(1), si(0, 10), None);
+        let items: Vec<_> = it
+            .map(|(t0, s)| (t0.value(), (s.start().value(), s.end().value())))
+            .collect();
+        assert_eq!(items, vec![(0, (0, 10))]);
+    }
+
+    #[test]
+    fn overlaps_binary_search_edge_positions() {
+        // hit paths where binary search returns 0 or len()
+        let s = SpaceIntervalSet::from_vec(vec![si(2, 4), si(6, 8)]);
+        // before first
+        assert!(!s.overlaps(si(0, 1)));
+        // after last
+        assert!(!s.overlaps(si(8, 10)));
+        // exact match on first
+        assert!(s.overlaps(si(2, 4)));
+        // exact match on last
+        assert!(s.overlaps(si(6, 8)));
+    }
+
+    #[test]
+    fn adjust_runs_no_overlay_is_identity_wrt_min_len() {
+        let base = SpaceIntervalSet::from_vec(vec![si(0, 1), si(2, 5), si(7, 9)]);
+        let ov: BerthOccupancyOverlay<i64> = BerthOccupancyOverlay::new();
+        // min_len = 1 → identity
+        let out = ov.adjust_runs(tp(0), base.clone(), si(0, 10), len(1));
+        assert_eq!(out.as_slice(), base.as_slice());
+        // min_len = 3 → filters short runs
+        let out2 = ov.adjust_runs(tp(0), base, si(0, 10), len(3));
+        assert_eq!(out2.as_slice(), &[si(2, 5)]);
+    }
+
+    #[test]
+    fn intersect_free_runs_min_len_one_equals_raw_free_check() {
+        let quay_length = len(10);
+        let berth = BO::new(quay_length);
+
+        // everything is free; min_len=1 should yield the whole search space
+        let view = AvailabilityView::new(&berth, ti(0, 5));
+        let runs = view.intersect_free_runs(len(1), si(2, 9), None);
+        assert_eq!(runs.as_slice(), &[si(2, 9)]);
+        // sanity with is_free_under
+        assert!(view.is_free_under(si(2, 9), None));
     }
 }
