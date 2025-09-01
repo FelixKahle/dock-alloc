@@ -18,8 +18,31 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+use crate::{
+    quay::QuayRead,
+    search::{Plan, ProposeCtx},
+};
 use dock_alloc_model::{Problem, Solution};
 use num_traits::{PrimInt, Signed};
+
+pub type ProposeResult<T, V> = Result<Option<Plan<T>>, V>;
+
+pub trait Operator<T, C, Q, R>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+    Q: QuayRead,
+    R: rand::Rng + ?Sized,
+{
+    type Error;
+
+    fn propose(
+        &self,
+        iter: usize,
+        rng: &mut R,
+        ctx: &ProposeCtx<'_, T, C, Q>,
+    ) -> ProposeResult<T, Self::Error>;
+}
 
 pub trait Solver<T, C>
 where

@@ -176,8 +176,8 @@ impl<T: PrimInt + Signed> TimeWindowTooShortError<T> {
         self.processing
     }
 
-    pub fn time_window(&self) -> TimeInterval<T> {
-        self.window
+    pub fn time_window(&self) -> &TimeInterval<T> {
+        &self.window
     }
 }
 
@@ -213,8 +213,8 @@ impl SpaceWindowTooShortError {
         self.length
     }
 
-    pub fn space_window(&self) -> SpaceInterval {
-        self.window
+    pub fn space_window(&self) -> &SpaceInterval {
+        &self.window
     }
 }
 
@@ -399,13 +399,13 @@ where
     }
 
     #[inline]
-    pub fn feasible_time_window(&self) -> TimeInterval<T> {
-        self.feasible_time_window
+    pub fn feasible_time_window(&self) -> &TimeInterval<T> {
+        &self.feasible_time_window
     }
 
     #[inline]
-    pub fn feasible_space_window(&self) -> SpaceInterval {
-        self.feasible_space_window
+    pub fn feasible_space_window(&self) -> &SpaceInterval {
+        &self.feasible_space_window
     }
 }
 
@@ -741,7 +741,7 @@ impl<T: PrimInt + Signed + Display + Debug> std::error::Error for ProblemBuildEr
 ///
 /// Internally stores **unassigned** requests and **preassigned** (fixed) assignments
 /// in separate maps to make invariants explicit.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Problem<T = i64, C = i64>
 where
     T: PrimInt + Signed,
@@ -858,14 +858,14 @@ where
         let tw = r.feasible_time_window();
         if !tw.contains_interval(&tspan) {
             return Err(ProblemBuildError::AssignmentOutsideTimeWindow(
-                AssignmentOutsideTimeWindowError::new(id, tw, tspan),
+                AssignmentOutsideTimeWindowError::new(id, *tw, tspan),
             ));
         }
 
         let sw = r.feasible_space_window();
         if !sw.contains_interval(&sspan) {
             return Err(ProblemBuildError::AssignmentOutsideSpaceWindow(
-                AssignmentOutsideSpaceWindowError::new(id, sw, sspan),
+                AssignmentOutsideSpaceWindowError::new(id, *sw, sspan),
             ));
         }
 
