@@ -25,3 +25,4 @@ pub mod lens;
 pub mod occ;
 pub mod quay;
 pub mod search;
+pub mod state;
