@@ -148,6 +148,26 @@ impl From<u64> for RequestId {
     }
 }
 
+/// An error indicating that a request's processing duration exceeds its feasible time window.
+///
+/// This error occurs when attempting to create a `Request` where the `processing_duration`
+/// is larger than the duration of the `feasible_time_window`, making it impossible for
+/// the request to be completed within its allowed time constraints.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{RequestId, TimeWindowTooShortError};
+/// use dock_alloc_core::domain::{TimeDelta, TimeInterval, TimePoint};
+///
+/// let id = RequestId::new(1);
+/// let processing = TimeDelta::new(10);
+/// let window = TimeInterval::new(TimePoint::new(0), TimePoint::new(5)); // Only 5 units long
+///
+/// let error = TimeWindowTooShortError::new(id, processing, window);
+/// assert_eq!(error.id(), id);
+/// assert_eq!(error.processing_duration(), processing);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TimeWindowTooShortError<T: PrimInt + Signed> {
     id: RequestId,
@@ -156,6 +176,26 @@ pub struct TimeWindowTooShortError<T: PrimInt + Signed> {
 }
 
 impl<T: PrimInt + Signed> TimeWindowTooShortError<T> {
+    /// Creates a new `TimeWindowTooShortError`.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The identifier of the request that caused the error
+    /// * `processing` - The processing duration that doesn't fit
+    /// * `window` - The time window that is too short
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, TimeWindowTooShortError};
+    /// use dock_alloc_core::domain::{TimeDelta, TimeInterval, TimePoint};
+    ///
+    /// let error = TimeWindowTooShortError::new(
+    ///     RequestId::new(42),
+    ///     TimeDelta::new(8),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(5))
+    /// );
+    /// ```
     pub fn new(
         id: RequestId,
         processing: TimeDelta<T>,
@@ -168,14 +208,62 @@ impl<T: PrimInt + Signed> TimeWindowTooShortError<T> {
         }
     }
 
+    /// Returns the identifier of the request that caused this error.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, TimeWindowTooShortError};
+    /// use dock_alloc_core::domain::{TimeDelta, TimeInterval, TimePoint};
+    ///
+    /// let id = RequestId::new(123);
+    /// let error = TimeWindowTooShortError::new(
+    ///     id,
+    ///     TimeDelta::new(10),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(5))
+    /// );
+    /// assert_eq!(error.id(), id);
+    /// ```
     pub fn id(&self) -> RequestId {
         self.id
     }
 
+    /// Returns the processing duration that doesn't fit in the time window.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, TimeWindowTooShortError};
+    /// use dock_alloc_core::domain::{TimeDelta, TimeInterval, TimePoint};
+    ///
+    /// let processing = TimeDelta::new(15);
+    /// let error = TimeWindowTooShortError::new(
+    ///     RequestId::new(1),
+    ///     processing,
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(10))
+    /// );
+    /// assert_eq!(error.processing_duration(), processing);
+    /// ```
     pub fn processing_duration(&self) -> TimeDelta<T> {
         self.processing
     }
 
+    /// Returns a reference to the time window that is too short.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, TimeWindowTooShortError};
+    /// use dock_alloc_core::domain::{TimeDelta, TimeInterval, TimePoint};
+    ///
+    /// let window = TimeInterval::new(TimePoint::new(5), TimePoint::new(8));
+    /// let error = TimeWindowTooShortError::new(
+    ///     RequestId::new(1),
+    ///     TimeDelta::new(10),
+    ///     window
+    /// );
+    /// assert_eq!(error.time_window(), &window);
+    /// ```
     pub fn time_window(&self) -> &TimeInterval<T> {
         &self.window
     }
@@ -193,6 +281,26 @@ impl<T: PrimInt + Signed + Display> Display for TimeWindowTooShortError<T> {
 
 impl<T: PrimInt + Signed + Debug + Display> std::error::Error for TimeWindowTooShortError<T> {}
 
+/// An error indicating that a request's length exceeds its feasible space window.
+///
+/// This error occurs when attempting to create a `Request` where the `length`
+/// is larger than the measure of the `feasible_space_window`, making it impossible
+/// for the request to fit within its allowed space constraints.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{RequestId, SpaceWindowTooShortError};
+/// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+///
+/// let id = RequestId::new(1);
+/// let length = SpaceLength::new(15);
+/// let window = SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10)); // Only 10 units long
+///
+/// let error = SpaceWindowTooShortError::new(id, length, window);
+/// assert_eq!(error.id(), id);
+/// assert_eq!(error.length(), length);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SpaceWindowTooShortError {
     id: RequestId,
@@ -201,18 +309,86 @@ pub struct SpaceWindowTooShortError {
 }
 
 impl SpaceWindowTooShortError {
+    /// Creates a new `SpaceWindowTooShortError`.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The identifier of the request that caused the error
+    /// * `length` - The length that doesn't fit
+    /// * `window` - The space window that is too short
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, SpaceWindowTooShortError};
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+    ///
+    /// let error = SpaceWindowTooShortError::new(
+    ///     RequestId::new(42),
+    ///     SpaceLength::new(20),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(15))
+    /// );
+    /// ```
     pub fn new(id: RequestId, length: SpaceLength, window: SpaceInterval) -> Self {
         SpaceWindowTooShortError { id, length, window }
     }
 
+    /// Returns the identifier of the request that caused this error.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, SpaceWindowTooShortError};
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+    ///
+    /// let id = RequestId::new(123);
+    /// let error = SpaceWindowTooShortError::new(
+    ///     id,
+    ///     SpaceLength::new(25),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(20))
+    /// );
+    /// assert_eq!(error.id(), id);
+    /// ```
     pub fn id(&self) -> RequestId {
         self.id
     }
 
+    /// Returns the length that doesn't fit in the space window.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, SpaceWindowTooShortError};
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+    ///
+    /// let length = SpaceLength::new(30);
+    /// let error = SpaceWindowTooShortError::new(
+    ///     RequestId::new(1),
+    ///     length,
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(25))
+    /// );
+    /// assert_eq!(error.length(), length);
+    /// ```
     pub fn length(&self) -> SpaceLength {
         self.length
     }
 
+    /// Returns a reference to the space window that is too short.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, SpaceWindowTooShortError};
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+    ///
+    /// let window = SpaceInterval::new(SpacePosition::new(5), SpacePosition::new(15));
+    /// let error = SpaceWindowTooShortError::new(
+    ///     RequestId::new(1),
+    ///     SpaceLength::new(20),
+    ///     window
+    /// );
+    /// assert_eq!(error.space_window(), &window);
+    /// ```
     pub fn space_window(&self) -> &SpaceInterval {
         &self.window
     }
@@ -230,9 +406,40 @@ impl Display for SpaceWindowTooShortError {
 
 impl std::error::Error for SpaceWindowTooShortError {}
 
+/// An error that can occur when creating a `Request`.
+///
+/// This enum represents the different validation errors that can occur
+/// when attempting to create a new request with invalid parameters.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{Request, RequestId, RequestError};
+/// use dock_alloc_core::domain::*;
+///
+/// // Attempting to create a request with a processing duration longer than the time window
+/// let result = Request::new(
+///     RequestId::new(1),
+///     SpaceLength::new(10),
+///     TimeDelta::new(20), // Processing duration
+///     SpacePosition::new(0),
+///     Cost::new(1),
+///     Cost::new(1),
+///     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)), // Only 10 units available
+///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+/// );
+///
+/// match result {
+///     Err(RequestError::TimeWindowTooShort(_)) => println!("Time window too short!"),
+///     Err(RequestError::SpaceWindowTooShort(_)) => println!("Space window too short!"),
+///     Ok(_) => println!("Request created successfully"),
+/// }
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequestError<T: PrimInt + Signed> {
+    /// The request's processing duration exceeds its feasible time window.
     TimeWindowTooShort(TimeWindowTooShortError<T>),
+    /// The request's length exceeds its feasible space window.
     SpaceWindowTooShort(SpaceWindowTooShortError),
 }
 
@@ -327,6 +534,47 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
+    /// Creates a new `Request` with the specified parameters.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Unique identifier for this request
+    /// * `length` - The length of space required by this request
+    /// * `processing_duration` - How long this request takes to process
+    /// * `target_position` - The preferred position along the quay
+    /// * `cost_per_delay` - Cost coefficient for waiting time beyond arrival
+    /// * `cost_per_position_deviation` - Cost coefficient for deviation from target position
+    /// * `feasible_time_window` - Time interval during which this request can be processed
+    /// * `feasible_space_window` - Space interval where this request can be placed
+    ///
+    /// # Errors
+    ///
+    /// Returns `RequestError::TimeWindowTooShort` if the processing duration exceeds
+    /// the time window duration.
+    ///
+    /// Returns `RequestError::SpaceWindowTooShort` if the required length exceeds
+    /// the space window measure.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    ///
+    /// let request = Request::new(
+    ///     RequestId::new(1),
+    ///     SpaceLength::new(10),
+    ///     TimeDelta::new(5),
+    ///     SpacePosition::new(20),
+    ///     Cost::new(2),
+    ///     Cost::new(1),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// ).expect("Valid request parameters");
+    ///
+    /// assert_eq!(request.id(), RequestId::new(1));
+    /// assert_eq!(request.length(), SpaceLength::new(10));
+    /// ```
     #[allow(clippy::too_many_arguments)]
     #[inline]
     pub fn new(
@@ -363,46 +611,205 @@ where
         })
     }
 
+    /// Returns the unique identifier of this request.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let request = Request::new(
+    /// #     RequestId::new(42), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    ///
+    /// assert_eq!(request.id(), RequestId::new(42));
+    /// ```
     #[inline]
     pub fn id(&self) -> RequestId {
         self.id
     }
 
+    /// Returns the length of space required by this request.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(15), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    ///
+    /// assert_eq!(request.length(), SpaceLength::new(15));
+    /// ```
     #[inline]
     pub fn length(&self) -> SpaceLength {
         self.length
     }
 
+    /// Returns the arrival time of this request.
+    ///
+    /// This is the start of the feasible time window, representing the earliest
+    /// time this request can begin processing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(100), TimePoint::new(200)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    ///
+    /// assert_eq!(request.arrival_time(), TimePoint::new(100));
+    /// ```
     #[inline]
     pub fn arrival_time(&self) -> TimePoint<T> {
         self.feasible_time_window.start()
     }
 
+    /// Returns the processing duration required by this request.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(8),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(20)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    ///
+    /// assert_eq!(request.processing_duration(), TimeDelta::new(8));
+    /// ```
     #[inline]
     pub fn processing_duration(&self) -> TimeDelta<T> {
         self.processing_duration
     }
 
+    /// Returns the target position for this request.
+    ///
+    /// This represents the preferred position along the quay where the request
+    /// would ideally be placed to minimize position deviation costs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(25), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    ///
+    /// assert_eq!(request.target_position(), SpacePosition::new(25));
+    /// ```
     #[inline]
     pub fn target_position(&self) -> SpacePosition {
         self.target_position
     }
 
+    /// Returns the cost coefficient for delay (waiting time).
+    ///
+    /// This value is multiplied by the waiting time to calculate the delay cost.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(3), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    ///
+    /// assert_eq!(request.cost_per_delay(), Cost::new(3));
+    /// ```
     #[inline]
     pub fn cost_per_delay(&self) -> Cost<C> {
         self.cost_per_delay
     }
 
+    /// Returns the cost coefficient for position deviation.
+    ///
+    /// This value is multiplied by the distance from the target position
+    /// to calculate the position deviation cost.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(4),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    ///
+    /// assert_eq!(request.cost_per_position_deviation(), Cost::new(4));
+    /// ```
     #[inline]
     pub fn cost_per_position_deviation(&self) -> Cost<C> {
         self.cost_per_position_deviation
     }
 
+    /// Returns a reference to the feasible time window for this request.
+    ///
+    /// This interval defines when the request can be processed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let window = TimeInterval::new(TimePoint::new(5), TimePoint::new(15));
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     window, SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    ///
+    /// assert_eq!(request.feasible_time_window(), &window);
+    /// ```
     #[inline]
     pub fn feasible_time_window(&self) -> &TimeInterval<T> {
         &self.feasible_time_window
     }
 
+    /// Returns a reference to the feasible space window for this request.
+    ///
+    /// This interval defines where along the quay the request can be placed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let window = SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(40));
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)), window
+    /// # ).unwrap();
+    ///
+    /// assert_eq!(request.feasible_space_window(), &window);
+    /// ```
     #[inline]
     pub fn feasible_space_window(&self) -> &SpaceInterval {
         &self.feasible_space_window
@@ -414,6 +821,33 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed + TryFrom<T>,
 {
+    /// Calculates the cost incurred by waiting for the given duration.
+    ///
+    /// The cost is computed as `cost_per_delay * waiting_time`.
+    ///
+    /// # Arguments
+    ///
+    /// * `waiting_time` - The duration of waiting time
+    ///
+    /// # Panics
+    ///
+    /// Panics if the waiting time value cannot be converted to the cost type `C`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(3), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    ///
+    /// let wait_cost = request.waiting_cost(TimeDelta::new(4));
+    /// assert_eq!(wait_cost, Cost::new(12)); // 3 * 4
+    /// ```
     #[inline]
     pub fn waiting_cost(&self, waiting_time: TimeDelta<T>) -> Cost<C> {
         let scalar: C = C::try_from(waiting_time.value())
@@ -428,6 +862,33 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed + TryFrom<usize>,
 {
+    /// Calculates the cost incurred by deviating from the target position.
+    ///
+    /// The cost is computed as `cost_per_position_deviation * deviation`.
+    ///
+    /// # Arguments
+    ///
+    /// * `deviation` - The distance from the target position
+    ///
+    /// # Panics
+    ///
+    /// Panics if the deviation value cannot be converted to the cost type `C`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(5),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    ///
+    /// let deviation_cost = request.target_position_deviation_cost(SpaceLength::new(3));
+    /// assert_eq!(deviation_cost, Cost::new(15)); // 5 * 3
+    /// ```
     #[inline]
     pub fn target_position_deviation_cost(&self, deviation: SpaceLength) -> Cost<C> {
         let scalar: C = C::try_from(deviation.value())
@@ -485,6 +946,34 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
+    /// Creates a new assignment for the given request.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - The request being assigned
+    /// * `start_position` - The position along the quay where the assignment starts
+    /// * `start_time` - The time when the assignment starts
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Assignment, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    ///
+    /// let assignment = Assignment::new(
+    ///     request,
+    ///     SpacePosition::new(15),
+    ///     TimePoint::new(2)
+    /// );
+    /// assert_eq!(assignment.start_position(), SpacePosition::new(15));
+    /// assert_eq!(assignment.start_time(), TimePoint::new(2));
+    /// ```
     #[inline]
     pub fn new(
         request: Request<T, C>,
@@ -498,16 +987,67 @@ where
         }
     }
 
+    /// Returns a reference to the request being assigned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Assignment, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let request = Request::new(
+    /// #     RequestId::new(42), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    /// # let assignment = Assignment::new(request, SpacePosition::new(15), TimePoint::new(2));
+    ///
+    /// assert_eq!(assignment.request().id(), RequestId::new(42));
+    /// ```
     #[inline]
     pub fn request(&self) -> &Request<T, C> {
         &self.request
     }
 
+    /// Returns the start position of this assignment along the quay.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Assignment, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    /// # let assignment = Assignment::new(request, SpacePosition::new(25), TimePoint::new(3));
+    ///
+    /// assert_eq!(assignment.start_position(), SpacePosition::new(25));
+    /// ```
     #[inline]
     pub fn start_position(&self) -> SpacePosition {
         self.start_position
     }
 
+    /// Returns the start time of this assignment.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Assignment, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    /// # let assignment = Assignment::new(request, SpacePosition::new(15), TimePoint::new(7));
+    ///
+    /// assert_eq!(assignment.start_time(), TimePoint::new(7));
+    /// ```
     #[inline]
     pub fn start_time(&self) -> TimePoint<T> {
         self.start_time
@@ -529,6 +1069,27 @@ where
     }
 }
 
+/// A wrapper around an `Assignment` indicating that it is fixed (preassigned).
+///
+/// Fixed assignments represent requests that have already been assigned and cannot
+/// be changed during optimization. They must be respected by any solution.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{Fixed, Assignment, Request, RequestId};
+/// use dock_alloc_core::domain::*;
+/// # let request = Request::new(
+/// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+/// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+/// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+/// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+/// # ).unwrap();
+///
+/// let assignment = Assignment::new(request, SpacePosition::new(15), TimePoint::new(2));
+/// let fixed = Fixed::new(assignment);
+/// assert_eq!(fixed.assignment().start_position(), SpacePosition::new(15));
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Fixed<T = i64, C = i64>(Assignment<T, C>)
 where
@@ -540,14 +1101,72 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
+    /// Creates a new fixed assignment from the given assignment.
+    ///
+    /// # Arguments
+    ///
+    /// * `a` - The assignment to mark as fixed
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Fixed, Assignment, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    ///
+    /// let assignment = Assignment::new(request, SpacePosition::new(10), TimePoint::new(1));
+    /// let fixed = Fixed::new(assignment);
+    /// ```
     pub fn new(a: Assignment<T, C>) -> Self {
         Self(a)
     }
+
+    /// Returns a reference to the underlying assignment.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Fixed, Assignment, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    /// # let assignment = Assignment::new(request, SpacePosition::new(10), TimePoint::new(1));
+    /// # let fixed = Fixed::new(assignment);
+    ///
+    /// assert_eq!(fixed.assignment().start_position(), SpacePosition::new(10));
+    /// ```
     pub fn assignment(&self) -> &Assignment<T, C> {
         &self.0
     }
 }
 
+/// An error indicating that an assignment is outside its feasible time window.
+///
+/// This error occurs when an assignment's time interval extends beyond
+/// the request's feasible time window, violating temporal constraints.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{RequestId, AssignmentOutsideTimeWindowError};
+/// use dock_alloc_core::domain::{TimeInterval, TimePoint};
+///
+/// let error = AssignmentOutsideTimeWindowError::new(
+///     RequestId::new(1),
+///     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)), // Feasible window
+///     TimeInterval::new(TimePoint::new(8), TimePoint::new(15))  // Assignment extends to 15
+/// );
+/// assert_eq!(error.id(), RequestId::new(1));
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AssignmentOutsideTimeWindowError<T: PrimInt + Signed> {
     id: RequestId,
@@ -556,6 +1175,26 @@ pub struct AssignmentOutsideTimeWindowError<T: PrimInt + Signed> {
 }
 
 impl<T: PrimInt + Signed> AssignmentOutsideTimeWindowError<T> {
+    /// Creates a new `AssignmentOutsideTimeWindowError`.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The identifier of the request with the invalid assignment
+    /// * `time_window` - The feasible time window for the request
+    /// * `assigned_interval` - The time interval of the invalid assignment
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, AssignmentOutsideTimeWindowError};
+    /// use dock_alloc_core::domain::{TimeInterval, TimePoint};
+    ///
+    /// let error = AssignmentOutsideTimeWindowError::new(
+    ///     RequestId::new(42),
+    ///     TimeInterval::new(TimePoint::new(5), TimePoint::new(20)),
+    ///     TimeInterval::new(TimePoint::new(18), TimePoint::new(25))
+    /// );
+    /// ```
     pub fn new(
         id: RequestId,
         time_window: TimeInterval<T>,
@@ -568,14 +1207,61 @@ impl<T: PrimInt + Signed> AssignmentOutsideTimeWindowError<T> {
         }
     }
 
+    /// Returns the identifier of the request that caused this error.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, AssignmentOutsideTimeWindowError};
+    /// use dock_alloc_core::domain::{TimeInterval, TimePoint};
+    ///
+    /// let error = AssignmentOutsideTimeWindowError::new(
+    ///     RequestId::new(123),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    ///     TimeInterval::new(TimePoint::new(8), TimePoint::new(15))
+    /// );
+    /// assert_eq!(error.id(), RequestId::new(123));
+    /// ```
     pub fn id(&self) -> RequestId {
         self.id
     }
 
+    /// Returns a reference to the feasible time window.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, AssignmentOutsideTimeWindowError};
+    /// use dock_alloc_core::domain::{TimeInterval, TimePoint};
+    ///
+    /// let window = TimeInterval::new(TimePoint::new(0), TimePoint::new(10));
+    /// let error = AssignmentOutsideTimeWindowError::new(
+    ///     RequestId::new(1),
+    ///     window,
+    ///     TimeInterval::new(TimePoint::new(8), TimePoint::new(15))
+    /// );
+    /// assert_eq!(error.time_window(), &window);
+    /// ```
     pub fn time_window(&self) -> &TimeInterval<T> {
         &self.time_window
     }
 
+    /// Returns a reference to the assigned time interval that caused the error.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, AssignmentOutsideTimeWindowError};
+    /// use dock_alloc_core::domain::{TimeInterval, TimePoint};
+    ///
+    /// let assigned = TimeInterval::new(TimePoint::new(8), TimePoint::new(15));
+    /// let error = AssignmentOutsideTimeWindowError::new(
+    ///     RequestId::new(1),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    ///     assigned
+    /// );
+    /// assert_eq!(error.assigned_interval(), &assigned);
+    /// ```
     pub fn assigned_interval(&self) -> &TimeInterval<T> {
         &self.assigned_interval
     }
@@ -596,6 +1282,24 @@ impl<T: PrimInt + Signed + Debug + Display> std::error::Error
 {
 }
 
+/// An error indicating that an assignment is outside its feasible space window.
+///
+/// This error occurs when an assignment's space interval extends beyond
+/// the request's feasible space window, violating spatial constraints.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{RequestId, AssignmentOutsideSpaceWindowError};
+/// use dock_alloc_core::domain::{SpaceInterval, SpacePosition};
+///
+/// let error = AssignmentOutsideSpaceWindowError::new(
+///     RequestId::new(1),
+///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(30)), // Feasible window
+///     SpaceInterval::new(SpacePosition::new(25), SpacePosition::new(35)) // Assignment extends to 35
+/// );
+/// assert_eq!(error.id(), RequestId::new(1));
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AssignmentOutsideSpaceWindowError {
     id: RequestId,
@@ -604,6 +1308,26 @@ pub struct AssignmentOutsideSpaceWindowError {
 }
 
 impl AssignmentOutsideSpaceWindowError {
+    /// Creates a new `AssignmentOutsideSpaceWindowError`.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The identifier of the request with the invalid assignment
+    /// * `space_window` - The feasible space window for the request
+    /// * `assigned_interval` - The space interval of the invalid assignment
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, AssignmentOutsideSpaceWindowError};
+    /// use dock_alloc_core::domain::{SpaceInterval, SpacePosition};
+    ///
+    /// let error = AssignmentOutsideSpaceWindowError::new(
+    ///     RequestId::new(42),
+    ///     SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(50)),
+    ///     SpaceInterval::new(SpacePosition::new(45), SpacePosition::new(55))
+    /// );
+    /// ```
     pub fn new(
         id: RequestId,
         space_window: SpaceInterval,
@@ -616,14 +1340,61 @@ impl AssignmentOutsideSpaceWindowError {
         }
     }
 
+    /// Returns the identifier of the request that caused this error.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, AssignmentOutsideSpaceWindowError};
+    /// use dock_alloc_core::domain::{SpaceInterval, SpacePosition};
+    ///
+    /// let error = AssignmentOutsideSpaceWindowError::new(
+    ///     RequestId::new(123),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(30)),
+    ///     SpaceInterval::new(SpacePosition::new(25), SpacePosition::new(35))
+    /// );
+    /// assert_eq!(error.id(), RequestId::new(123));
+    /// ```
     pub fn id(&self) -> RequestId {
         self.id
     }
 
+    /// Returns a reference to the feasible space window.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, AssignmentOutsideSpaceWindowError};
+    /// use dock_alloc_core::domain::{SpaceInterval, SpacePosition};
+    ///
+    /// let window = SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(30));
+    /// let error = AssignmentOutsideSpaceWindowError::new(
+    ///     RequestId::new(1),
+    ///     window,
+    ///     SpaceInterval::new(SpacePosition::new(25), SpacePosition::new(35))
+    /// );
+    /// assert_eq!(error.space_window(), &window);
+    /// ```
     pub fn space_window(&self) -> &SpaceInterval {
         &self.space_window
     }
 
+    /// Returns a reference to the assigned space interval that caused the error.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, AssignmentOutsideSpaceWindowError};
+    /// use dock_alloc_core::domain::{SpaceInterval, SpacePosition};
+    ///
+    /// let assigned = SpaceInterval::new(SpacePosition::new(25), SpacePosition::new(35));
+    /// let error = AssignmentOutsideSpaceWindowError::new(
+    ///     RequestId::new(1),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(30)),
+    ///     assigned
+    /// );
+    /// assert_eq!(error.assigned_interval(), &assigned);
+    /// ```
     pub fn assigned_interval(&self) -> &SpaceInterval {
         &self.assigned_interval
     }
@@ -641,6 +1412,24 @@ impl Display for AssignmentOutsideSpaceWindowError {
 
 impl std::error::Error for AssignmentOutsideSpaceWindowError {}
 
+/// An error indicating that an assignment extends beyond the quay length.
+///
+/// This error occurs when an assignment's space interval extends past
+/// the end of the quay, violating the physical constraints of the dock.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{RequestId, AssignmentExceedsQuayError};
+/// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+///
+/// let error = AssignmentExceedsQuayError::new(
+///     RequestId::new(1),
+///     SpaceLength::new(100), // Quay is 100 units long
+///     SpaceInterval::new(SpacePosition::new(90), SpacePosition::new(110)) // Assignment goes to 110
+/// );
+/// assert_eq!(error.quay_length(), SpaceLength::new(100));
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AssignmentExceedsQuayError {
     id: RequestId,
@@ -649,6 +1438,26 @@ pub struct AssignmentExceedsQuayError {
 }
 
 impl AssignmentExceedsQuayError {
+    /// Creates a new `AssignmentExceedsQuayError`.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The identifier of the request with the invalid assignment
+    /// * `quay_length` - The total length of the quay
+    /// * `assigned_interval` - The space interval that exceeds the quay
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, AssignmentExceedsQuayError};
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+    ///
+    /// let error = AssignmentExceedsQuayError::new(
+    ///     RequestId::new(42),
+    ///     SpaceLength::new(200),
+    ///     SpaceInterval::new(SpacePosition::new(180), SpacePosition::new(220))
+    /// );
+    /// ```
     pub fn new(id: RequestId, quay_length: SpaceLength, assigned_interval: SpaceInterval) -> Self {
         AssignmentExceedsQuayError {
             id,
@@ -657,14 +1466,60 @@ impl AssignmentExceedsQuayError {
         }
     }
 
+    /// Returns the identifier of the request that caused this error.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, AssignmentExceedsQuayError};
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+    ///
+    /// let error = AssignmentExceedsQuayError::new(
+    ///     RequestId::new(123),
+    ///     SpaceLength::new(100),
+    ///     SpaceInterval::new(SpacePosition::new(90), SpacePosition::new(110))
+    /// );
+    /// assert_eq!(error.id(), RequestId::new(123));
+    /// ```
     pub fn id(&self) -> RequestId {
         self.id
     }
 
+    /// Returns the total length of the quay.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, AssignmentExceedsQuayError};
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+    ///
+    /// let error = AssignmentExceedsQuayError::new(
+    ///     RequestId::new(1),
+    ///     SpaceLength::new(150),
+    ///     SpaceInterval::new(SpacePosition::new(140), SpacePosition::new(160))
+    /// );
+    /// assert_eq!(error.quay_length(), SpaceLength::new(150));
+    /// ```
     pub fn quay_length(&self) -> SpaceLength {
         self.quay_length
     }
 
+    /// Returns a reference to the assigned space interval that exceeds the quay.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, AssignmentExceedsQuayError};
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+    ///
+    /// let assigned = SpaceInterval::new(SpacePosition::new(90), SpacePosition::new(110));
+    /// let error = AssignmentExceedsQuayError::new(
+    ///     RequestId::new(1),
+    ///     SpaceLength::new(100),
+    ///     assigned
+    /// );
+    /// assert_eq!(error.assigned_interval(), &assigned);
+    /// ```
     pub fn assigned_interval(&self) -> &SpaceInterval {
         &self.assigned_interval
     }
@@ -682,6 +1537,24 @@ impl Display for AssignmentExceedsQuayError {
 
 impl std::error::Error for AssignmentExceedsQuayError {}
 
+/// An error indicating that two preassigned assignments overlap in space and time.
+///
+/// This error occurs when attempting to add a preassigned assignment that
+/// conflicts with an existing preassigned assignment, creating an impossible
+/// scenario where two requests would occupy the same space at the same time.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{RequestId, PreassignedOverlapError};
+///
+/// let error = PreassignedOverlapError::new(
+///     RequestId::new(1),
+///     RequestId::new(2)
+/// );
+/// assert_eq!(error.request_a(), RequestId::new(1));
+/// assert_eq!(error.request_b(), RequestId::new(2));
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PreassignedOverlapError {
     a: RequestId,
@@ -689,14 +1562,57 @@ pub struct PreassignedOverlapError {
 }
 
 impl PreassignedOverlapError {
+    /// Creates a new `PreassignedOverlapError`.
+    ///
+    /// # Arguments
+    ///
+    /// * `a` - The identifier of the first conflicting request
+    /// * `b` - The identifier of the second conflicting request
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, PreassignedOverlapError};
+    ///
+    /// let error = PreassignedOverlapError::new(
+    ///     RequestId::new(10),
+    ///     RequestId::new(20)
+    /// );
+    /// ```
     pub fn new(a: RequestId, b: RequestId) -> Self {
         PreassignedOverlapError { a, b }
     }
 
+    /// Returns the identifier of the first conflicting request.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, PreassignedOverlapError};
+    ///
+    /// let error = PreassignedOverlapError::new(
+    ///     RequestId::new(5),
+    ///     RequestId::new(7)
+    /// );
+    /// assert_eq!(error.request_a(), RequestId::new(5));
+    /// ```
     pub fn request_a(&self) -> RequestId {
         self.a
     }
 
+    /// Returns the identifier of the second conflicting request.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{RequestId, PreassignedOverlapError};
+    ///
+    /// let error = PreassignedOverlapError::new(
+    ///     RequestId::new(5),
+    ///     RequestId::new(7)
+    /// );
+    /// assert_eq!(error.request_b(), RequestId::new(7));
+    /// ```
     pub fn request_b(&self) -> RequestId {
         self.b
     }
@@ -712,12 +1628,32 @@ impl Display for PreassignedOverlapError {
     }
 }
 
+/// An error that can occur when building a `Problem`.
+///
+/// This enum represents the different validation errors that can occur
+/// when using `ProblemBuilder` to construct a berth allocation problem.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{ProblemBuilder, ProblemBuildError, RequestId};
+/// use dock_alloc_core::domain::SpaceLength;
+///
+/// // This will cause a duplicate ID error if you try to add the same request twice
+/// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
+/// // ... add requests that would cause errors
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProblemBuildError<T: PrimInt + Signed> {
+    /// A request with this ID has already been added to the problem.
     DuplicateRequestId(RequestId),
+    /// A preassigned assignment is outside its request's feasible time window.
     AssignmentOutsideTimeWindow(AssignmentOutsideTimeWindowError<T>),
+    /// A preassigned assignment is outside its request's feasible space window.
     AssignmentOutsideSpaceWindow(AssignmentOutsideSpaceWindowError),
+    /// A preassigned assignment extends beyond the quay length.
     AssignmentExceedsQuay(AssignmentExceedsQuayError),
+    /// Two preassigned assignments overlap in space and time.
     PreassignedOverlap(PreassignedOverlapError),
 }
 
@@ -739,8 +1675,43 @@ impl<T: PrimInt + Signed + Display + Debug> std::error::Error for ProblemBuildEr
 
 /// A berth allocation problem instance.
 ///
-/// Internally stores **unassigned** requests and **preassigned** (fixed) assignments
-/// in separate maps to make invariants explicit.
+/// This struct represents a complete berth allocation problem, containing both
+/// unassigned requests that need to be allocated and preassigned (fixed) assignments
+/// that must be respected in any solution.
+///
+/// The problem definition includes the quay length, which constrains where
+/// assignments can be placed spatially.
+///
+/// # Type Parameters
+///
+/// * `T` - The numeric type used for time values (default: `i64`)
+/// * `C` - The numeric type used for cost values (default: `i64`)
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{Problem, ProblemBuilder, Request, RequestId};
+/// use dock_alloc_core::domain::*;
+///
+/// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
+///
+/// let request = Request::new(
+///     RequestId::new(1),
+///     SpaceLength::new(10),
+///     TimeDelta::new(5),
+///     SpacePosition::new(20),
+///     Cost::new(2),
+///     Cost::new(1),
+///     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+/// ).unwrap();
+///
+/// builder.add_unassigned_request(request).unwrap();
+/// let problem = builder.build();
+///
+/// assert_eq!(problem.total_requests(), 1);
+/// assert_eq!(problem.quay_length(), SpaceLength::new(100));
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Problem<T = i64, C = i64>
 where
@@ -770,29 +1741,171 @@ where
         }
     }
 
+    /// Returns a reference to the map of unassigned requests.
+    ///
+    /// These are requests that need to be allocated a berth position and time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    /// # builder.add_unassigned_request(request).unwrap();
+    /// # let problem = builder.build();
+    ///
+    /// assert_eq!(problem.unassigned().len(), 1);
+    /// assert!(problem.unassigned().contains_key(&RequestId::new(1)));
+    /// ```
     #[inline]
     pub fn unassigned(&self) -> &HashMap<RequestId, Request<T, C>> {
         &self.unassigned
     }
 
+    /// Returns a reference to the map of preassigned (fixed) assignments.
+    ///
+    /// These are assignments that are already decided and must be respected
+    /// in any solution to the problem.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{ProblemBuilder, Fixed, Assignment, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    /// # let assignment = Assignment::new(request, SpacePosition::new(15), TimePoint::new(2));
+    /// # builder.add_preassigned(Fixed::new(assignment)).unwrap();
+    /// # let problem = builder.build();
+    ///
+    /// assert_eq!(problem.preassigned().len(), 1);
+    /// assert!(problem.preassigned().contains_key(&RequestId::new(1)));
+    /// ```
     #[inline]
     pub fn preassigned(&self) -> &HashMap<RequestId, Fixed<T, C>> {
         &self.preassigned
     }
 
+    /// Returns the total length of the quay.
+    ///
+    /// This defines the spatial constraint for the problem - no assignment
+    /// can extend beyond this length.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::ProblemBuilder;
+    /// use dock_alloc_core::domain::SpaceLength;
+    ///
+    /// let builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(200));
+    /// let problem = builder.build();
+    /// assert_eq!(problem.quay_length(), SpaceLength::new(200));
+    /// ```
     #[inline]
     pub fn quay_length(&self) -> SpaceLength {
         self.quay_length
     }
 
+    /// Returns the total number of requests in this problem.
+    ///
+    /// This includes both unassigned requests and preassigned requests.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// # let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
+    /// # let request1 = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    /// # let request2 = Request::new(
+    /// #     RequestId::new(2), SpaceLength::new(8), TimeDelta::new(3),
+    /// #     SpacePosition::new(15), Cost::new(1), Cost::new(2),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(8)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(40))
+    /// # ).unwrap();
+    /// # builder.add_unassigned_request(request1).unwrap();
+    /// # builder.add_unassigned_request(request2).unwrap();
+    /// # let problem = builder.build();
+    ///
+    /// assert_eq!(problem.total_requests(), 2);
+    /// ```
     #[inline]
     pub fn total_requests(&self) -> usize {
         self.unassigned.len() + self.preassigned.len()
     }
 }
 
+/// Type alias for a berth allocation problem using standard integer types.
+///
+/// This is a convenience alias for `Problem<i64, i64>`, representing the most
+/// common configuration where both time and cost values are 64-bit signed integers.
 pub type BerthAllocationProblem = Problem<i64, i64>;
 
+/// A builder for constructing `Problem` instances with validation.
+///
+/// `ProblemBuilder` provides a safe way to construct berth allocation problems
+/// by validating constraints as requests and assignments are added. It ensures
+/// that all assignments are feasible and that preassigned assignments don't conflict.
+///
+/// # Type Parameters
+///
+/// * `T` - The numeric type used for time values (default: `i64`)
+/// * `C` - The numeric type used for cost values (default: `i64`)
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{ProblemBuilder, Request, Fixed, Assignment, RequestId};
+/// use dock_alloc_core::domain::*;
+///
+/// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
+///
+/// // Add an unassigned request
+/// let request1 = Request::new(
+///     RequestId::new(1),
+///     SpaceLength::new(10),
+///     TimeDelta::new(5),
+///     SpacePosition::new(20),
+///     Cost::new(2),
+///     Cost::new(1),
+///     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+/// ).unwrap();
+/// builder.add_unassigned_request(request1).unwrap();
+///
+/// // Add a preassigned request
+/// let request2 = Request::new(
+///     RequestId::new(2),
+///     SpaceLength::new(8),
+///     TimeDelta::new(3),
+///     SpacePosition::new(15),
+///     Cost::new(1),
+///     Cost::new(2),
+///     TimeInterval::new(TimePoint::new(0), TimePoint::new(8)),
+///     SpaceInterval::new(SpacePosition::new(60), SpacePosition::new(80))
+/// ).unwrap();
+/// let assignment = Assignment::new(request2, SpacePosition::new(65), TimePoint::new(1));
+/// builder.add_preassigned(Fixed::new(assignment)).unwrap();
+///
+/// let problem = builder.build();
+/// assert_eq!(problem.total_requests(), 2);
+/// ```
 pub struct ProblemBuilder<T = i64, C = i64>
 where
     T: PrimInt + Signed,
@@ -808,6 +1921,20 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
+    /// Creates a new `ProblemBuilder` with the specified quay length.
+    ///
+    /// # Arguments
+    ///
+    /// * `quay_length` - The total length of the quay
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::ProblemBuilder;
+    /// use dock_alloc_core::domain::SpaceLength;
+    ///
+    /// let builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(150));
+    /// ```
     pub fn new(quay_length: SpaceLength) -> Self {
         Self {
             unassigned: HashMap::new(),
@@ -816,11 +1943,60 @@ where
         }
     }
 
+    /// Sets the quay length for this problem.
+    ///
+    /// # Arguments
+    ///
+    /// * `length` - The new quay length
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::ProblemBuilder;
+    /// use dock_alloc_core::domain::SpaceLength;
+    ///
+    /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
+    /// builder.quay_length(SpaceLength::new(200));
+    /// ```
     pub fn quay_length(&mut self, length: SpaceLength) -> &mut Self {
         self.quay_length = length;
         self
     }
 
+    /// Adds an unassigned request to the problem.
+    ///
+    /// The request will need to be allocated a berth position and time
+    /// in any solution to the problem.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - The request to add
+    ///
+    /// # Errors
+    ///
+    /// Returns `ProblemBuildError::DuplicateRequestId` if a request with the same
+    /// ID has already been added to this problem.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    ///
+    /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
+    /// let request = Request::new(
+    ///     RequestId::new(1),
+    ///     SpaceLength::new(10),
+    ///     TimeDelta::new(5),
+    ///     SpacePosition::new(20),
+    ///     Cost::new(2),
+    ///     Cost::new(1),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// ).unwrap();
+    ///
+    /// builder.add_unassigned_request(request).unwrap();
+    /// ```
     pub fn add_unassigned_request(
         &mut self,
         request: Request<T, C>,
@@ -842,6 +2018,47 @@ where
         (TimeInterval::new(t0, t1), SpaceInterval::new(s0, s1))
     }
 
+    /// Adds a preassigned (fixed) assignment to the problem.
+    ///
+    /// The assignment is validated to ensure it respects all constraints:
+    /// - Must be within the request's feasible time and space windows
+    /// - Must not extend beyond the quay length
+    /// - Must not overlap with other preassigned assignments
+    ///
+    /// # Arguments
+    ///
+    /// * `fixed` - The fixed assignment to add
+    ///
+    /// # Errors
+    ///
+    /// Returns various `ProblemBuildError` variants for different constraint violations:
+    /// - `DuplicateRequestId` if a request with the same ID already exists
+    /// - `AssignmentOutsideTimeWindow` if the assignment is outside the time window
+    /// - `AssignmentOutsideSpaceWindow` if the assignment is outside the space window
+    /// - `AssignmentExceedsQuay` if the assignment extends beyond the quay
+    /// - `PreassignedOverlap` if the assignment overlaps with existing preassigned assignments
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{ProblemBuilder, Fixed, Assignment, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    ///
+    /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
+    /// let request = Request::new(
+    ///     RequestId::new(1),
+    ///     SpaceLength::new(10),
+    ///     TimeDelta::new(5),
+    ///     SpacePosition::new(20),
+    ///     Cost::new(2),
+    ///     Cost::new(1),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// ).unwrap();
+    ///
+    /// let assignment = Assignment::new(request, SpacePosition::new(15), TimePoint::new(2));
+    /// builder.add_preassigned(Fixed::new(assignment)).unwrap();
+    /// ```
     pub fn add_preassigned(
         &mut self,
         fixed: Fixed<T, C>,
@@ -889,6 +2106,21 @@ where
         Ok(self)
     }
 
+    /// Builds the final `Problem` instance from the current state.
+    ///
+    /// This consumes the builder's current state and returns a validated
+    /// problem instance ready for optimization.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    ///
+    /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
+    /// // ... add requests ...
+    /// let problem = builder.build();
+    /// ```
     pub fn build(&self) -> Problem<T, C> {
         Problem::new(
             self.unassigned.clone(),
@@ -900,8 +2132,44 @@ where
 
 /// Statistics about a solution to the berth allocation problem.
 ///
-/// This struct encapsulates key metrics of a solution, including total cost,
-/// total waiting time, and total target position deviation.
+/// This struct provides a summary of key quality metrics for a solution,
+/// aggregating costs, waiting times, and position deviations across all
+/// assigned requests.
+///
+/// # Type Parameters
+///
+/// * `T` - The numeric type used for time values (default: `i64`)
+/// * `C` - The numeric type used for cost values (default: `i64`)
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{Solution, Assignment, Request, RequestId};
+/// use dock_alloc_core::domain::*;
+/// use std::collections::HashMap;
+///
+/// // Stats are typically created automatically when building solutions
+/// let request = Request::new(
+///     RequestId::new(1),
+///     SpaceLength::new(10),
+///     TimeDelta::new(5),
+///     SpacePosition::new(20),
+///     Cost::new(2),
+///     Cost::new(1),
+///     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+/// ).unwrap();
+///
+/// let assignment = Assignment::new(request, SpacePosition::new(25), TimePoint::new(3));
+/// let mut assignments = HashMap::new();
+/// assignments.insert(RequestId::new(1), assignment);
+/// let solution = Solution::from_assignments(assignments);
+///
+/// let stats = solution.stats();
+/// println!("Total cost: {}", stats.total_cost());
+/// println!("Total waiting time: {}", stats.total_waiting_time());
+/// println!("Total position deviation: {}", stats.total_target_position_deviation());
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SolutionStats<T = i64, C = i64>
 where
@@ -931,16 +2199,89 @@ where
         }
     }
 
+    /// Returns the total cost of the solution.
+    ///
+    /// This includes both waiting costs and position deviation costs
+    /// summed across all assignments.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Solution, Assignment, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// use std::collections::HashMap;
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    /// # let assignment = Assignment::new(request, SpacePosition::new(25), TimePoint::new(3));
+    /// # let mut assignments = HashMap::new();
+    /// # assignments.insert(RequestId::new(1), assignment);
+    /// # let solution = Solution::from_assignments(assignments);
+    ///
+    /// println!("Solution cost: {}", solution.stats().total_cost());
+    /// ```
     #[inline]
     pub fn total_cost(&self) -> Cost<C> {
         self.total_cost
     }
 
+    /// Returns the total waiting time across all assignments.
+    ///
+    /// This is the sum of waiting times for all requests, where waiting time
+    /// is the difference between the assignment start time and the request's
+    /// arrival time (clamped to be non-negative).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Solution, Assignment, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// use std::collections::HashMap;
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    /// # let assignment = Assignment::new(request, SpacePosition::new(25), TimePoint::new(3));
+    /// # let mut assignments = HashMap::new();
+    /// # assignments.insert(RequestId::new(1), assignment);
+    /// # let solution = Solution::from_assignments(assignments);
+    ///
+    /// println!("Total waiting time: {}", solution.stats().total_waiting_time());
+    /// ```
     #[inline]
     pub fn total_waiting_time(&self) -> TimeDelta<T> {
         self.total_waiting_time
     }
 
+    /// Returns the total target position deviation across all assignments.
+    ///
+    /// This is the sum of absolute deviations from target positions
+    /// for all requests in the solution.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Solution, Assignment, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// use std::collections::HashMap;
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    /// # let assignment = Assignment::new(request, SpacePosition::new(25), TimePoint::new(3));
+    /// # let mut assignments = HashMap::new();
+    /// # assignments.insert(RequestId::new(1), assignment);
+    /// # let solution = Solution::from_assignments(assignments);
+    ///
+    /// println!("Total position deviation: {}", solution.stats().total_target_position_deviation());
+    /// ```
     #[inline]
     pub fn total_target_position_deviation(&self) -> SpaceLength {
         self.total_target_position_deviation
@@ -949,8 +2290,42 @@ where
 
 /// A solution to the berth allocation problem.
 ///
-/// This struct encapsulates the decisions made in the solution,
-/// including the assignments of requests and the associated statistics.
+/// This struct represents a complete solution, containing assignments for
+/// requests and automatically computed statistics about the solution quality.
+/// Solutions are typically created from a set of assignments and automatically
+/// calculate metrics like total cost, waiting time, and position deviation.
+///
+/// # Type Parameters
+///
+/// * `T` - The numeric type used for time values (default: `i64`)
+/// * `C` - The numeric type used for cost values (default: `i64`)
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_model::{Solution, Assignment, Request, RequestId};
+/// use dock_alloc_core::domain::*;
+/// use std::collections::HashMap;
+///
+/// let request = Request::new(
+///     RequestId::new(1),
+///     SpaceLength::new(10),
+///     TimeDelta::new(5),
+///     SpacePosition::new(20),
+///     Cost::new(2),
+///     Cost::new(1),
+///     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+/// ).unwrap();
+///
+/// let assignment = Assignment::new(request, SpacePosition::new(25), TimePoint::new(3));
+/// let mut assignments = HashMap::new();
+/// assignments.insert(RequestId::new(1), assignment);
+///
+/// let solution = Solution::from_assignments(assignments);
+/// println!("Solution has {} assignments", solution.decisions().len());
+/// println!("Total cost: {}", solution.stats().total_cost());
+/// ```
 #[derive(Debug, Clone)]
 pub struct Solution<T = i64, C = i64>
 where
@@ -966,6 +2341,40 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
 {
+    /// Creates a new solution from a set of assignments.
+    ///
+    /// This method automatically computes solution statistics including
+    /// total cost, waiting time, and position deviation.
+    ///
+    /// # Arguments
+    ///
+    /// * `assignments` - A map from request IDs to their assignments
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Solution, Assignment, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// use std::collections::HashMap;
+    ///
+    /// let request = Request::new(
+    ///     RequestId::new(1),
+    ///     SpaceLength::new(10),
+    ///     TimeDelta::new(5),
+    ///     SpacePosition::new(20),
+    ///     Cost::new(2),
+    ///     Cost::new(1),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// ).unwrap();
+    ///
+    /// let assignment = Assignment::new(request, SpacePosition::new(25), TimePoint::new(3));
+    /// let mut assignments = HashMap::new();
+    /// assignments.insert(RequestId::new(1), assignment);
+    ///
+    /// let solution = Solution::from_assignments(assignments);
+    /// assert_eq!(solution.decisions().len(), 1);
+    /// ```
     #[inline]
     pub fn from_assignments(assignments: HashMap<RequestId, Assignment<T, C>>) -> Self {
         let mut total_wait = TimeDelta::<T>::new(T::zero());
@@ -994,11 +2403,63 @@ where
         }
     }
 
+    /// Returns a reference to the solution statistics.
+    ///
+    /// The statistics provide a summary of solution quality including
+    /// total cost, waiting time, and position deviation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Solution, Assignment, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// use std::collections::HashMap;
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    /// # let assignment = Assignment::new(request, SpacePosition::new(25), TimePoint::new(3));
+    /// # let mut assignments = HashMap::new();
+    /// # assignments.insert(RequestId::new(1), assignment);
+    /// # let solution = Solution::from_assignments(assignments);
+    ///
+    /// let stats = solution.stats();
+    /// println!("Total cost: {}", stats.total_cost());
+    /// ```
     #[inline]
     pub fn stats(&self) -> &SolutionStats<T, C> {
         &self.stats
     }
 
+    /// Returns a reference to the assignment decisions.
+    ///
+    /// This map contains the final assignments for all requests in the solution,
+    /// mapping request IDs to their corresponding assignments.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_model::{Solution, Assignment, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    /// use std::collections::HashMap;
+    /// # let request = Request::new(
+    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
+    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
+    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
+    /// # ).unwrap();
+    /// # let assignment = Assignment::new(request, SpacePosition::new(25), TimePoint::new(3));
+    /// # let mut assignments = HashMap::new();
+    /// # assignments.insert(RequestId::new(1), assignment);
+    /// # let solution = Solution::from_assignments(assignments);
+    ///
+    /// let decisions = solution.decisions();
+    /// if let Some(assignment) = decisions.get(&RequestId::new(1)) {
+    ///     println!("Request 1 starts at position {}", assignment.start_position());
+    /// }
+    /// ```
     #[inline]
     pub fn decisions(&self) -> &HashMap<RequestId, Assignment<T, C>> {
         &self.decisions

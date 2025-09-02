@@ -57,7 +57,6 @@ use std::{
 /// let handles: Vec<_> = ledger.iter_movable_handles().collect();
 /// assert_eq!(handles.len(), 0); // No assignments committed yet
 /// ```
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MovableHandle<'brand> {
     id: RequestId,
@@ -134,7 +133,6 @@ impl<'brand> std::fmt::Display for MovableHandle<'brand> {
 ///     assert_eq!(handle.id(), RequestId::new(100));
 /// }
 /// ```
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FixedHandle<'brand> {
     id: RequestId,
@@ -215,7 +213,6 @@ impl<'brand> std::fmt::Display for FixedHandle<'brand> {
 /// let movables: Vec<_> = ledger.iter_movable_assignments().collect();
 /// assert_eq!(movables.len(), 0); // No assignments committed yet
 /// ```
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Movable<'brand, T, C>
 where
@@ -543,8 +540,6 @@ where
     /// // In practice, commit() would be called with movables from solver algorithms
     /// assert_eq!(ledger.committed().len(), 0);
     /// ```
-    ///
-
     pub fn commit(&mut self, ma: Movable<'brand, T, C>) -> Result<(), LedgerError> {
         let id = ma.id();
         if self.committed.contains_key(&id) {
@@ -587,8 +582,6 @@ where
     /// // In practice, uncommit() would be called with handles from previous operations
     /// assert_eq!(ledger.committed().len(), 0);
     /// ```
-    ///
-
     pub fn uncommit(
         &mut self,
         mh: MovableHandle<'brand>,
@@ -690,8 +683,6 @@ where
     /// let handles: Vec<_> = ledger.iter_movable_handles().collect();
     /// assert_eq!(handles.len(), 0); // No assignments committed yet
     /// ```
-    ///
-
     #[inline]
     pub fn iter_movable_handles(&self) -> impl Iterator<Item = MovableHandle<'brand>> + '_ {
         self.committed.keys().map(|&rid| MovableHandle {
@@ -702,7 +693,31 @@ where
 
     /// Returns an iterator over all committed movable assignments.
     ///
-
+    /// This provides direct access to the movable assignments that have been
+    /// committed to this ledger. Each assignment contains the complete allocation
+    /// information and can be used for analysis or further operations.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::ledger::AssignmentLedger;
+    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    ///
+    /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
+    /// let request = Request::new(
+    ///     RequestId::new(1), SpaceLength::new(4), TimeDelta::new(3),
+    ///     SpacePosition::new(10), Cost::new(1), Cost::new(1),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(100)),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
+    /// ).unwrap();
+    /// builder.add_unassigned_request(request).unwrap();
+    /// let problem = builder.build();
+    ///
+    /// let ledger: AssignmentLedger<'_, '_, i64, i64> = AssignmentLedger::new(&problem);
+    /// let movables: Vec<_> = ledger.iter_movable_assignments().collect();
+    /// assert_eq!(movables.len(), 0); // No assignments committed yet
+    /// ```
     #[inline]
     pub fn iter_movable_assignments(&self) -> impl Iterator<Item = &Movable<'brand, T, C>> + '_ {
         self.committed.values()
@@ -734,8 +749,6 @@ where
     /// let committed: Vec<_> = ledger.iter_committed().collect();
     /// assert_eq!(committed.len(), 0); // No assignments committed yet
     /// ```
-    ///
-
     #[inline]
     pub fn iter_committed(&self) -> impl Iterator<Item = &Movable<'brand, T, C>> {
         self.committed.values()
@@ -781,8 +794,6 @@ where
     /// assert_eq!(assignments.len(), 1); // Only the fixed assignment
     /// assert_eq!(assignments[0].request().id(), RequestId::new(100));
     /// ```
-    ///
-
     pub fn iter_assignments(&self) -> impl Iterator<Item = Assignment<T, C>> + '_ {
         let fixed_iter = self
             .problem
@@ -960,9 +971,6 @@ where
     /// // Since movables can't be created externally, this demonstrates the concept
     /// assert_eq!(overlay.iter_staged_commits().count(), 0);
     /// ```
-
-    ///
-
     pub fn commit(&mut self, ma: Movable<'brand, T, C>) -> Result<(), StageError> {
         let id = ma.id();
         if self.ledger.committed().contains_key(&id) {
@@ -1014,9 +1022,6 @@ where
     /// // Since handles can't be created externally, this demonstrates the concept
     /// assert_eq!(overlay.iter_staged_uncommits().count(), 0);
     /// ```
-
-    ///
-
     pub fn uncommit(
         &mut self,
         mh: MovableHandle<'brand>,
@@ -1113,8 +1118,6 @@ where
     /// This includes assignments from the base ledger that are not staged for uncommit,
     /// plus assignments that are staged for commit. The result represents the effective
     /// view of movable assignments in this overlay.
-    ///
-
     #[inline]
     pub fn iter_movable_handles(&self) -> impl Iterator<Item = MovableHandle<'brand>> + '_ {
         let base_visible = self
@@ -1176,8 +1179,6 @@ where
     /// let staged: Vec<_> = overlay.iter_staged_commits().collect();
     /// assert_eq!(staged.len(), 0); // No staged commits initially
     /// ```
-    ///
-
     #[inline]
     pub fn iter_staged_commits(&self) -> impl Iterator<Item = &Movable<'brand, T, C>> {
         self.staged_commits.values()
@@ -1211,8 +1212,6 @@ where
     /// let uncommits: Vec<_> = overlay.iter_staged_uncommits().collect();
     /// assert_eq!(uncommits.len(), 0); // No staged uncommits initially
     /// ```
-    ///
-
     #[inline]
     pub fn iter_staged_uncommits(&self) -> impl Iterator<Item = &MovableHandle<'brand>> {
         self.staged_uncommits.values()
@@ -1263,8 +1262,6 @@ where
     /// assert_eq!(assignments.len(), 1); // Only the fixed assignment
     /// assert_eq!(assignments[0].request().id(), RequestId::new(100));
     /// ```
-    ///
-
     pub fn iter_assignments(&self) -> impl Iterator<Item = &Assignment<T, C>> + '_ {
         let fixed = self
             .ledger
@@ -1327,8 +1324,6 @@ where
 /// assert_eq!(solution.decisions().len(), 1);
 /// assert!(solution.decisions().contains_key(&RequestId::new(100)));
 /// ```
-///
-
 impl<'brand, 'a, T, C> From<&AssignmentLedger<'brand, 'a, T, C>> for Solution<T, C>
 where
     T: PrimInt + Signed,

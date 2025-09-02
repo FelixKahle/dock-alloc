@@ -48,7 +48,7 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 /// # Examples
 ///
 /// ```
-/// use dock_alloc_solver::occ::BerthOccupancy;
+/// use dock_alloc_solver::occupancy::BerthOccupancy;
 /// use dock_alloc_solver::quay::BTreeMapQuay;
 /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
 ///
@@ -87,7 +87,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::BerthOccupancy;
+    /// use dock_alloc_solver::occupancy::BerthOccupancy;
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::SpaceLength;
     ///
@@ -115,7 +115,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::BerthOccupancy;
+    /// use dock_alloc_solver::occupancy::BerthOccupancy;
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::SpaceLength;
     ///
@@ -137,7 +137,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::BerthOccupancy;
+    /// use dock_alloc_solver::occupancy::BerthOccupancy;
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
     ///
@@ -168,7 +168,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::BerthOccupancy;
+    /// use dock_alloc_solver::occupancy::BerthOccupancy;
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
     ///
@@ -198,7 +198,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::BerthOccupancy;
+    /// use dock_alloc_solver::occupancy::BerthOccupancy;
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
     ///
@@ -237,7 +237,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::BerthOccupancy;
+    /// use dock_alloc_solver::occupancy::BerthOccupancy;
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
     ///
@@ -275,7 +275,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::BerthOccupancy;
+    /// use dock_alloc_solver::occupancy::BerthOccupancy;
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
     ///
@@ -316,7 +316,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::BerthOccupancy;
+    /// use dock_alloc_solver::occupancy::BerthOccupancy;
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
     ///
@@ -359,7 +359,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::BerthOccupancy;
+    /// use dock_alloc_solver::occupancy::BerthOccupancy;
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
     ///
@@ -407,7 +407,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::BerthOccupancy;
+    /// use dock_alloc_solver::occupancy::BerthOccupancy;
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
     ///
@@ -443,7 +443,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::BerthOccupancy;
+    /// use dock_alloc_solver::occupancy::BerthOccupancy;
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
     ///
@@ -488,7 +488,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::BerthOccupancy;
+    /// use dock_alloc_solver::occupancy::BerthOccupancy;
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint, TimeDelta};
     ///
@@ -533,7 +533,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::BerthOccupancy;
+    /// use dock_alloc_solver::occupancy::BerthOccupancy;
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
     ///
@@ -688,7 +688,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::BerthOccupancy;
+    /// use dock_alloc_solver::occupancy::BerthOccupancy;
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
     ///
@@ -760,7 +760,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::BerthOccupancy;
+    /// use dock_alloc_solver::occupancy::BerthOccupancy;
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
     ///
@@ -827,7 +827,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::BerthOccupancy;
+    /// use dock_alloc_solver::occupancy::BerthOccupancy;
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint, TimeDelta};
     ///
@@ -864,7 +864,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::BerthOccupancy;
+    /// use dock_alloc_solver::occupancy::BerthOccupancy;
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint, TimeDelta};
     ///
@@ -1154,7 +1154,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::BerthOccupancy;
+    /// use dock_alloc_solver::occupancy::BerthOccupancy;
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_model::ProblemBuilder;
     /// use dock_alloc_core::domain::SpaceLength;
@@ -1893,7 +1893,7 @@ where
 /// # Examples
 ///
 /// ```
-/// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+/// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
 /// use dock_alloc_solver::quay::BTreeMapQuay;
 /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
 ///
@@ -1945,7 +1945,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::SpaceLength;
     ///
@@ -1977,7 +1977,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
     ///
@@ -2008,7 +2008,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
     ///
@@ -2042,7 +2042,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
     ///
@@ -2078,7 +2078,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
     ///
@@ -2112,7 +2112,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
     ///
@@ -2143,7 +2143,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
     ///
@@ -2181,7 +2181,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
     ///
@@ -2218,7 +2218,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
     ///
@@ -2253,7 +2253,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
     ///
@@ -2307,7 +2307,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
     ///
@@ -2356,7 +2356,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
     ///
@@ -2383,7 +2383,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
     ///
@@ -2411,7 +2411,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint, TimeDelta};
     ///
@@ -2447,7 +2447,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
     /// use dock_alloc_solver::quay::BTreeMapQuay;
     /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
     ///

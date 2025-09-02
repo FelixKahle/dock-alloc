@@ -21,5 +21,5 @@
 
 pub mod domain;
 pub mod ledger;
-pub mod occ;
+pub mod occupancy;
 pub mod quay;
