@@ -1187,6 +1187,11 @@ where
     }
 }
 
+/// A collection of non-overlapping space intervals maintained in sorted order.
+///
+/// Represents a set of space intervals that are automatically coalesced to maintain
+/// non-overlapping, sorted intervals. Provides efficient operations for union,
+/// intersection, and subtraction of interval sets.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct SpaceIntervalSet {
     intervals: Vec<SpaceInterval>,
@@ -1692,6 +1697,10 @@ impl<'a> IntoIterator for &'a mut SpaceIntervalSet {
     }
 }
 
+/// Iterator that yields the union of keys from two time-indexed maps in sorted order.
+///
+/// Takes two `BTreeMap<TimePoint<T>, SpaceIntervalSet>` references and yields all unique
+/// time points from both maps in ascending order. Duplicate time points are yielded only once.
 struct KeysUnion<'a, T: PrimInt + Signed> {
     a: Peekable<Copied<std::collections::btree_map::Keys<'a, TimePoint<T>, SpaceIntervalSet>>>,
     b: Peekable<Copied<std::collections::btree_map::Keys<'a, TimePoint<T>, SpaceIntervalSet>>>,
@@ -1740,6 +1749,12 @@ impl<'a, T: PrimInt + Signed> Iterator for KeysUnion<'a, T> {
     }
 }
 
+/// Iterator over space intervals that remain free across all overlay time slices.
+///
+/// Computes the intersection of free space across all time points where an overlay
+/// has modifications. Yields `SpaceInterval`s that are free in the base berth state,
+/// remain free after applying all overlay modifications, meet the minimum length
+/// requirement, and fall within the specified search bounds.
 pub struct IntersectIter<'a, T, Q>
 where
     T: PrimInt + Signed,
@@ -1869,6 +1884,43 @@ where
     }
 }
 
+/// Temporary overlay that tracks space allocation modifications on top of a base berth.
+///
+/// Allows applying temporary changes (freeing or occupying space) to a berth without
+/// modifying the underlying `BerthOccupancy`. Useful for algorithms that need to explore
+/// "what-if" scenarios or make tentative allocations that can be easily undone.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+/// use dock_alloc_solver::quay::BTreeMapQuay;
+/// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
+///
+/// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
+/// let mut berth = Berth::new(SpaceLength::new(100));
+///
+/// // Create some base occupation
+/// berth.occupy(
+///     TimeInterval::new(TimePoint::new(5), TimePoint::new(15)),
+///     SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40))
+/// );
+///
+/// // Create overlay to test temporary changes
+/// let mut overlay = BerthOccupancyOverlay::new(&berth);
+///
+/// // Temporarily free part of the occupied space
+/// overlay.free(
+///     TimeInterval::new(TimePoint::new(8), TimePoint::new(12)),
+///     SpaceInterval::new(SpacePosition::new(25), SpacePosition::new(35))
+/// );
+///
+/// // Check that the overlay shows the space as free
+/// assert!(overlay.is_free(
+///     TimeInterval::new(TimePoint::new(8), TimePoint::new(12)),
+///     SpaceInterval::new(SpacePosition::new(25), SpacePosition::new(35))
+/// ));
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BerthOccupancyOverlay<'a, T, Q>
 where
@@ -1885,6 +1937,22 @@ where
     T: PrimInt + Signed,
     Q: QuayRead,
 {
+    /// Creates a new overlay on top of the given berth occupancy.
+    ///
+    /// The overlay starts with no modifications, so all queries will initially
+    /// return the same results as the base berth.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::quay::BTreeMapQuay;
+    /// use dock_alloc_core::domain::SpaceLength;
+    ///
+    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
+    /// let berth = Berth::new(SpaceLength::new(100));
+    /// let overlay = BerthOccupancyOverlay::new(&berth);
+    /// ```
     pub fn new(berth_occupancy: &'a BerthOccupancy<T, Q>) -> Self {
         Self {
             berth_occupancy,
@@ -1893,11 +1961,35 @@ where
         }
     }
 
+    /// Returns a reference to the underlying base berth occupancy.
+    ///
+    /// Provides access to the original berth state without any overlay modifications.
     #[inline]
     pub fn berth(&self) -> &'a BerthOccupancy<T, Q> {
         self.berth_occupancy
     }
 
+    /// Adds an occupation at a specific time point to the overlay.
+    ///
+    /// Marks the specified space interval as occupied at the given time point,
+    /// overriding any free state from the base berth. Empty space intervals are ignored.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::quay::BTreeMapQuay;
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
+    ///
+    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
+    /// let berth = Berth::new(SpaceLength::new(100));
+    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
+    ///
+    /// overlay.add_occupy(
+    ///     TimePoint::new(5),
+    ///     SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(20))
+    /// );
+    /// ```
     #[inline]
     pub fn add_occupy(&mut self, time: TimePoint<T>, space: SpaceInterval) {
         if space.start() >= space.end() {
@@ -1909,6 +2001,26 @@ where
             .push_coalesced(space);
     }
 
+    /// Marks the specified space interval as occupied during the given time interval.
+    ///
+    /// Applies the occupation to all relevant time slices that overlap with the time window.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::quay::BTreeMapQuay;
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
+    ///
+    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
+    /// let berth = Berth::new(SpaceLength::new(100));
+    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
+    ///
+    /// overlay.occupy(
+    ///     TimeInterval::new(TimePoint::new(5), TimePoint::new(15)),
+    ///     SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40))
+    /// );
+    /// ```
     pub fn occupy(&mut self, time_window: TimeInterval<T>, space_interval: SpaceInterval) {
         if let Some(predecessor_timepoint) = self
             .berth_occupancy
@@ -1921,6 +2033,27 @@ where
         }
     }
 
+    /// Removes an occupation at a specific time point from the overlay.
+    ///
+    /// Removes the specified space interval from the overlay's occupation at the given
+    /// time point. If this results in no occupied space remaining at that time point,
+    /// the time point is removed from the overlay entirely.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::quay::BTreeMapQuay;
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
+    ///
+    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
+    /// let berth = Berth::new(SpaceLength::new(100));
+    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
+    ///
+    /// let space = SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(20));
+    /// overlay.add_occupy(TimePoint::new(5), space);
+    /// overlay.remove_occupy(TimePoint::new(5), space);
+    /// ```
     pub fn remove_occupy(&mut self, time: TimePoint<T>, space: SpaceInterval) {
         if space.start() >= space.end() {
             return;
@@ -1936,6 +2069,29 @@ where
         }
     }
 
+    /// Undoes a previous occupy operation by removing occupations from all affected time points.
+    ///
+    /// This is the reverse of [`occupy`](Self::occupy), removing the specified space
+    /// interval from overlay occupations at all time points that would have been
+    /// affected by the original occupy call.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::quay::BTreeMapQuay;
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
+    ///
+    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
+    /// let berth = Berth::new(SpaceLength::new(100));
+    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
+    ///
+    /// let time_window = TimeInterval::new(TimePoint::new(5), TimePoint::new(15));
+    /// let space_region = SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40));
+    ///
+    /// overlay.occupy(time_window, space_region);
+    /// overlay.undo_occupy(time_window, space_region);
+    /// ```
     pub fn undo_occupy(&mut self, time_window: TimeInterval<T>, space_interval: SpaceInterval) {
         if let Some(pred) = self
             .berth_occupancy
@@ -1948,6 +2104,27 @@ where
         }
     }
 
+    /// Adds a free space designation at a specific time point to the overlay.
+    ///
+    /// Marks the specified space interval as free at the given time point,
+    /// overriding any occupied state from the base berth. Empty space intervals are ignored.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::quay::BTreeMapQuay;
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
+    ///
+    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
+    /// let berth = Berth::new(SpaceLength::new(100));
+    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
+    ///
+    /// overlay.add_free(
+    ///     TimePoint::new(5),
+    ///     SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(20))
+    /// );
+    /// ```
     #[inline]
     pub fn add_free(&mut self, time: TimePoint<T>, space: SpaceInterval) {
         if space.start() >= space.end() {
@@ -1959,6 +2136,30 @@ where
             .push_coalesced(space);
     }
 
+    /// Marks the specified space interval as free during the given time interval.
+    ///
+    /// Applies the free designation to all relevant time slices that overlap with the time window.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::quay::BTreeMapQuay;
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
+    ///
+    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
+    /// let mut berth = Berth::new(SpaceLength::new(100));
+    /// berth.occupy(
+    ///     TimeInterval::new(TimePoint::new(5), TimePoint::new(15)),
+    ///     SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40))
+    /// );
+    ///
+    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
+    /// overlay.free(
+    ///     TimeInterval::new(TimePoint::new(8), TimePoint::new(12)),
+    ///     SpaceInterval::new(SpacePosition::new(25), SpacePosition::new(35))
+    /// );
+    /// ```
     pub fn free(&mut self, time_window: TimeInterval<T>, space_interval: SpaceInterval) {
         if let Some(predecessor_timepoint) = self
             .berth_occupancy
@@ -1971,6 +2172,27 @@ where
         }
     }
 
+    /// Removes a free space designation at a specific time point from the overlay.
+    ///
+    /// Removes the specified space interval from the overlay's free space at the given
+    /// time point. If this results in no free space remaining at that time point,
+    /// the time point is removed from the overlay entirely.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::quay::BTreeMapQuay;
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
+    ///
+    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
+    /// let berth = Berth::new(SpaceLength::new(100));
+    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
+    ///
+    /// let space = SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(20));
+    /// overlay.add_free(TimePoint::new(5), space);
+    /// overlay.remove_free(TimePoint::new(5), space);
+    /// ```
     pub fn remove_free(&mut self, time: TimePoint<T>, space: SpaceInterval) {
         if space.start() >= space.end() {
             return;
@@ -1987,6 +2209,29 @@ where
         }
     }
 
+    /// Undoes a previous free operation by removing free designations from all affected time points.
+    ///
+    /// This is the reverse of [`free`](Self::free), removing the specified space
+    /// interval from overlay free designations at all time points that would have
+    /// been affected by the original free call.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::quay::BTreeMapQuay;
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
+    ///
+    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
+    /// let berth = Berth::new(SpaceLength::new(100));
+    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
+    ///
+    /// let time_window = TimeInterval::new(TimePoint::new(5), TimePoint::new(15));
+    /// let space_region = SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40));
+    ///
+    /// overlay.free(time_window, space_region);
+    /// overlay.undo_free(time_window, space_region);
+    /// ```
     pub fn undo_free(&mut self, time_window: TimeInterval<T>, space_interval: SpaceInterval) {
         if let Some(pred) = self
             .berth_occupancy
@@ -1999,6 +2244,37 @@ where
         }
     }
 
+    /// Checks if the specified space interval is completely free during the entire time interval.
+    ///
+    /// Considers both the base berth state and any overlay modifications. Returns `true`
+    /// if and only if every position within the space interval is free throughout the
+    /// entire duration of the time interval, accounting for overlay changes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::quay::BTreeMapQuay;
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
+    ///
+    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
+    /// let mut berth = Berth::new(SpaceLength::new(100));
+    /// berth.occupy(
+    ///     TimeInterval::new(TimePoint::new(5), TimePoint::new(15)),
+    ///     SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40))
+    /// );
+    ///
+    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
+    /// overlay.free(
+    ///     TimeInterval::new(TimePoint::new(8), TimePoint::new(12)),
+    ///     SpaceInterval::new(SpacePosition::new(25), SpacePosition::new(35))
+    /// );
+    ///
+    /// assert!(overlay.is_free(
+    ///     TimeInterval::new(TimePoint::new(8), TimePoint::new(12)),
+    ///     SpaceInterval::new(SpacePosition::new(25), SpacePosition::new(35))
+    /// ));
+    /// ```
     pub fn is_free(&self, time_window: TimeInterval<T>, space_interval: SpaceInterval) -> bool {
         self.iter_slice_timepoints_for(time_window).all(|tp| {
             if self.occupied_overlaps_at(tp, space_interval) {
@@ -2022,6 +2298,33 @@ where
         })
     }
 
+    /// Checks if the specified space interval has any occupation during the time interval.
+    ///
+    /// Considers both the base berth state and any overlay modifications. Returns `true`
+    /// if there is any overlap between occupied space and the given space interval at any
+    /// point during the time interval, accounting for overlay changes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::quay::BTreeMapQuay;
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
+    ///
+    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
+    /// let berth = Berth::new(SpaceLength::new(100));
+    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
+    ///
+    /// overlay.occupy(
+    ///     TimeInterval::new(TimePoint::new(3), TimePoint::new(7)),
+    ///     SpaceInterval::new(SpacePosition::new(25), SpacePosition::new(35))
+    /// );
+    ///
+    /// assert!(overlay.is_occupied(
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
+    ///     SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40))
+    /// ));
+    /// ```
     pub fn is_occupied(&self, time_window: TimeInterval<T>, space_interval: SpaceInterval) -> bool {
         self.iter_slice_timepoints_for(time_window).any(|tp| {
             if self.occupied_overlaps_at(tp, space_interval) {
@@ -2045,16 +2348,86 @@ where
         })
     }
 
+    /// Returns an iterator over all time points where free space has been added by the overlay.
+    ///
+    /// This iterator yields time points in sorted order where the overlay has explicitly
+    /// marked additional space as free beyond what the base berth provides.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::quay::BTreeMapQuay;
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
+    ///
+    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
+    /// let berth = Berth::new(SpaceLength::new(100));
+    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
+    ///
+    /// overlay.add_free(TimePoint::new(5), SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10)));
+    /// overlay.add_free(TimePoint::new(10), SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10)));
+    ///
+    /// let timepoints: Vec<_> = overlay.iter_free_timepoints().map(|t| t.value()).collect();
+    /// assert_eq!(timepoints, vec![5, 10]);
+    /// ```
     #[inline]
     pub fn iter_free_timepoints(&self) -> impl Iterator<Item = TimePoint<T>> + '_ {
         self.free_by_time.keys().copied()
     }
 
+    /// Returns an iterator over all time points where occupation has been added by the overlay.
+    ///
+    /// This iterator yields time points in sorted order where the overlay has explicitly
+    /// marked additional space as occupied beyond what the base berth provides.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::quay::BTreeMapQuay;
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
+    ///
+    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
+    /// let berth = Berth::new(SpaceLength::new(100));
+    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
+    ///
+    /// overlay.add_occupy(TimePoint::new(3), SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10)));
+    /// overlay.add_occupy(TimePoint::new(7), SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10)));
+    ///
+    /// let timepoints: Vec<_> = overlay.iter_occupied_timepoints().map(|t| t.value()).collect();
+    /// assert_eq!(timepoints, vec![3, 7]);
+    /// ```
     #[inline]
     pub fn iter_occupied_timepoints(&self) -> impl Iterator<Item = TimePoint<T>> + '_ {
         self.occupied_by_time.keys().copied()
     }
 
+    /// Returns an iterator over all free space-time slots within the given constraints.
+    ///
+    /// Finds all combinations of start times and space intervals where an operation
+    /// of a given duration can be scheduled, considering both base berth state and
+    /// overlay modifications.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::quay::BTreeMapQuay;
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint, TimeDelta};
+    ///
+    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
+    /// let berth = Berth::new(SpaceLength::new(100));
+    /// let overlay = BerthOccupancyOverlay::new(&berth);
+    ///
+    /// let available_slots: Vec<_> = overlay.iter_free(
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(30)),
+    ///     TimeDelta::new(5),       // operation duration
+    ///     SpaceLength::new(20),    // required space
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100))
+    /// ).collect();
+    ///
+    /// assert!(!available_slots.is_empty());
+    /// ```
     #[inline]
     pub fn iter_free(
         &'a self,
@@ -2066,6 +2439,27 @@ where
         OverlayFreeIter::new(self, time_window, duration, required_space, space_window)
     }
 
+    /// Returns an iterator over free space intervals that remain free across all overlay time slices.
+    ///
+    /// Computes the intersection of free space across all time points where the overlay
+    /// has modifications, filtered by the minimum required length.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::occ::{BerthOccupancy, BerthOccupancyOverlay};
+    /// use dock_alloc_solver::quay::BTreeMapQuay;
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+    ///
+    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
+    /// let berth = Berth::new(SpaceLength::new(100));
+    /// let overlay = BerthOccupancyOverlay::new(&berth);
+    ///
+    /// let free_runs: Vec<_> = overlay.iter_intersect_free_runs(
+    ///     SpaceLength::new(10),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100))
+    /// ).collect();
+    /// ```
     #[inline]
     pub fn iter_intersect_free_runs(
         &self,
@@ -2119,6 +2513,12 @@ where
     }
 }
 
+/// Iterator over free space-time slots within an overlay's constraints.
+///
+/// Finds all combinations of start times and space intervals where an operation
+/// of a given duration can be scheduled, considering both base berth state and
+/// overlay modifications. Yields tuples of `(start_time, space_interval)`
+/// representing valid scheduling slots.
 pub struct OverlayFreeIter<'a, T, Q>
 where
     T: PrimInt + Signed + Copy,
