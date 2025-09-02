@@ -22,41 +22,164 @@
 use dock_alloc_core::domain::{SpaceInterval, SpaceLength, SpacePosition};
 use std::collections::BTreeMap;
 
-/// A `Quay` tracks free and occupied intervals within a fixed total space.
+/// A read-only interface for tracking free and occupied intervals within a fixed total space.
 ///
-/// It supports querying for free/occupied status, iterating over free intervals,
-/// and modifying the state by freeing or occupying intervals.
+/// A `QuayRead` represents a data structure that manages space allocation within a bounded
+/// linear space. It tracks which intervals are free (available for allocation) and which
+/// are occupied (already allocated). The trait provides methods to query the state and
+/// iterate over free intervals that meet certain criteria.
+///
+/// The space is represented as a range `[0, capacity)` where positions are of type
+/// [`SpacePosition`] and lengths are of type [`SpaceLength`]. Intervals are represented
+/// by [`SpaceInterval`].
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_solver::quay::{QuayRead, BTreeMapQuay};
+/// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+///
+/// // Create a quay with capacity 100, initially all free
+/// let quay = BTreeMapQuay::new(SpaceLength::new(100), true);
+///
+/// // Check if an interval is free
+/// let interval = SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(20));
+/// assert!(quay.check_free(interval));
+///
+/// // Iterate over free intervals
+/// let search_range = SpaceInterval::new(SpacePosition::zero(), SpacePosition::new(100));
+/// let free_intervals: Vec<_> = quay
+///     .iter_free_intervals(SpaceLength::new(5), search_range)
+///     .collect();
+/// ```
 pub trait QuayRead: Eq + Clone {
-    /// Create a new `Quay` with the given total space.
+    /// Creates a new quay with the specified total capacity.
     ///
-    /// If `initially_free` is true, the entire space is marked as free; otherwise, it is occupied.
+    /// The entire space is initialized to the same state: if `initially_free` is `true`,
+    /// all space is marked as free; if `false`, all space is marked as occupied.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::quay::{QuayRead, BTreeMapQuay};
+    /// use dock_alloc_core::domain::SpaceLength;
+    ///
+    /// // Create a quay with all space initially free
+    /// let free_quay = BTreeMapQuay::new(SpaceLength::new(100), true);
+    /// assert_eq!(free_quay.capacity(), SpaceLength::new(100));
+    ///
+    /// // Create a quay with all space initially occupied
+    /// let occupied_quay = BTreeMapQuay::new(SpaceLength::new(50), false);
+    /// assert_eq!(occupied_quay.capacity(), SpaceLength::new(50));
+    /// ```
     fn new(total_space: SpaceLength, initially_free: bool) -> Self
     where
         Self: Sized;
 
-    /// An iterator over free intervals.
+    /// An iterator over free intervals that meet specific criteria.
     ///
-    /// The iterator yields `SpaceInterval`s that are free within the specified search range
-    /// and have at least the required length.
+    /// The iterator yields [`SpaceInterval`]s that are:
+    /// - Completely free (all positions within the interval are available)
+    /// - Within the specified search range
+    /// - At least as long as the required minimum length
+    ///
+    /// The iteration order is implementation-defined but typically follows
+    /// the natural ordering of intervals by their start position.
     type FreeIter<'a>: Iterator<Item = SpaceInterval> + 'a
     where
         Self: 'a;
 
-    /// Check if the specified interval is entirely free.
+    /// Checks if the specified interval is entirely free.
     ///
-    /// Returns `true` if all positions in the interval are free, `false` otherwise.
+    /// Returns `true` if and only if every position within the interval is marked as free.
+    /// If the interval is empty (start >= end), returns `true`. Intervals that extend
+    /// beyond the quay's capacity are clamped to the valid range.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::quay::{QuayRead, QuayWrite, BTreeMapQuay};
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+    ///
+    /// let mut quay = BTreeMapQuay::new(SpaceLength::new(100), true);
+    /// let interval = SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(20));
+    ///
+    /// assert!(quay.check_free(interval));
+    ///
+    /// quay.occupy(interval);
+    /// assert!(!quay.check_free(interval));
+    /// ```
     fn check_free(&self, space: SpaceInterval) -> bool;
 
-    /// Check if the specified interval is entirely occupied.
+    /// Checks if the specified interval is entirely occupied.
     ///
-    /// Returns `true` if all positions in the interval are occupied, `false` otherwise.
+    /// Returns `true` if and only if every position within the interval is marked as occupied.
+    /// If the interval is empty (start >= end), returns `false`. Intervals that extend
+    /// beyond the quay's capacity are clamped to the valid range.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::quay::{QuayRead, QuayWrite, BTreeMapQuay};
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+    ///
+    /// let mut quay = BTreeMapQuay::new(SpaceLength::new(100), false);
+    /// let interval = SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(20));
+    ///
+    /// assert!(quay.check_occupied(interval));
+    ///
+    /// quay.free(interval);
+    /// assert!(!quay.check_occupied(interval));
+    /// ```
     fn check_occupied(&self, space: SpaceInterval) -> bool;
 
-    /// Returns the total capacity of the `Quay`.
+    /// Returns the total capacity of the quay.
+    ///
+    /// The capacity represents the total amount of space managed by this quay,
+    /// corresponding to the range `[0, capacity)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::quay::{QuayRead, BTreeMapQuay};
+    /// use dock_alloc_core::domain::SpaceLength;
+    ///
+    /// let quay = BTreeMapQuay::new(SpaceLength::new(256), true);
+    /// assert_eq!(quay.capacity(), SpaceLength::new(256));
+    /// ```
     fn capacity(&self) -> SpaceLength;
 
-    /// Returns an iterator over free intervals within the specified search range
-    /// that are at least as long as the required space.
+    /// Returns an iterator over free intervals matching the specified criteria.
+    ///
+    /// The iterator yields intervals that are:
+    /// - Completely within the `search_range` (or the intersection with the search range)
+    /// - Entirely free (all positions are available)
+    /// - At least `required_space` long
+    ///
+    /// The search range is clamped to the quay's capacity `[0, capacity)`. If the
+    /// search range is invalid (start >= end), an empty iterator is returned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::quay::{QuayRead, QuayWrite, BTreeMapQuay};
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+    ///
+    /// let mut quay = BTreeMapQuay::new(SpaceLength::new(100), true);
+    ///
+    /// // Occupy some space to create gaps
+    /// quay.occupy(SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(30)));
+    /// quay.occupy(SpaceInterval::new(SpacePosition::new(60), SpacePosition::new(70)));
+    ///
+    /// // Find free intervals of at least 15 units in the range [0, 100)
+    /// let search_range = SpaceInterval::new(SpacePosition::zero(), SpacePosition::new(100));
+    /// let free_intervals: Vec<_> = quay
+    ///     .iter_free_intervals(SpaceLength::new(15), search_range)
+    ///     .collect();
+    ///
+    /// // Should find intervals [0, 20), [30, 60), [70, 100)
+    /// assert_eq!(free_intervals.len(), 3);
+    /// ```
     fn iter_free_intervals(
         &self,
         required_space: SpaceLength,
@@ -64,19 +187,132 @@ pub trait QuayRead: Eq + Clone {
     ) -> Self::FreeIter<'_>;
 }
 
-/// A `QuayWrite` allows modifying the state of a `Quay` by marking intervals as free or occupied.
+/// A write interface for modifying the allocation state of space intervals.
+///
+/// `QuayWrite` provides methods to change the state of intervals within the quay,
+/// marking them as either free (available for allocation) or occupied (allocated).
+/// These operations can merge adjacent free intervals or split existing ones.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_solver::quay::{QuayRead, QuayWrite, BTreeMapQuay};
+/// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+///
+/// let mut quay = BTreeMapQuay::new(SpaceLength::new(100), false);
+/// let interval = SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(30));
+///
+/// // Free an interval
+/// quay.free(interval);
+/// assert!(quay.check_free(interval));
+///
+/// // Occupy part of it
+/// let sub_interval = SpaceInterval::new(SpacePosition::new(15), SpacePosition::new(25));
+/// quay.occupy(sub_interval);
+/// assert!(quay.check_occupied(sub_interval));
+/// ```
 pub trait QuayWrite {
-    /// Mark the specified interval as free.
+    /// Marks the specified interval as free (available for allocation).
+    ///
+    /// All positions within the interval are marked as free. If the interval is adjacent
+    /// to or overlaps with existing free intervals, they may be merged into a single
+    /// larger free interval. The interval is clamped to the quay's valid range `[0, capacity)`.
+    ///
+    /// If the interval is empty (start >= end), this operation has no effect.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::quay::{QuayRead, QuayWrite, BTreeMapQuay};
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+    ///
+    /// let mut quay = BTreeMapQuay::new(SpaceLength::new(100), false);
+    /// let interval = SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40));
+    ///
+    /// quay.free(interval);
+    /// assert!(quay.check_free(interval));
+    ///
+    /// // Adjacent intervals are merged
+    /// let adjacent = SpaceInterval::new(SpacePosition::new(40), SpacePosition::new(60));
+    /// quay.free(adjacent);
+    ///
+    /// let merged = SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(60));
+    /// assert!(quay.check_free(merged));
+    /// ```
     fn free(&mut self, space: SpaceInterval);
 
-    /// Mark the specified interval as occupied.
+    /// Marks the specified interval as occupied (allocated).
+    ///
+    /// All positions within the interval are marked as occupied. If the interval
+    /// overlaps with existing free intervals, those free intervals may be split
+    /// or completely removed. The interval is clamped to the quay's valid range
+    /// `[0, capacity)`.
+    ///
+    /// If the interval is empty (start >= end), this operation has no effect.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::quay::{QuayRead, QuayWrite, BTreeMapQuay};
+    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+    ///
+    /// let mut quay = BTreeMapQuay::new(SpaceLength::new(100), true);
+    /// let interval = SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40));
+    ///
+    /// quay.occupy(interval);
+    /// assert!(quay.check_occupied(interval));
+    ///
+    /// // The free interval [0, 100) is now split into [0, 20) and [40, 100)
+    /// assert!(quay.check_free(SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(20))));
+    /// assert!(quay.check_free(SpaceInterval::new(SpacePosition::new(40), SpacePosition::new(100))));
+    /// ```
     fn occupy(&mut self, space: SpaceInterval);
 }
 
-/// A `Quay` that supports both reading and writing operations.
+/// A complete quay interface supporting both reading and writing operations.
+///
+/// This trait combines [`QuayRead`] and [`QuayWrite`] to provide a full-featured
+/// space allocation tracking interface. Any type that implements both read and
+/// write operations automatically implements this trait.
 pub trait Quay: QuayRead + QuayWrite {}
 impl<T: QuayRead + QuayWrite> Quay for T {}
 
+/// A [`BTreeMap`]-based implementation of a quay for space allocation tracking.
+///
+/// `BTreeMapQuay` uses a [`BTreeMap`] to efficiently store free intervals as
+/// `(start_position, end_position)` pairs. This provides good performance for
+/// most operations with O(log n) complexity for basic operations where n is
+/// the number of free intervals.
+///
+/// The implementation is particularly efficient when:
+/// - The number of free intervals is relatively small
+/// - You need to frequently query or iterate over free intervals in order
+/// - You need precise control over memory usage
+///
+/// # Memory Usage
+///
+/// Memory usage scales with the number of distinct free intervals, not the
+/// total capacity. Each free interval requires one map entry.
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_solver::quay::{QuayRead, QuayWrite, BTreeMapQuay};
+/// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+///
+/// let mut quay = BTreeMapQuay::new(SpaceLength::new(100), true);
+///
+/// // Occupy some space to create gaps
+/// quay.occupy(SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(30)));
+/// quay.occupy(SpaceInterval::new(SpacePosition::new(60), SpacePosition::new(70)));
+///
+/// // Find free intervals of at least 15 units
+/// let search_range = SpaceInterval::new(SpacePosition::zero(), SpacePosition::new(100));
+/// let free_intervals: Vec<_> = quay
+///     .iter_free_intervals(SpaceLength::new(15), search_range)
+///     .collect();
+/// assert_eq!(free_intervals.len(), 3); // [0,20), [30,60), and [70,100)
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BTreeMapQuay {
     total: SpaceLength,
@@ -84,6 +320,17 @@ pub struct BTreeMapQuay {
 }
 
 impl BTreeMapQuay {
+    /// Creates a new `BTreeMapQuay` with the specified capacity and initial state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::quay::BTreeMapQuay;
+    /// use dock_alloc_core::domain::SpaceLength;
+    ///
+    /// let free_quay = BTreeMapQuay::new(SpaceLength::new(100), true);
+    /// let occupied_quay = BTreeMapQuay::new(SpaceLength::new(100), false);
+    /// ```
     #[inline]
     pub fn new(total_space: SpaceLength, initially_free: bool) -> Self {
         let mut free = BTreeMap::new();
@@ -96,6 +343,17 @@ impl BTreeMapQuay {
         }
     }
 
+    /// Returns the total capacity of this quay.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::quay::BTreeMapQuay;
+    /// use dock_alloc_core::domain::SpaceLength;
+    ///
+    /// let quay = BTreeMapQuay::new(SpaceLength::new(100), true);
+    /// assert_eq!(quay.capacity(), SpaceLength::new(100));
+    /// ```
     #[inline]
     pub fn capacity(&self) -> SpaceLength {
         self.total
@@ -194,6 +452,11 @@ impl BTreeMapQuay {
     }
 }
 
+/// Iterator over free intervals in a [`BTreeMapQuay`] that meet specific criteria.
+///
+/// This iterator is returned by [`BTreeMapQuay::iter_free_intervals`] and yields
+/// [`SpaceInterval`]s that are within the search range and meet the minimum length
+/// requirement.
 pub struct BTreeMapFreeIter<'a> {
     map_iter: std::collections::btree_map::Range<'a, SpacePosition, SpacePosition>,
     pending: Option<(SpacePosition, SpacePosition)>,
@@ -343,6 +606,51 @@ impl QuayWrite for BTreeMapQuay {
     }
 }
 
+/// A vector-of-bools implementation of a quay for space allocation tracking.
+///
+/// `BooleanVecQuay` uses a [`Vec<bool>`] where each boolean represents whether
+/// a single unit of space is free (`true`) or occupied (`false`). This provides
+/// constant-time access to any position but uses memory proportional to the
+/// total capacity.
+///
+/// The implementation is particularly efficient when:
+/// - The total capacity is relatively small
+/// - You need frequent random access to individual positions
+/// - You can afford O(capacity) memory usage
+/// - Most operations work on small intervals
+///
+/// # Memory Usage
+///
+/// Memory usage is directly proportional to the total capacity: each unit of
+/// space requires one bit (in practice, one byte due to `Vec<bool>` implementation).
+///
+/// # Performance Characteristics
+///
+/// - Position queries: O(1)
+/// - Interval queries: O(interval_length)
+/// - Free/occupy operations: O(interval_length)
+/// - Iterator creation: O(1)
+/// - Iterator next: O(average_gap_size)
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_solver::quay::{QuayRead, QuayWrite, BooleanVecQuay};
+/// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+///
+/// let mut quay = BooleanVecQuay::new(SpaceLength::new(100), true);
+///
+/// // Occupy some space to create gaps
+/// quay.occupy(SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(30)));
+/// quay.occupy(SpaceInterval::new(SpacePosition::new(60), SpacePosition::new(70)));
+///
+/// // Find free intervals of at least 15 units
+/// let search_range = SpaceInterval::new(SpacePosition::zero(), SpacePosition::new(100));
+/// let free_intervals: Vec<_> = quay
+///     .iter_free_intervals(SpaceLength::new(15), search_range)
+///     .collect();
+/// assert_eq!(free_intervals.len(), 3); // [0,20), [30,60), and [70,100)
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BooleanVecQuay {
     total: SpaceLength,
@@ -350,6 +658,17 @@ pub struct BooleanVecQuay {
 }
 
 impl BooleanVecQuay {
+    /// Creates a new `BooleanVecQuay` with the specified capacity and initial state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::quay::BooleanVecQuay;
+    /// use dock_alloc_core::domain::SpaceLength;
+    ///
+    /// let free_quay = BooleanVecQuay::new(SpaceLength::new(100), true);
+    /// let occupied_quay = BooleanVecQuay::new(SpaceLength::new(100), false);
+    /// ```
     #[inline]
     pub fn new(total_space: SpaceLength, initially_free: bool) -> Self {
         let size = total_space.value();
@@ -380,6 +699,11 @@ impl BooleanVecQuay {
     }
 }
 
+/// Iterator over free intervals in a [`BooleanVecQuay`] that meet specific criteria.
+///
+/// This iterator is returned by [`BooleanVecQuay::iter_free_intervals`] and yields
+/// [`SpaceInterval`]s that are within the search range and meet the minimum length
+/// requirement.
 pub struct BooleanVecFreeIter<'a> {
     slice: &'a [bool],
     cur: usize,
@@ -498,6 +822,50 @@ impl QuayWrite for BooleanVecQuay {
     }
 }
 
+/// A bit-packed implementation of a quay for space allocation tracking.
+///
+/// `BitPackedQuay` uses a [`Vec<u64>`] where each bit represents whether a single
+/// unit of space is free (`1`) or occupied (`0`). This provides the most compact
+/// memory representation while still allowing efficient bitwise operations.
+///
+/// The implementation is particularly efficient when:
+/// - Memory usage is a primary concern
+/// - The total capacity is large
+/// - You can work with word-aligned operations
+/// - You need to perform bulk operations on ranges
+///
+/// # Memory Usage
+///
+/// Memory usage is approximately `capacity_in_bits / 8` bytes, making it the most
+/// memory-efficient implementation. Each 64-bit word stores 64 space units.
+///
+/// # Performance Characteristics
+///
+/// - Position queries: O(1) with bit operations
+/// - Interval queries: O(interval_length / 64) for word-aligned operations
+/// - Free/occupy operations: O(interval_length / 64) for word-aligned operations
+/// - Iterator creation: O(1)
+/// - Iterator next: O(average_gap_size / 64)
+///
+/// # Examples
+///
+/// ```
+/// use dock_alloc_solver::quay::{QuayRead, QuayWrite, BitPackedQuay};
+/// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
+///
+/// let mut quay = BitPackedQuay::new(SpaceLength::new(100), true);
+///
+/// // Occupy some space to create gaps
+/// quay.occupy(SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(30)));
+/// quay.occupy(SpaceInterval::new(SpacePosition::new(60), SpacePosition::new(70)));
+///
+/// // Find free intervals of at least 15 units
+/// let search_range = SpaceInterval::new(SpacePosition::zero(), SpacePosition::new(100));
+/// let free_intervals: Vec<_> = quay
+///     .iter_free_intervals(SpaceLength::new(15), search_range)
+///     .collect();
+/// assert_eq!(free_intervals.len(), 3); // [0,20), [30,60), and [70,100)
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BitPackedQuay {
     total: SpaceLength,
@@ -507,6 +875,21 @@ pub struct BitPackedQuay {
 impl BitPackedQuay {
     const WORD_BITS: usize = u64::BITS as usize;
 
+    /// Creates a new `BitPackedQuay` with the specified capacity and initial state.
+    ///
+    /// The implementation uses 64-bit words to pack bits efficiently. If the capacity
+    /// is not a multiple of 64, the unused bits in the final word are always set to 0
+    /// regardless of the `initially_free` parameter.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::quay::BitPackedQuay;
+    /// use dock_alloc_core::domain::SpaceLength;
+    ///
+    /// let free_quay = BitPackedQuay::new(SpaceLength::new(100), true);
+    /// let occupied_quay = BitPackedQuay::new(SpaceLength::new(100), false);
+    /// ```
     #[inline]
     pub fn new(total_space: SpaceLength, initially_free: bool) -> Self {
         let nbits = total_space.value();
@@ -632,6 +1015,12 @@ impl BitPackedQuay {
     }
 }
 
+/// Iterator over free intervals in a [`BitPackedQuay`] that meet specific criteria.
+///
+/// This iterator is returned by [`BitPackedQuay::iter_free_intervals`] and yields
+/// [`SpaceInterval`]s that are within the search range and meet the minimum length
+/// requirement. The iterator uses bit manipulation to efficiently scan through
+/// the packed bit representation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BitPackedFreeIter<'a> {
     quay: &'a BitPackedQuay,
