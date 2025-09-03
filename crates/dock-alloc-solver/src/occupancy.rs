@@ -218,23 +218,18 @@ where
             return;
         }
 
-        // NOTE: use strict predecessor so we coalesce the key just before `start_time`
-        let left_boundary =
-            strict_predecessor_key(&self.timeline, start_time).unwrap_or(start_time);
-        let right_boundary = first_key_after(&self.timeline, end_time).unwrap_or(end_time);
+        let (left_boundary, right_boundary) =
+            coalesce_brackets(&self.timeline, start_time, end_time);
 
-        // Collect necessary timepoints to avoid borrowing issues during iteration
-        // We only need to coalesce at timepoints within [left_boundary, right_boundary]
-        // Note: coalescing visits [left_boundary, right_boundary] inclusive;
-        // that’s different from the normal half-open operational windows.
+        // Collect first to avoid borrow invalidation while mutating.
         let timepoints_in_range: Vec<_> = self
             .timeline
             .range((Included(left_boundary), Included(right_boundary)))
             .map(|(time_point, _)| *time_point)
             .collect();
 
-        for time_point in timepoints_in_range {
-            self.coalesce_at(time_point);
+        for tp in timepoints_in_range {
+            self.coalesce_at(tp);
         }
     }
 
@@ -488,66 +483,22 @@ where
         source_runs: &[SpaceInterval],
         destination_runs: &mut Vec<SpaceInterval>,
     ) {
-        destination_runs.clear();
-
-        let mut free_run_iter = quay_snapshot
+        let free_runs: Vec<SpaceInterval> = quay_snapshot
             .iter_free_intervals(required_length, bounds)
-            .peekable();
-
-        let mut current_free_run_opt = free_run_iter.next();
-        let mut source_index = 0usize;
-
-        while source_index < source_runs.len() {
-            let source_run = source_runs[source_index];
-
-            while let Some(free_run) = current_free_run_opt
-                && free_run.end() <= source_run.start()
-            {
-                current_free_run_opt = free_run_iter.next();
-            }
-            if current_free_run_opt.is_none() {
-                break;
-            }
-
-            let mut free_run = current_free_run_opt.unwrap();
-            while free_run.start() < source_run.end() {
-                let intersection_start = if source_run.start().value() >= free_run.start().value() {
-                    source_run.start()
-                } else {
-                    free_run.start()
-                };
-                let intersection_end = if source_run.end().value() <= free_run.end().value() {
-                    source_run.end()
-                } else {
-                    free_run.end()
-                };
-
-                if intersection_end > intersection_start
-                    && (intersection_end.value() - intersection_start.value())
-                        >= required_length.value()
-                {
-                    destination_runs.push(SpaceInterval::new(intersection_start, intersection_end));
-                }
-
-                if source_run.end() <= free_run.end() {
-                    break;
-                } else {
-                    current_free_run_opt = free_run_iter.next();
-                    if current_free_run_opt.is_none() {
-                        break;
-                    }
-                    free_run = current_free_run_opt.unwrap();
-                }
-            }
-
-            source_index += 1;
-        }
+            .collect();
+        intersect_sorted_min_len(required_length, source_runs, &free_runs, destination_runs);
     }
 
     fn build_runs_for_start_time(&mut self, start_time: TimePoint<T>) {
         self.feasible_runs.clear();
         self.next_emit_index = 0;
         self.current_start_time = None;
+
+        // Early guard: required length exceeds bounds capacity
+        let bounds_len = self.search_bounds.end().value() - self.search_bounds.start().value();
+        if self.required_length.value() > bounds_len {
+            return;
+        }
 
         let predecessor_timepoint = self
             .berth
@@ -559,11 +510,13 @@ where
                 .berth
                 .snapshot_at(predecessor_timepoint)
                 .expect("slice timepoint must exist");
+
             self.feasible_runs.seed_from_iter(
                 quay_snapshot.iter_free_intervals(self.required_length, self.search_bounds),
             );
         }
 
+        // Intersect across all internal slice keys in [start, end)
         let end_time = start_time + self.processing_duration;
         for timepoint in self
             .berth
@@ -634,29 +587,6 @@ where
     C: PrimInt + Signed + Zero + Copy,
     Q: Quay,
 {
-    /// Creates a berth occupancy tracker from a problem with preassigned requests.
-    ///
-    /// This implementation initializes a berth with the specified quay length and then
-    /// marks all preassigned requests as occupied in their assigned time and space intervals.
-    /// This provides a starting state for solving scheduling problems with existing commitments.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::BerthOccupancy;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_model::ProblemBuilder;
-    /// use dock_alloc_core::domain::SpaceLength;
-    ///
-    /// // Create an empty problem using the builder (in practice, this would have requests)
-    /// let problem = ProblemBuilder::<i64, i32>::new(SpaceLength::new(200)).build();
-    ///
-    /// // Convert to berth occupancy with existing assignments
-    /// let berth: BerthOccupancy<i64, BTreeMapQuay> = BerthOccupancy::from(&problem);
-    ///
-    /// assert_eq!(berth.quay_length(), SpaceLength::new(200));
-    /// // The berth now has all preassigned requests marked as occupied
-    /// ```
     fn from(problem: &Problem<T, C>) -> Self {
         let mut berth_occupancy = BerthOccupancy::<T, Q>::new(problem.quay_length());
         for fixed in problem.preassigned().values() {
@@ -707,6 +637,7 @@ fn next_key_after<T: PrimInt + Signed, Q>(
     }
 }
 
+#[derive(Clone, Debug)]
 struct KeysUnion<'a, T: PrimInt + Signed> {
     a: Peekable<Copied<std::collections::btree_map::Keys<'a, TimePoint<T>, SpaceIntervalSet>>>,
     b: Peekable<Copied<std::collections::btree_map::Keys<'a, TimePoint<T>, SpaceIntervalSet>>>,
@@ -767,11 +698,6 @@ where
     emit_idx: usize,
     acc: SpaceIntervalSet,
     tmp: SpaceIntervalSet,
-    base: SpaceIntervalSet,
-    adj: SpaceIntervalSet,
-    clamp_buf: SpaceIntervalSet,
-    union_buf: SpaceIntervalSet,
-    sub_buf: SpaceIntervalSet,
 }
 
 impl<'brand, 'a, T, Q> IntersectIter<'brand, 'a, T, Q>
@@ -792,11 +718,6 @@ where
             emit_idx: 0,
             acc: SpaceIntervalSet::new(),
             tmp: SpaceIntervalSet::new(),
-            base: SpaceIntervalSet::new(),
-            adj: SpaceIntervalSet::new(),
-            clamp_buf: SpaceIntervalSet::new(),
-            union_buf: SpaceIntervalSet::new(),
-            sub_buf: SpaceIntervalSet::new(),
         }
     }
 
@@ -806,51 +727,35 @@ where
         }
         self.computed = true;
 
+        // Iterate across overlay keys (free ∪ occupied); this preserves original semantics.
         let keys =
             KeysUnion::<'a, T>::new(&self.overlay.free_by_time, &self.overlay.occupied_by_time);
 
         let mut first = true;
         let mut saw_any_key = false;
 
+        // Scratch buffers reused across iterations
+        let mut base = SpaceIntervalSet::new();
+        let mut buf = SpaceIntervalSet::new();
+
         for tp in keys {
             saw_any_key = true;
 
-            // base free runs for this slice within bounds (no temp Vec; coalescing as we go)
-            let qs = match self.overlay.berth_occupancy.snapshot_at(tp) {
-                Some(q) => q,
-                None => continue,
-            };
-            self.base
-                .clear_and_fill_from_iter(qs.iter_free_intervals(SpaceLength::new(1), self.bounds));
+            // Adjusted runs at this slice timepoint
+            let adj = self.overlay.adjusted_free_runs_at(
+                tp,
+                self.bounds,
+                self.required,
+                &mut base,
+                &mut buf,
+            );
 
-            // apply overlay free additions
-            self.adj.clear();
-            if let Some(f) = self.overlay.free_by_time.get(&tp) {
-                self.clamp_buf.clear();
-                f.clamped_into(self.bounds, &mut self.clamp_buf);
-                self.base.union_into(&self.clamp_buf, &mut self.union_buf);
-            } else {
-                // no additions → union_buf := base
-                self.union_buf = core::mem::take(&mut self.base);
-            }
-
-            // then subtract overlay occupied
-            if let Some(o) = self.overlay.occupied_by_time.get(&tp) {
-                o.clamped_into(self.bounds, &mut self.clamp_buf);
-                self.union_buf
-                    .subtract_into(&self.clamp_buf, &mut self.sub_buf);
-                core::mem::swap(&mut self.adj, &mut self.sub_buf);
-            } else {
-                core::mem::swap(&mut self.adj, &mut self.union_buf);
-            }
-
-            // intersect with accumulator
             if first {
-                self.acc = core::mem::take(&mut self.adj);
+                self.acc = adj;
                 first = false;
             } else {
                 self.tmp.clear();
-                self.acc.intersection_into(&self.adj, &mut self.tmp);
+                self.acc.intersection_into(&adj, &mut self.tmp);
                 core::mem::swap(&mut self.acc, &mut self.tmp);
                 if self.acc.is_empty() {
                     break;
@@ -858,7 +763,7 @@ where
             }
         }
 
-        // No overlay keys → neutral element: just the bounds (then filter by required)
+        // No overlay keys → neutral element: just bounds (then filter by required)
         if !saw_any_key {
             self.acc = SpaceIntervalSet::from_vec(vec![self.bounds]);
         }
@@ -1138,19 +1043,53 @@ where
         min_length: SpaceLength,
     ) -> SpaceIntervalSet {
         let mut result_set = base_set;
+
         if let Some(free_set) = self.free_by_time.get(&timepoint) {
-            let clamped_free_intervals = free_set.clamped(bounds);
-            if !clamped_free_intervals.is_empty() {
-                result_set = result_set.union(&clamped_free_intervals);
+            let clamped_free = free_set.clamped(bounds);
+            if !clamped_free.is_empty() {
+                result_set = result_set.union(&clamped_free);
             }
         }
+
         if let Some(occupied_set) = self.occupied_by_time.get(&timepoint) {
             let clamped_occupied = occupied_set.clamped(bounds);
             if !clamped_occupied.is_empty() {
                 result_set = result_set.subtract(&clamped_occupied);
             }
         }
+
         result_set.filter_min_length(min_length)
+    }
+
+    #[inline]
+    fn adjusted_free_runs_at(
+        &self,
+        tp: TimePoint<T>,
+        bounds: SpaceInterval,
+        min_len: SpaceLength,
+        scratch_base: &mut SpaceIntervalSet,
+        scratch_buf: &mut SpaceIntervalSet,
+    ) -> SpaceIntervalSet {
+        // Base (quay) free runs inside bounds
+        let qs = self.berth_occupancy.snapshot_at(tp).expect("slice exists");
+        scratch_base.clear_and_fill_from_iter(qs.iter_free_intervals(SpaceLength::new(1), bounds));
+
+        // + overlay free (union)
+        let mut acc = core::mem::take(scratch_base);
+        if let Some(free_set) = self.free_by_time.get(&tp) {
+            scratch_buf.clear();
+            free_set.clamped_into(bounds, scratch_buf);
+            acc = acc.union(scratch_buf);
+        }
+
+        // - overlay occupied (subtract)
+        if let Some(occ_set) = self.occupied_by_time.get(&tp) {
+            scratch_buf.clear();
+            occ_set.clamped_into(bounds, scratch_buf);
+            acc = acc.subtract(scratch_buf);
+        }
+
+        acc.filter_min_length(min_len)
     }
 }
 
@@ -1244,90 +1183,65 @@ where
         None
     }
 
-    fn intersect_with_set_into(
-        required: SpaceLength,
-        source: &[SpaceInterval],
-        set: &[SpaceInterval],
-        out: &mut Vec<SpaceInterval>,
-    ) {
-        out.clear();
-        let mut i = 0usize;
-        let mut j = 0usize;
-        while i < source.len() && j < set.len() {
-            let a = source[i];
-            let b = set[j];
-
-            let start = if a.start().value() >= b.start().value() {
-                a.start()
-            } else {
-                b.start()
-            };
-            let end = if a.end().value() <= b.end().value() {
-                a.end()
-            } else {
-                b.end()
-            };
-
-            if end > start && (end.value() - start.value()) >= required.value() {
-                out.push(SpaceInterval::new(start, end));
-            }
-
-            if a.end() < b.end() { i += 1 } else { j += 1 }
-        }
-    }
-
     fn build_runs_for_start(&mut self, start: TimePoint<T>) {
         self.runs.clear();
         self.emit_idx = 0;
         self.current_start = None;
+
+        // Early guard: required length exceeds bounds capacity
+        let bounds_len = self.bounds.end().value() - self.bounds.start().value();
+        if self.required.value() > bounds_len {
+            return;
+        }
 
         let berth = self.overlay.berth_occupancy;
         let pred = berth
             .slice_predecessor_timepoint(start)
             .expect("timeline has origin snapshot");
 
-        let qs = berth.snapshot_at(pred).expect("slice timepoint must exist");
-        let base =
-            SpaceIntervalSet::from_iter(qs.iter_free_intervals(SpaceLength::new(1), self.bounds));
-
+        // If overlay touches `start`, seed with `start`; otherwise with predecessor.
         let have_start_overlay = self.overlay.free_by_time.contains_key(&start)
             || self.overlay.occupied_by_time.contains_key(&start);
+        let seed_tp = if have_start_overlay { start } else { pred };
 
-        let adj_seed = if have_start_overlay {
-            self.overlay
-                .adjust_runs(start, base, self.bounds, self.required)
-        } else {
-            self.overlay
-                .adjust_runs(pred, base, self.bounds, self.required)
-        };
+        // Scratch sets reused across steps
+        let mut scratch_base = SpaceIntervalSet::new();
+        let mut scratch_buf = SpaceIntervalSet::new();
 
-        self.runs
-            .seed_from_iter(adj_seed.as_slice().iter().copied());
+        // Seed runs
+        let seed = self.overlay.adjusted_free_runs_at(
+            seed_tp,
+            self.bounds,
+            self.required,
+            &mut scratch_base,
+            &mut scratch_buf,
+        );
+        self.runs.seed_from_iter(seed.as_slice().iter().copied());
         if self.runs.current().is_empty() {
             return;
         }
 
-        let qs_start = berth
-            .snapshot_at(start)
-            .expect("slice timepoint must exist");
-        let base_start = SpaceIntervalSet::from_iter(
-            qs_start.iter_free_intervals(SpaceLength::new(1), self.bounds),
+        // Intersect with adjusted runs at `start`
+        let start_set = self.overlay.adjusted_free_runs_at(
+            start,
+            self.bounds,
+            self.required,
+            &mut scratch_base,
+            &mut scratch_buf,
         );
-        let adj_start = self
-            .overlay
-            .adjust_runs(start, base_start, self.bounds, self.required);
-
         let req = self.required;
-        let adj_slice = adj_start.as_slice();
+        let start_slice = start_set.as_slice();
         self.runs.step(|cur, next| {
-            Self::intersect_with_set_into(req, cur, adj_slice, next);
+            intersect_sorted_min_len(req, cur, start_slice, next);
         });
         if self.runs.current().is_empty() {
             return;
         }
-        let end = start + self.duration;
 
+        // Intersect with each subsequent slice key inside (start, start+duration)
+        let end = start + self.duration;
         let mut cursor = start;
+
         loop {
             let next_tp = next_key_after(
                 &berth.timeline,
@@ -1345,18 +1259,16 @@ where
                 break;
             }
 
-            let qs_tp = berth.snapshot_at(tp).expect("slice timepoint must exist");
-            let base_tp = SpaceIntervalSet::from_iter(
-                qs_tp.iter_free_intervals(SpaceLength::new(1), self.bounds),
+            let adj_tp = self.overlay.adjusted_free_runs_at(
+                tp,
+                self.bounds,
+                self.required,
+                &mut scratch_base,
+                &mut scratch_buf,
             );
-            let adj_tp = self
-                .overlay
-                .adjust_runs(tp, base_tp, self.bounds, self.required);
-
-            let req = self.required;
             let adj_slice = adj_tp.as_slice();
             self.runs.step(|cur, next| {
-                Self::intersect_with_set_into(req, cur, adj_slice, next);
+                intersect_sorted_min_len(req, cur, adj_slice, next);
             });
         }
 
@@ -1393,6 +1305,56 @@ where
             if self.current_start.is_none() {
                 continue;
             }
+        }
+    }
+}
+
+#[inline]
+fn coalesce_brackets<T, Q>(
+    map: &std::collections::BTreeMap<TimePoint<T>, Q>,
+    start: TimePoint<T>,
+    end: TimePoint<T>,
+) -> (TimePoint<T>, TimePoint<T>)
+where
+    T: PrimInt + Signed + Copy,
+{
+    let left = strict_predecessor_key(map, start).unwrap_or(start);
+    let right = first_key_after(map, end).unwrap_or(end);
+    (left, right)
+}
+
+#[inline]
+fn intersect_sorted_min_len(
+    required: SpaceLength,
+    left: &[SpaceInterval],
+    right: &[SpaceInterval],
+    out: &mut Vec<SpaceInterval>,
+) {
+    out.clear();
+    let mut i = 0usize;
+    let mut j = 0usize;
+    while i < left.len() && j < right.len() {
+        let a = left[i];
+        let b = right[j];
+
+        let start = if a.start().value() >= b.start().value() {
+            a.start()
+        } else {
+            b.start()
+        };
+        let end = if a.end().value() <= b.end().value() {
+            a.end()
+        } else {
+            b.end()
+        };
+
+        if end > start && (end.value() - start.value()) >= required.value() {
+            out.push(SpaceInterval::new(start, end));
+        }
+        if a.end() < b.end() {
+            i += 1;
+        } else {
+            j += 1;
         }
     }
 }
