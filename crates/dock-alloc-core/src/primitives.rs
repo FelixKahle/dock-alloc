@@ -220,6 +220,63 @@ impl<T> Interval<T> {
         other.start_inclusive >= self.start_inclusive && other.end_exclusive <= self.end_exclusive
     }
 
+    /// Checks if this interval precedes another interval.
+    ///
+    /// An interval precedes another if its end is less than or equal to
+    /// the other interval's start, meaning they either don't overlap or
+    /// touch exactly at one point.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::primitives::Interval;
+    ///
+    /// let a = Interval::new(1, 5);
+    /// let b = Interval::new(5, 10); // b starts where a ends
+    /// assert!(a.precedes(&b));      // a precedes b
+    ///
+    /// let c = Interval::new(6, 10); // c starts after a ends
+    /// assert!(a.precedes(&c));      // a precedes c
+    ///
+    /// let d = Interval::new(4, 8);  // d overlaps with a
+    /// assert!(!a.precedes(&d));     // a does not precede d
+    /// ```
+    #[inline]
+    pub fn precedes(&self, other: &Self) -> bool
+    where
+        T: PartialOrd + Copy,
+    {
+        self.end() <= other.start()
+    }
+
+    /// Checks if this interval strictly precedes another interval.
+    ///
+    /// An interval strictly precedes another if its end is less than
+    /// the other interval's start, meaning there is a gap between them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::primitives::Interval;
+    ///
+    /// let a = Interval::new(1, 5);
+    /// let b = Interval::new(5, 10); // b starts where a ends
+    /// assert!(!a.strictly_precedes(&b)); // a doesn't strictly precede b
+    ///
+    /// let c = Interval::new(6, 10); // c starts after a ends
+    /// assert!(a.strictly_precedes(&c));  // a strictly precedes c
+    ///
+    /// let d = Interval::new(4, 8);  // d overlaps with a
+    /// assert!(!a.strictly_precedes(&d)); // a doesn't strictly precede d
+    /// ```
+    #[inline]
+    pub fn strictly_precedes(&self, other: &Self) -> bool
+    where
+        T: PartialOrd + Copy,
+    {
+        self.end() < other.start()
+    }
+
     /// Checks if this interval intersects with another interval.
     ///
     /// This method checks if there is any overlap between the
@@ -473,9 +530,9 @@ impl<T> Interval<T> {
     /// assert_eq!(empty_interval.length(), 0); // length is 0 for empty
     /// ```
     #[inline]
-    pub fn length(&self) -> T
+    pub fn length<D>(&self) -> D
     where
-        T: Sub<Output = T> + Copy,
+        T: Copy + Sub<Output = D>,
     {
         self.end_exclusive - self.start_inclusive
     }
@@ -497,9 +554,10 @@ impl<T> Interval<T> {
     /// assert_eq!(empty_interval.midpoint(), 5); // midpoint is 5 for empty interval
     /// ```
     #[inline]
-    pub fn midpoint(&self) -> T
+    pub fn midpoint<D>(&self) -> T
     where
-        T: FromPrimitive + Copy + Sub<Output = T> + Div<T, Output = T> + Add<T, Output = T>,
+        T: FromPrimitive + Copy + Sub<Output = D> + Div<T, Output = T> + Add<T, Output = T>,
+        D: FromPrimitive + Div<T, Output = T>,
     {
         self.start_inclusive + (self.end_exclusive - self.start_inclusive) / T::from_u8(2).unwrap()
     }

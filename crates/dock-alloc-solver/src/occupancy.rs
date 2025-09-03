@@ -20,6 +20,7 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use crate::domain::SpaceTimeRectangle;
+use crate::intervalset::IntervalSet;
 use crate::quay::{Quay, QuayRead, QuayWrite};
 use dock_alloc_core::domain::{
     SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
@@ -676,6 +677,8 @@ where
     }
 }
 
+type SpaceIntervalSet = IntervalSet<SpacePosition>;
+
 #[inline]
 fn next_key_after<T: PrimInt + Signed, Q>(
     base: &BTreeMap<TimePoint<T>, Q>,
@@ -701,508 +704,6 @@ fn next_key_after<T: PrimInt + Signed, Q>(
         (None, Some(y), None) => Some(y),
         (None, None, Some(z)) => Some(z),
         _ => [nb, nf, no].into_iter().flatten().min(),
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-struct SpaceIntervalSet {
-    intervals: Vec<SpaceInterval>,
-}
-
-impl SpaceIntervalSet {
-    #[inline]
-    fn new() -> Self {
-        Self {
-            intervals: Vec::new(),
-        }
-    }
-
-    #[inline]
-    fn with_capacity(capacity: usize) -> Self {
-        Self {
-            intervals: Vec::with_capacity(capacity),
-        }
-    }
-
-    #[inline]
-    fn from_vec(mut intervals: Vec<SpaceInterval>) -> Self {
-        if !intervals.is_empty() {
-            Self::coalesce_in_place(&mut intervals);
-        }
-        Self { intervals }
-    }
-
-    #[inline]
-    fn len(&self) -> usize {
-        self.intervals.len()
-    }
-
-    #[inline]
-    fn is_empty(&self) -> bool {
-        self.intervals.is_empty()
-    }
-
-    #[inline]
-    fn as_slice(&self) -> &[SpaceInterval] {
-        &self.intervals
-    }
-
-    #[inline]
-    fn clear(&mut self) {
-        self.intervals.clear()
-    }
-
-    #[inline]
-    fn clear_and_fill_from_iter<I: IntoIterator<Item = SpaceInterval>>(&mut self, iter: I) {
-        self.clear();
-        for iv in iter {
-            self.push_coalesced(iv);
-        }
-    }
-
-    #[inline]
-    fn retain_min_length(&mut self, min_length: SpaceLength) {
-        if min_length.value() > 1 {
-            self.intervals.retain(|iv| iv.extent() >= min_length);
-        }
-    }
-
-    #[inline]
-    fn covers(&self, required_interval: SpaceInterval) -> bool {
-        if required_interval.start() >= required_interval.end() {
-            return true;
-        }
-        let mut cursor = required_interval.start();
-        for interval in &self.intervals {
-            if interval.end() <= cursor {
-                continue;
-            }
-            if interval.start() > cursor {
-                return false;
-            }
-            cursor = cursor.max(interval.end());
-            if cursor >= required_interval.end() {
-                return true;
-            }
-        }
-        false
-    }
-
-    #[inline]
-    fn overlaps(&self, interval_to_check: SpaceInterval) -> bool {
-        if self.intervals.is_empty() {
-            return false;
-        }
-
-        let mut low_index = 0usize;
-        let mut high_index = self.intervals.len();
-        while low_index < high_index {
-            let mid_index = (low_index + high_index) / 2;
-            if self.intervals[mid_index].start() < interval_to_check.start() {
-                low_index = mid_index + 1;
-            } else {
-                high_index = mid_index;
-            }
-        }
-        if low_index > 0 && self.intervals[low_index - 1].intersects(&interval_to_check) {
-            return true;
-        }
-        if low_index < self.intervals.len()
-            && self.intervals[low_index].intersects(&interval_to_check)
-        {
-            return true;
-        }
-        false
-    }
-
-    #[inline]
-    fn clamped_linear(&self, bounds: SpaceInterval) -> Self {
-        if self.is_empty() {
-            return Self::new();
-        }
-        let self_intervals = &self.intervals;
-        let mut start_index =
-            match self_intervals.binary_search_by_key(&bounds.start(), |interval| interval.end()) {
-                Ok(index) | Err(index) => index,
-            };
-
-        let mut result_set = Self::with_capacity(4.min(self_intervals.len()));
-        while start_index < self_intervals.len()
-            && self_intervals[start_index].start() < bounds.end()
-        {
-            let start_pos = core::cmp::max(self_intervals[start_index].start(), bounds.start());
-            let end_pos = core::cmp::min(self_intervals[start_index].end(), bounds.end());
-            if start_pos < end_pos {
-                result_set
-                    .intervals
-                    .push(SpaceInterval::new(start_pos, end_pos));
-            }
-            start_index += 1;
-        }
-        result_set
-    }
-
-    #[inline]
-    fn clamped_linear_into(&self, bounds: SpaceInterval, out: &mut Self) {
-        out.clear();
-        if self.is_empty() {
-            return;
-        }
-        let self_intervals = &self.intervals;
-        let mut idx = match self_intervals.binary_search_by_key(&bounds.start(), |i| i.end()) {
-            Ok(i) | Err(i) => i,
-        };
-        while idx < self_intervals.len() && self_intervals[idx].start() < bounds.end() {
-            let s = core::cmp::max(self_intervals[idx].start(), bounds.start());
-            let e = core::cmp::min(self_intervals[idx].end(), bounds.end());
-            if s < e {
-                out.intervals.push(SpaceInterval::new(s, e));
-            }
-            idx += 1;
-        }
-    }
-
-    #[inline]
-    fn push_coalesced(&mut self, new_interval: SpaceInterval) {
-        if new_interval.start() >= new_interval.end() {
-            return;
-        }
-        let intervals = &mut self.intervals;
-        let mut insertion_index = intervals
-            .binary_search_by_key(&new_interval.start(), |i| i.start())
-            .unwrap_or_else(|i| i);
-        let mut merged_start = new_interval.start();
-        let mut merged_end = new_interval.end();
-        if insertion_index > 0 && intervals[insertion_index - 1].end() >= merged_start {
-            insertion_index -= 1;
-            merged_start = intervals[insertion_index].start().min(merged_start);
-        }
-        let mut merge_scan_index = insertion_index;
-        while merge_scan_index < intervals.len()
-            && intervals[merge_scan_index].start() <= merged_end
-        {
-            merged_end = intervals[merge_scan_index].end().max(merged_end);
-            merge_scan_index += 1;
-        }
-        let merged_interval = SpaceInterval::new(merged_start, merged_end);
-        if insertion_index == intervals.len() {
-            intervals.push(merged_interval);
-        } else if merge_scan_index == insertion_index {
-            intervals.insert(insertion_index, merged_interval);
-        } else {
-            intervals[insertion_index] = merged_interval;
-            if merge_scan_index > insertion_index + 1 {
-                intervals.drain(insertion_index + 1..merge_scan_index);
-            }
-        }
-    }
-
-    #[inline]
-    fn union(&self, other: &Self) -> Self {
-        if self.is_empty() {
-            return other.clone();
-        }
-        if other.is_empty() {
-            return self.clone();
-        }
-
-        let (self_intervals, other_intervals) = (&self.intervals, &other.intervals);
-        let mut result_intervals = Vec::with_capacity(self_intervals.len() + other_intervals.len());
-        let (mut self_index, mut other_index) = (0usize, 0usize);
-        while self_index < self_intervals.len() && other_index < other_intervals.len() {
-            let next_interval_to_merge =
-                if self_intervals[self_index].start() <= other_intervals[other_index].start() {
-                    let interval = self_intervals[self_index];
-                    self_index += 1;
-                    interval
-                } else {
-                    let interval = other_intervals[other_index];
-                    other_index += 1;
-                    interval
-                };
-            Self::push_and_merge(&mut result_intervals, next_interval_to_merge);
-        }
-        while self_index < self_intervals.len() {
-            Self::push_and_merge(&mut result_intervals, self_intervals[self_index]);
-            self_index += 1;
-        }
-        while other_index < other_intervals.len() {
-            Self::push_and_merge(&mut result_intervals, other_intervals[other_index]);
-            other_index += 1;
-        }
-        Self {
-            intervals: result_intervals,
-        }
-    }
-
-    #[inline]
-    fn union_into(&self, other: &Self, out: &mut Self) {
-        out.intervals.clear();
-        if self.is_empty() {
-            out.intervals.extend_from_slice(&other.intervals);
-            return;
-        }
-        if other.is_empty() {
-            out.intervals.extend_from_slice(&self.intervals);
-            return;
-        }
-        let (a, b) = (&self.intervals, &other.intervals);
-        let (mut i, mut j) = (0usize, 0usize);
-        while i < a.len() && j < b.len() {
-            let next = if a[i].start() <= b[j].start() {
-                let v = a[i];
-                i += 1;
-                v
-            } else {
-                let v = b[j];
-                j += 1;
-                v
-            };
-            Self::push_and_merge(&mut out.intervals, next);
-        }
-        while i < a.len() {
-            Self::push_and_merge(&mut out.intervals, a[i]);
-            i += 1;
-        }
-        while j < b.len() {
-            Self::push_and_merge(&mut out.intervals, b[j]);
-            j += 1;
-        }
-    }
-
-    #[inline]
-    fn subtract(&self, other: &Self) -> Self {
-        if self.is_empty() || other.is_empty() {
-            return self.clone();
-        }
-
-        let (minuend_intervals, subtrahend_intervals) = (&self.intervals, &other.intervals);
-        let mut result_intervals: Vec<SpaceInterval> = Vec::with_capacity(minuend_intervals.len());
-        let (mut minuend_index, mut subtrahend_scan_start_index) = (0usize, 0usize);
-
-        while minuend_index < minuend_intervals.len() {
-            let mut current_minuend_interval = minuend_intervals[minuend_index];
-            while subtrahend_scan_start_index < subtrahend_intervals.len()
-                && subtrahend_intervals[subtrahend_scan_start_index].end()
-                    <= current_minuend_interval.start()
-            {
-                subtrahend_scan_start_index += 1;
-            }
-            let mut subtrahend_index = subtrahend_scan_start_index;
-            let mut is_fully_consumed = false;
-
-            while subtrahend_index < subtrahend_intervals.len()
-                && subtrahend_intervals[subtrahend_index].start() < current_minuend_interval.end()
-            {
-                let current_subtrahend_interval = subtrahend_intervals[subtrahend_index];
-                if current_subtrahend_interval.start() > current_minuend_interval.start() {
-                    result_intervals.push(SpaceInterval::new(
-                        current_minuend_interval.start(),
-                        current_subtrahend_interval.start(),
-                    ));
-                }
-                if current_subtrahend_interval.end() >= current_minuend_interval.end() {
-                    is_fully_consumed = true;
-                    break;
-                }
-                current_minuend_interval = SpaceInterval::new(
-                    current_subtrahend_interval.end(),
-                    current_minuend_interval.end(),
-                );
-                subtrahend_index += 1;
-            }
-            if !is_fully_consumed {
-                result_intervals.push(current_minuend_interval);
-            }
-            subtrahend_scan_start_index = subtrahend_index;
-            minuend_index += 1;
-        }
-        debug_assert!(Self::is_sorted_non_overlapping(&result_intervals));
-        Self {
-            intervals: result_intervals,
-        }
-    }
-
-    #[inline]
-    fn subtract_into(&self, other: &Self, out: &mut Self) {
-        out.intervals.clear();
-        if self.is_empty() {
-            return;
-        }
-        if other.is_empty() {
-            out.intervals.extend_from_slice(&self.intervals);
-            return;
-        }
-
-        let (a, b) = (&self.intervals, &other.intervals);
-        let (mut i, mut j) = (0usize, 0usize);
-
-        while i < a.len() {
-            let mut cur = a[i];
-            while j < b.len() && b[j].end() <= cur.start() {
-                j += 1;
-            }
-            let mut jj = j;
-            let mut consumed = false;
-            while jj < b.len() && b[jj].start() < cur.end() {
-                let cut = b[jj];
-                if cut.start() > cur.start() {
-                    out.intervals
-                        .push(SpaceInterval::new(cur.start(), cut.start()));
-                }
-                if cut.end() >= cur.end() {
-                    consumed = true;
-                    break;
-                }
-                cur = SpaceInterval::new(cut.end(), cur.end());
-                jj += 1;
-            }
-            if !consumed {
-                out.intervals.push(cur);
-            }
-            j = jj;
-            i += 1;
-        }
-        debug_assert!(Self::is_sorted_non_overlapping(&out.intervals));
-    }
-
-    #[inline]
-    fn intersection_into(&self, other: &Self, result_set: &mut Self) {
-        if self.is_empty() || other.is_empty() {
-            result_set.clear();
-            return;
-        }
-        let (self_intervals, other_intervals) = (&self.intervals, &other.intervals);
-        result_set.intervals.clear();
-        result_set
-            .intervals
-            .reserve(self_intervals.len().min(other_intervals.len()));
-        let (mut self_index, mut other_index) = (0usize, 0usize);
-        while self_index < self_intervals.len() && other_index < other_intervals.len() {
-            let intersection_start =
-                if self_intervals[self_index].start() > other_intervals[other_index].start() {
-                    self_intervals[self_index].start()
-                } else {
-                    other_intervals[other_index].start()
-                };
-            let intersection_end =
-                if self_intervals[self_index].end() < other_intervals[other_index].end() {
-                    self_intervals[self_index].end()
-                } else {
-                    other_intervals[other_index].end()
-                };
-            if intersection_start < intersection_end {
-                result_set
-                    .intervals
-                    .push(SpaceInterval::new(intersection_start, intersection_end));
-            }
-            if self_intervals[self_index].end() < other_intervals[other_index].end() {
-                self_index += 1
-            } else {
-                other_index += 1
-            }
-        }
-        debug_assert!(Self::is_sorted_non_overlapping(&result_set.intervals));
-    }
-
-    #[inline]
-    fn filter_min_length(mut self, min_length: SpaceLength) -> Self {
-        if min_length.value() > 1 {
-            self.intervals
-                .retain(|interval| interval.extent() >= min_length);
-        }
-        self
-    }
-
-    #[inline]
-    fn coalesce_in_place(intervals: &mut Vec<SpaceInterval>) {
-        if intervals.len() < 2 {
-            return;
-        }
-        intervals.sort_by_key(|interval| interval.start());
-        let mut write_index = 0usize;
-        for read_index in 1..intervals.len() {
-            if intervals[write_index].end() >= intervals[read_index].start() {
-                intervals[write_index] = SpaceInterval::new(
-                    intervals[write_index].start(),
-                    intervals[write_index]
-                        .end()
-                        .max(intervals[read_index].end()),
-                );
-            } else {
-                write_index += 1;
-                intervals[write_index] = intervals[read_index];
-            }
-        }
-        intervals.truncate(write_index + 1);
-        debug_assert!(Self::is_sorted_non_overlapping(intervals));
-    }
-
-    #[inline]
-    fn push_and_merge(intervals: &mut Vec<SpaceInterval>, interval_to_push: SpaceInterval) {
-        if let Some(last) = intervals.last_mut()
-            && last.end() >= interval_to_push.start()
-        {
-            *last = SpaceInterval::new(last.start(), last.end().max(interval_to_push.end()));
-            return;
-        }
-        intervals.push(interval_to_push);
-    }
-
-    #[inline]
-    #[cfg(debug_assertions)]
-    fn is_sorted_non_overlapping(intervals: &[SpaceInterval]) -> bool {
-        intervals
-            .windows(2)
-            .all(|window| window[0].end() < window[1].start())
-    }
-
-    #[inline]
-    #[cfg(not(debug_assertions))]
-    fn is_sorted_non_overlapping(_intervals: &[SpaceInterval]) -> bool {
-        true
-    }
-}
-
-impl From<Vec<SpaceInterval>> for SpaceIntervalSet {
-    fn from(intervals: Vec<SpaceInterval>) -> Self {
-        Self::from_vec(intervals)
-    }
-}
-
-impl FromIterator<SpaceInterval> for SpaceIntervalSet {
-    fn from_iter<I: IntoIterator<Item = SpaceInterval>>(iter: I) -> Self {
-        let mut intervals: Vec<SpaceInterval> = iter.into_iter().collect();
-        if !intervals.is_empty() {
-            Self::coalesce_in_place(&mut intervals);
-        }
-        Self { intervals }
-    }
-}
-
-impl core::ops::Deref for SpaceIntervalSet {
-    type Target = [SpaceInterval];
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.intervals
-    }
-}
-
-impl<'a> IntoIterator for &'a SpaceIntervalSet {
-    type Item = &'a SpaceInterval;
-    type IntoIter = core::slice::Iter<'a, SpaceInterval>;
-    #[inline]
-    fn into_iter(self) -> Self::IntoIter {
-        self.intervals.iter()
-    }
-}
-
-impl<'a> IntoIterator for &'a mut SpaceIntervalSet {
-    type Item = &'a mut SpaceInterval;
-    type IntoIter = core::slice::IterMut<'a, SpaceInterval>;
-    #[inline]
-    fn into_iter(self) -> Self::IntoIter {
-        self.intervals.iter_mut()
     }
 }
 
@@ -1326,7 +827,7 @@ where
             self.adj.clear();
             if let Some(f) = self.overlay.free_by_time.get(&tp) {
                 self.clamp_buf.clear();
-                f.clamped_linear_into(self.bounds, &mut self.clamp_buf);
+                f.clamped_into(self.bounds, &mut self.clamp_buf);
                 self.base.union_into(&self.clamp_buf, &mut self.union_buf);
             } else {
                 // no additions → union_buf := base
@@ -1335,7 +836,7 @@ where
 
             // then subtract overlay occupied
             if let Some(o) = self.overlay.occupied_by_time.get(&tp) {
-                o.clamped_linear_into(self.bounds, &mut self.clamp_buf);
+                o.clamped_into(self.bounds, &mut self.clamp_buf);
                 self.union_buf
                     .subtract_into(&self.clamp_buf, &mut self.sub_buf);
                 core::mem::swap(&mut self.adj, &mut self.sub_buf);
@@ -1422,7 +923,7 @@ where
         self.occupied_by_time
             .entry(time)
             .or_default()
-            .push_coalesced(space);
+            .insert_and_coalesce(space);
     }
 
     pub fn occupy(&mut self, rect: &SpaceTimeRectangle<T>) {
@@ -1478,7 +979,7 @@ where
         self.free_by_time
             .entry(time)
             .or_default()
-            .push_coalesced(space);
+            .insert_and_coalesce(space);
     }
 
     pub fn free(&mut self, rect: &SpaceTimeRectangle<T>) {
@@ -1638,15 +1139,15 @@ where
     ) -> SpaceIntervalSet {
         let mut result_set = base_set;
         if let Some(free_set) = self.free_by_time.get(&timepoint) {
-            let clamped_free_intervals = free_set.clamped_linear(bounds);
+            let clamped_free_intervals = free_set.clamped(bounds);
             if !clamped_free_intervals.is_empty() {
                 result_set = result_set.union(&clamped_free_intervals);
             }
         }
         if let Some(occupied_set) = self.occupied_by_time.get(&timepoint) {
-            let clamped_occupied_intervals = occupied_set.clamped_linear(bounds);
-            if !clamped_occupied_intervals.is_empty() {
-                result_set = result_set.subtract(&clamped_occupied_intervals);
+            let clamped_occupied = occupied_set.clamped(bounds);
+            if !clamped_occupied.is_empty() {
+                result_set = result_set.subtract(&clamped_occupied);
             }
         }
         result_set.filter_min_length(min_length)
@@ -2347,119 +1848,6 @@ mod tests {
     }
 
     #[test]
-    fn set_coalescing_and_push() {
-        // from_vec should coalesce and sort
-        let set = SpaceIntervalSet::from_vec(vec![si(3, 6), si(1, 4), si(8, 10), si(6, 7)]);
-        // Expect [1,7) and [8,10)
-        assert_eq!(set.as_slice(), &[si(1, 7), si(8, 10)]);
-
-        // push_coalesced maintains ordering and merging
-        let mut set2 = SpaceIntervalSet::new();
-        set2.push_coalesced(si(5, 7));
-        set2.push_coalesced(si(1, 3));
-        set2.push_coalesced(si(3, 5));
-        set2.push_coalesced(si(9, 11));
-        set2.push_coalesced(si(8, 9));
-        assert_eq!(set2.as_slice(), &[si(1, 7), si(8, 11)]);
-    }
-
-    #[test]
-    fn set_overlaps_and_covers() {
-        let set = SpaceIntervalSet::from_vec(vec![si(0, 3), si(5, 8)]);
-        assert!(set.overlaps(si(1, 2)));
-        assert!(set.overlaps(si(2, 6))); // touches both ranges via overlap with [0,3) first
-        assert!(set.overlaps(si(7, 9)));
-        assert!(!set.overlaps(si(3, 5))); // gap
-
-        assert!(set.covers(si(1, 2)));
-        assert!(!set.covers(si(2, 6))); // gap breaks coverage
-        assert!(set.covers(si(5, 8)));
-        assert!(set.covers(si(0, 0))); // vacuously true for empty
-    }
-
-    #[test]
-    fn set_clamp_and_clamp_linear_into() {
-        let set = SpaceIntervalSet::from_vec(vec![si(0, 2), si(4, 7), si(9, 12)]);
-        let clamped = set.clamped_linear(si(1, 10));
-        assert_eq!(clamped.as_slice(), &[si(1, 2), si(4, 7), si(9, 10)]);
-
-        let mut out = SpaceIntervalSet::new();
-        set.clamped_linear_into(si(1, 10), &mut out);
-        assert_eq!(out.as_slice(), &[si(1, 2), si(4, 7), si(9, 10)]);
-    }
-
-    #[test]
-    fn set_union_and_union_into() {
-        let a = SpaceIntervalSet::from_vec(vec![si(0, 3), si(5, 6)]);
-        let b = SpaceIntervalSet::from_vec(vec![si(2, 5), si(8, 9)]);
-        let u = a.union(&b);
-        assert_eq!(u.as_slice(), &[si(0, 6), si(8, 9)]);
-
-        let mut out = SpaceIntervalSet::new();
-        a.union_into(&b, &mut out);
-        assert_eq!(out.as_slice(), &[si(0, 6), si(8, 9)]);
-    }
-
-    #[test]
-    fn set_subtract_and_subtract_into() {
-        let a = SpaceIntervalSet::from_vec(vec![si(0, 10), si(12, 15)]);
-        let b = SpaceIntervalSet::from_vec(vec![si(3, 4), si(8, 13)]);
-
-        let s = a.subtract(&b);
-        assert_eq!(s.as_slice(), &[si(0, 3), si(4, 8), si(13, 15)]);
-
-        let mut out = SpaceIntervalSet::new();
-        a.subtract_into(&b, &mut out);
-        assert_eq!(out.as_slice(), &[si(0, 3), si(4, 8), si(13, 15)]);
-    }
-
-    #[test]
-    fn set_retain_and_filter_min_length() {
-        // retain_min_length (in-place, >= semantics)
-        let mut set = SpaceIntervalSet::from_vec(vec![si(0, 3), si(5, 9), si(10, 11)]);
-        set.retain_min_length(len(4)); // keep intervals with extent >= 4
-        assert_eq!(set.as_slice(), &[si(5, 9)]);
-
-        // filter_min_length (by value, >= semantics)
-        let set2 = SpaceIntervalSet::from_vec(vec![si(0, 3), si(4, 6), si(10, 14)]);
-        let filtered = set2.filter_min_length(len(3));
-        assert_eq!(filtered.as_slice(), &[si(0, 3), si(10, 14)]);
-
-        // both intervals have extent 2, so with min len 3 the result is empty
-        let filtered2 =
-            SpaceIntervalSet::from_vec(vec![si(0, 2), si(4, 6)]).filter_min_length(len(3));
-        assert!(filtered2.as_slice().is_empty());
-    }
-
-    #[test]
-    fn set_clear_and_fill_from_iter_and_into_iter() {
-        let mut set = SpaceIntervalSet::new();
-        // Out-of-order, overlapping -> should coalesce into [0,5)
-        set.clear_and_fill_from_iter(vec![si(1, 3), si(0, 1), si(2, 5)]);
-        assert_eq!(set.as_slice(), &[si(0, 5)]);
-
-        // IntoIterator for &SpaceIntervalSet
-        let collected: Vec<_> = (&set).into_iter().copied().collect();
-        assert_eq!(collected, vec![si(0, 5)]);
-    }
-
-    #[test]
-    fn keys_union_merges_sorted_without_duplicates() {
-        // Build dummy maps keyed by TimePoint<T>
-        let mut free = BTreeMap::new();
-        let mut occ = BTreeMap::new();
-        free.insert(tp(0), SpaceIntervalSet::from_vec(vec![si(0, 1)]));
-        free.insert(tp(10), SpaceIntervalSet::from_vec(vec![si(0, 1)]));
-        free.insert(tp(20), SpaceIntervalSet::from_vec(vec![si(0, 1)]));
-        occ.insert(tp(5), SpaceIntervalSet::from_vec(vec![si(0, 1)]));
-        occ.insert(tp(10), SpaceIntervalSet::from_vec(vec![si(0, 1)]));
-        occ.insert(tp(30), SpaceIntervalSet::from_vec(vec![si(0, 1)]));
-
-        let merged: Vec<_> = KeysUnion::<'_, T>::new(&free, &occ).collect();
-        assert_eq!(merged, vec![tp(0), tp(5), tp(10), tp(20), tp(30)]);
-    }
-
-    #[test]
     fn overlay_add_free_and_occupy_and_queries() {
         let quay_length = len(10);
         let mut berth = BO::new(quay_length);
@@ -2673,32 +2061,6 @@ mod tests {
         // both start=0 and end=5 should appear (end because a key exists at 5)
         assert!(items.iter().any(|(t, _)| *t == 0));
         assert!(items.iter().any(|(t, _)| *t == 5));
-    }
-
-    #[test]
-    fn set_covers_empty_interval_vacuously_true() {
-        let s = SpaceIntervalSet::from_vec(vec![si(2, 4)]);
-        assert!(s.covers(si(3, 3))); // empty
-        assert!(s.covers(si(2, 3)));
-        assert!(!s.covers(si(1, 3)));
-    }
-
-    #[test]
-    fn set_overlaps_edge_touching_is_false_half_open() {
-        let s = SpaceIntervalSet::from_vec(vec![si(1, 3)]);
-        assert!(s.overlaps(si(2, 4))); // overlaps
-        assert!(!s.overlaps(si(3, 5))); // touches at 3 only ⇒ false
-    }
-
-    #[test]
-    fn set_clamped_linear_into_empty_and_bounds_outside() {
-        let mut out = SpaceIntervalSet::new();
-        SpaceIntervalSet::new().clamped_linear_into(si(0, 10), &mut out);
-        assert!(out.is_empty());
-
-        let s = SpaceIntervalSet::from_vec(vec![si(10, 12)]);
-        s.clamped_linear_into(si(0, 10), &mut out);
-        assert!(out.is_empty());
     }
 
     #[test]
