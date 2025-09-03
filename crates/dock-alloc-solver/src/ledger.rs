@@ -19,6 +19,7 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+use dock_alloc_core::domain::{SpaceLength, SpacePosition, TimeDelta, TimePoint};
 use dock_alloc_model::{
     Assignment, FixedAssignment, MoveableRequest, Problem, RequestId, Solution,
 };
@@ -258,6 +259,22 @@ impl<'brand, T: PrimInt + Signed, C: PrimInt + Signed> MovableAssignment<'brand,
     #[inline]
     pub fn assignment(&self) -> &Assignment<T, C> {
         &self.assignment
+    }
+
+    pub fn start_position(&self) -> SpacePosition {
+        self.assignment.start_position()
+    }
+
+    pub fn start_time(&self) -> TimePoint<T> {
+        self.assignment.start_time()
+    }
+
+    pub fn length(&self) -> SpaceLength {
+        self.assignment.request().length()
+    }
+
+    pub fn processing_duration(&self) -> TimeDelta<T> {
+        self.assignment.request().processing_duration()
     }
 
     /// Returns the handle for this movable assignment.

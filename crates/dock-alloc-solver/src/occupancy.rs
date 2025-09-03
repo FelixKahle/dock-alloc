@@ -19,6 +19,7 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+use crate::domain::SpaceTimeRectangle;
 use crate::quay::{Quay, QuayRead, QuayWrite};
 use dock_alloc_core::domain::{
     SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
@@ -29,43 +30,61 @@ use num_traits::{PrimInt, Signed, Zero};
 use std::collections::BTreeMap;
 use std::iter::{Copied, Peekable};
 use std::marker::PhantomData;
-use std::ops::Bound::{Excluded, Included, Unbounded};
+use std::ops::Bound::{self, Excluded, Included, Unbounded};
 
-/// A time-aware berth occupancy tracker that manages space allocation over time.
-///
-/// `BerthOccupancy` represents the occupancy state of a berth (quay) across time by maintaining
-/// a timeline of snapshots. Each snapshot captures the state of space allocation at a specific
-/// time point using a quay data structure. The timeline is automatically managed to efficiently
-/// track changes and coalesce identical states.
-///
-/// The berth has a fixed length in space and extends infinitely in time. Space is represented
-/// as intervals `[start_position, end_position)` and time as intervals `[start_time, end_time)`.
-///
-/// # Type Parameters
-///
-/// * `T` - The primitive integer type used for time values, must support signed arithmetic
-/// * `Q` - The quay implementation used to track space occupancy at each time point
-///
-/// # Examples
-///
-/// ```
-/// use dock_alloc_solver::occupancy::BerthOccupancy;
-/// use dock_alloc_solver::quay::BTreeMapQuay;
-/// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
-///
-/// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-///
-/// let mut berth = Berth::new(SpaceLength::new(100));
-///
-/// // Initially the entire berth is free
-/// let time_window = TimeInterval::new(TimePoint::new(0), TimePoint::new(10));
-/// let space_region = SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50));
-/// assert!(berth.is_free(time_window, space_region));
-///
-/// // Occupy some space for a time period
-/// berth.occupy(time_window, space_region);
-/// assert!(berth.is_occupied(time_window, space_region));
-/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TimeSliceRef<'a, T, Q>
+where
+    T: PrimInt + Signed,
+{
+    time: TimePoint<T>,
+    quay: &'a Q,
+}
+
+impl<'a, T, Q> TimeSliceRef<'a, T, Q>
+where
+    T: PrimInt + Signed,
+{
+    #[inline]
+    pub fn new(time: TimePoint<T>, quay: &'a Q) -> Self {
+        Self { time, quay }
+    }
+
+    #[inline]
+    pub fn time(&self) -> TimePoint<T> {
+        self.time
+    }
+
+    #[inline]
+    pub fn quay(&self) -> &'a Q {
+        self.quay
+    }
+}
+
+type TimeKeyRange<T> = (Bound<TimePoint<T>>, Bound<TimePoint<T>>);
+
+#[inline]
+fn time_key_range<T: PrimInt + Signed>(start: TimePoint<T>, end: TimePoint<T>) -> TimeKeyRange<T> {
+    (Bound::Included(start), Bound::Excluded(end))
+}
+
+fn strict_predecessor_key<T: PrimInt + Signed, Q>(
+    map: &BTreeMap<TimePoint<T>, Q>,
+    t: TimePoint<T>,
+) -> Option<TimePoint<T>> {
+    map.range(..t).next_back().map(|(tp, _)| *tp)
+}
+
+#[inline]
+fn first_key_after<T: PrimInt + Signed, Q>(
+    map: &BTreeMap<TimePoint<T>, Q>,
+    t: TimePoint<T>,
+) -> Option<TimePoint<T>> {
+    map.range((Excluded(t), Unbounded))
+        .next()
+        .map(|(tp, _)| *tp)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BerthOccupancy<T, Q>
 where
@@ -80,24 +99,6 @@ where
     T: PrimInt + Signed,
     Q: QuayRead + Clone + PartialEq,
 {
-    /// Creates a new berth occupancy tracker with the specified length.
-    ///
-    /// The berth starts completely free at time zero. The timeline contains a single
-    /// snapshot at `TimePoint::new(T::zero())` representing the initial free state.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::BerthOccupancy;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::SpaceLength;
-    ///
-    /// type Berth = BerthOccupancy<i32, BTreeMapQuay>;
-    /// let berth = Berth::new(SpaceLength::new(200));
-    ///
-    /// assert_eq!(berth.quay_length(), SpaceLength::new(200));
-    /// assert_eq!(berth.time_event_count(), 1); // Single initial event
-    /// ```
     #[inline]
     pub fn new(quay_length: SpaceLength) -> Self {
         let mut timeline = BTreeMap::new();
@@ -108,47 +109,11 @@ where
         }
     }
 
-    /// Returns the total length of the berth.
-    ///
-    /// This represents the maximum space available along the berth, corresponding
-    /// to the range `[0, quay_length)` in space coordinates.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::BerthOccupancy;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::SpaceLength;
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let berth = Berth::new(SpaceLength::new(150));
-    ///
-    /// assert_eq!(berth.quay_length(), SpaceLength::new(150));
-    /// ```
     #[inline]
     pub fn quay_length(&self) -> SpaceLength {
         self.quay_length
     }
 
-    /// Returns the space interval representing the entire berth.
-    ///
-    /// This returns `[0, quay_length)` as a [`SpaceInterval`], representing
-    /// the full spatial extent of the berth.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::BerthOccupancy;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let berth = Berth::new(SpaceLength::new(80));
-    ///
-    /// let full_space = berth.quay_space_interval();
-    /// assert_eq!(full_space.start(), SpacePosition::new(0));
-    /// assert_eq!(full_space.end(), SpacePosition::new(80));
-    /// ```
     #[inline]
     pub fn quay_space_interval(&self) -> SpaceInterval {
         SpaceInterval::new(SpacePosition::new(0), self.quay_end())
@@ -159,66 +124,11 @@ where
         SpacePosition::new(self.quay_length.value())
     }
 
-    /// Returns the number of time events (snapshots) in the timeline.
-    ///
-    /// This represents the number of distinct time points where the occupancy
-    /// state changes. A newly created berth has 1 event (the initial free state).
-    /// Operations that change occupancy may add new events, but identical adjacent
-    /// states are automatically coalesced to minimize storage.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::BerthOccupancy;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let mut berth = Berth::new(SpaceLength::new(100));
-    ///
-    /// assert_eq!(berth.time_event_count(), 1); // Initial state
-    ///
-    /// // Occupy some space - creates new events at start and end times
-    /// let time_window = TimeInterval::new(TimePoint::new(5), TimePoint::new(10));
-    /// let space_region = SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40));
-    /// berth.occupy(time_window, space_region);
-    ///
-    /// assert_eq!(berth.time_event_count(), 3); // Events at t=0, t=5, t=10
-    /// ```
     #[inline]
     pub fn time_event_count(&self) -> usize {
         self.timeline.len()
     }
 
-    /// Returns a reference to the quay state snapshot at the specified time point.
-    ///
-    /// This returns the state that is active at the given time point by finding
-    /// the most recent snapshot at or before that time. Returns `None` if the
-    /// time point is before the earliest snapshot in the timeline.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::BerthOccupancy;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let mut berth = Berth::new(SpaceLength::new(100));
-    ///
-    /// // Initially free everywhere
-    /// let initial_state = berth.snapshot_at(TimePoint::new(0)).unwrap();
-    /// // Note: In real usage, you would typically use BerthOccupancy methods for queries
-    /// // rather than accessing the quay snapshots directly
-    ///
-    /// // Occupy some space
-    /// let time_window = TimeInterval::new(TimePoint::new(5), TimePoint::new(10));
-    /// let space_region = SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40));
-    /// berth.occupy(time_window, space_region);
-    ///
-    /// // Check occupation using BerthOccupancy methods
-    /// assert!(berth.is_occupied(time_window, space_region));
-    /// ```
     #[inline]
     pub fn snapshot_at(&self, time_point: TimePoint<T>) -> Option<&Q> {
         self.timeline
@@ -227,206 +137,43 @@ where
             .map(|(_, quay_state)| quay_state)
     }
 
-    /// Returns a mutable reference to the quay state snapshot at the specified time point.
-    ///
-    /// If no snapshot exists at the exact time point, this method first creates one
-    /// by splitting the timeline (copying the most recent prior state). This ensures
-    /// that modifications affect only the time period starting from the specified point.
-    ///
-    /// Returns `None` if the time point is before the earliest snapshot in the timeline.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::BerthOccupancy;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let mut berth = Berth::new(SpaceLength::new(100));
-    ///
-    /// // Get mutable snapshot at t=5 (creates a split in timeline)
-    /// // Create a split at t=5 (snapshot_at_mut creates the split)
-    /// let _ = berth.snapshot_at_mut(TimePoint::new(5));
-    ///
-    /// // Now use BerthOccupancy methods to modify state
-    /// let space_region = SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(20));
-    /// berth.occupy_at(TimePoint::new(5), TimeDelta::new(10), space_region);
-    /// # use dock_alloc_core::domain::TimeDelta;
-    ///
-    /// // Now the berth has occupation starting from t=5
-    /// assert_eq!(berth.time_event_count(), 3); // Events at t=0, t=5, and t=15 (end of occupation)
-    /// ```
     #[inline]
     pub fn snapshot_at_mut(&mut self, time_point: TimePoint<T>) -> Option<&mut Q> {
         self.split_at(time_point);
         self.timeline.get_mut(&time_point)
     }
 
-    /// Checks if the specified space interval is completely free during the entire time interval.
-    ///
-    /// Returns `true` if and only if every position within the space interval is free
-    /// throughout the entire duration of the time interval. If either interval is empty,
-    /// returns `true` (vacuously true for empty regions).
-    ///
-    /// # Panics
-    ///
-    /// Panics in debug builds if the space interval extends beyond the berth boundaries.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::BerthOccupancy;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let mut berth = Berth::new(SpaceLength::new(100));
-    ///
-    /// let time_window = TimeInterval::new(TimePoint::new(0), TimePoint::new(10));
-    /// let space_region = SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40));
-    ///
-    /// // Initially free
-    /// assert!(berth.is_free(time_window, space_region));
-    ///
-    /// // Occupy part of the time interval
-    /// let occupied_time = TimeInterval::new(TimePoint::new(3), TimePoint::new(7));
-    /// berth.occupy(occupied_time, space_region);
-    ///
-    /// // No longer free during the entire time window
-    /// assert!(!berth.is_free(time_window, space_region));
-    /// // But free before occupation
-    /// assert!(berth.is_free(TimeInterval::new(TimePoint::new(0), TimePoint::new(3)), space_region));
-    /// ```
-    pub fn is_free(&self, ti: TimeInterval<T>, si: SpaceInterval) -> bool {
-        if ti.is_empty() || si.is_empty() {
+    pub fn is_free(&self, rect: &SpaceTimeRectangle<T>) -> bool {
+        if rect.is_empty() {
             return true;
         }
-        debug_assert!(self.space_within_quay(si));
-
-        self.iter_slices_covering(ti.start(), ti.end())
-            .all(|(_, qs)| !qs.check_occupied(si))
+        debug_assert!(self.space_within_quay(rect.space()));
+        let ti = rect.time();
+        let si = rect.space();
+        self.slices_covering(ti)
+            .all(|s| !s.quay().check_occupied(si))
     }
 
-    /// Checks if the specified space interval has any occupation during the time interval.
-    ///
-    /// Returns `true` if there is any overlap between occupied space and the given space
-    /// interval at any point during the time interval. This is the logical negation of
-    /// [`is_free`](Self::is_free).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::BerthOccupancy;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let mut berth = Berth::new(SpaceLength::new(100));
-    ///
-    /// let time_window = TimeInterval::new(TimePoint::new(0), TimePoint::new(10));
-    /// let space_region = SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40));
-    ///
-    /// // Initially not occupied
-    /// assert!(!berth.is_occupied(time_window, space_region));
-    ///
-    /// // Occupy part of the time interval
-    /// berth.occupy(TimeInterval::new(TimePoint::new(3), TimePoint::new(7)), space_region);
-    ///
-    /// // Now shows as occupied during the time window
-    /// assert!(berth.is_occupied(time_window, space_region));
-    /// ```
     #[inline]
-    pub fn is_occupied(
-        &self,
-        time_interval: TimeInterval<T>,
-        space_interval: SpaceInterval,
-    ) -> bool {
-        !self.is_free(time_interval, space_interval)
+    pub fn is_occupied(&self, rect: &SpaceTimeRectangle<T>) -> bool {
+        !self.is_free(rect)
     }
 
-    /// Returns an iterator over free intervals for each time slice within the given time interval.
-    ///
-    /// For each distinct time slice in the timeline that overlaps with the given time interval,
-    /// this yields a tuple of `(time_point, free_intervals_iterator)`. The free intervals iterator
-    /// provides all free space intervals within the search space that meet the minimum length requirement.
-    ///
-    /// This is useful for analyzing how free space availability changes over time.
-    ///
-    /// # Panics
-    ///
-    /// Panics in debug builds if the search space extends beyond the berth boundaries.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::BerthOccupancy;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let mut berth = Berth::new(SpaceLength::new(100));
-    ///
-    /// // Create occupation that changes over time
-    /// berth.occupy(
-    ///     TimeInterval::new(TimePoint::new(5), TimePoint::new(10)),
-    ///     SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40))
-    /// );
-    ///
-    /// // Analyze free space over time
-    /// let time_window = TimeInterval::new(TimePoint::new(0), TimePoint::new(15));
-    /// let search_space = SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100));
-    ///
-    /// for (time_point, free_iter) in berth.iter_free_per_slice(time_window, SpaceLength::new(10), search_space) {
-    ///     let free_intervals: Vec<_> = free_iter.collect();
-    ///     println!("At time {}: {} free intervals", time_point.value(), free_intervals.len());
-    /// }
-    /// ```
-    pub fn iter_free_per_slice<'a>(
+    pub fn iter_slice_free_runs<'a>(
         &'a self,
         time_interval: TimeInterval<T>,
         required_space: SpaceLength,
         search_space: SpaceInterval,
     ) -> impl Iterator<Item = (TimePoint<T>, <Q as QuayRead>::FreeIter<'a>)> + 'a {
         debug_assert!(self.space_within_quay(search_space));
-
-        let timepoints = self.iter_timepoints_covering(time_interval.start(), time_interval.end());
-        timepoints.map(move |time_point| {
-            let quay_state = &self.timeline[&time_point];
+        self.slices_covering(time_interval).map(move |s| {
             (
-                time_point,
-                quay_state.iter_free_intervals(required_space, search_space),
+                s.time(),
+                s.quay().iter_free_intervals(required_space, search_space),
             )
         })
     }
 
-    /// Returns the time point of the most recent snapshot at or before the given time point.
-    ///
-    /// This is useful for finding which snapshot is active at a given time. Returns `None`
-    /// if the time point is before all snapshots in the timeline.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::BerthOccupancy;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let mut berth = Berth::new(SpaceLength::new(100));
-    ///
-    /// // Initially only snapshot at t=0
-    /// assert_eq!(berth.slice_predecessor_timepoint(TimePoint::new(5)), Some(TimePoint::new(0)));
-    ///
-    /// // Create occupation that adds snapshots at t=10 and t=20
-    /// berth.occupy(
-    ///     TimeInterval::new(TimePoint::new(10), TimePoint::new(20)),
-    ///     SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40))
-    /// );
-    ///
-    /// // Now t=15 uses snapshot from t=10
-    /// assert_eq!(berth.slice_predecessor_timepoint(TimePoint::new(15)), Some(TimePoint::new(10)));
-    /// ```
     #[inline]
     pub fn slice_predecessor_timepoint(&self, time_point: TimePoint<T>) -> Option<TimePoint<T>> {
         self.timeline
@@ -435,34 +182,6 @@ where
             .map(|(tp, _)| *tp)
     }
 
-    /// Returns an iterator over timeline events that occur within the given time interval.
-    ///
-    /// This yields time points where the occupancy state changes within the half-open
-    /// interval `(start, end)` - excluding the start time but including snapshots up to
-    /// (but not including) the end time.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::BerthOccupancy;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let mut berth = Berth::new(SpaceLength::new(100));
-    ///
-    /// // Create occupations that add events at t=5, t=10, t=15
-    /// berth.occupy(TimeInterval::new(TimePoint::new(5), TimePoint::new(10)),
-    ///              SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(20)));
-    /// berth.occupy(TimeInterval::new(TimePoint::new(10), TimePoint::new(15)),
-    ///              SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40)));
-    ///
-    /// // Get events in interval (3, 12)
-    /// let events: Vec<_> = berth.iter_timepoints(TimeInterval::new(TimePoint::new(3), TimePoint::new(12)))
-    ///                          .map(|tp| tp.value())
-    ///                          .collect();
-    /// assert_eq!(events, vec![5, 10]); // Events at t=5 and t=10, not t=0 or t=15
-    /// ```
     #[inline]
     pub fn iter_timepoints(
         &self,
@@ -476,46 +195,6 @@ where
             .map(|(time_key, _)| *time_key)
     }
 
-    /// Returns an iterator over all free space-time slots within the given constraints.
-    ///
-    /// This finds all combinations of start times and space intervals where:
-    /// - The start time is within the time window
-    /// - There is enough time remaining for the full duration
-    /// - The space interval is completely free for the entire duration
-    /// - The space interval is within the space window and meets the minimum length requirement
-    ///
-    /// This is the core method for finding available berth slots for scheduling operations.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::BerthOccupancy;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint, TimeDelta};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let mut berth = Berth::new(SpaceLength::new(100));
-    ///
-    /// // Block some space during [10, 20)
-    /// berth.occupy(
-    ///     TimeInterval::new(TimePoint::new(10), TimePoint::new(20)),
-    ///     SpaceInterval::new(SpacePosition::new(30), SpacePosition::new(50))
-    /// );
-    ///
-    /// // Find slots for a 5-unit operation requiring 20 units of space
-    /// let time_window = TimeInterval::new(TimePoint::new(0), TimePoint::new(30));
-    /// let space_window = SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100));
-    ///
-    /// let available_slots: Vec<_> = berth.iter_free(
-    ///     time_window,
-    ///     TimeDelta::new(5),      // operation duration
-    ///     SpaceLength::new(20),   // required space
-    ///     space_window
-    /// ).collect();
-    ///
-    /// // Should find slots before t=10 and after t=20, plus unblocked space areas
-    /// assert!(!available_slots.is_empty());
-    /// ```
     #[inline]
     pub fn iter_free(
         &self,
@@ -527,28 +206,6 @@ where
         BerthOccupancyFreeIter::new(self, time_window, duration, required_space, space_window)
     }
 
-    /// Checks if the given space interval is completely within the berth boundaries.
-    ///
-    /// Returns `true` if the space interval is entirely contained within `[0, quay_length)`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::BerthOccupancy;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let berth = Berth::new(SpaceLength::new(100));
-    ///
-    /// // Valid intervals
-    /// assert!(berth.space_within_quay(SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))));
-    /// assert!(berth.space_within_quay(SpaceInterval::new(SpacePosition::new(80), SpacePosition::new(100))));
-    ///
-    /// // Invalid intervals (extend beyond berth)
-    /// assert!(!berth.space_within_quay(SpaceInterval::new(SpacePosition::new(50), SpacePosition::new(150))));
-    /// // Cannot create SpacePosition with negative values in this example
-    /// ```
     #[inline]
     pub fn space_within_quay(&self, space_interval: SpaceInterval) -> bool {
         let quay_bounds = self.quay_space_interval();
@@ -560,20 +217,15 @@ where
             return;
         }
 
-        let left_boundary = self
-            .timeline
-            .range(..start_time)
-            .next_back()
-            .map(|(time_point, _)| *time_point)
-            .unwrap_or(start_time);
+        // NOTE: use strict predecessor so we coalesce the key just before `start_time`
+        let left_boundary =
+            strict_predecessor_key(&self.timeline, start_time).unwrap_or(start_time);
+        let right_boundary = first_key_after(&self.timeline, end_time).unwrap_or(end_time);
 
-        let right_boundary = self
-            .timeline
-            .range((Excluded(end_time), Unbounded))
-            .next()
-            .map(|(time_point, _)| *time_point)
-            .unwrap_or(end_time);
-
+        // Collect necessary timepoints to avoid borrowing issues during iteration
+        // We only need to coalesce at timepoints within [left_boundary, right_boundary]
+        // Note: coalescing visits [left_boundary, right_boundary] inclusive;
+        // that’s different from the normal half-open operational windows.
         let timepoints_in_range: Vec<_> = self
             .timeline
             .range((Included(left_boundary), Included(right_boundary)))
@@ -627,44 +279,26 @@ where
     }
 
     #[inline]
-    fn iter_slices_covering(
+    pub fn slices_covering(
         &self,
-        start: TimePoint<T>,
-        end: TimePoint<T>,
-    ) -> impl Iterator<Item = (TimePoint<T>, &Q)> + '_ {
+        interval: TimeInterval<T>,
+    ) -> impl Iterator<Item = TimeSliceRef<'_, T, Q>> {
+        let start = interval.start();
+        let end = interval.end();
+
         let pred = self
             .timeline
             .range(..=start)
             .next_back()
-            .map(|(t, q)| (*t, q));
+            .map(|(t, q)| TimeSliceRef { time: *t, quay: q });
+
         let tail = self
             .timeline
             .range((Excluded(start), Unbounded))
             .take_while(move |(t, _)| *t < &end)
-            .map(|(t, q)| (*t, q));
+            .map(|(t, q)| TimeSliceRef { time: *t, quay: q });
 
         pred.into_iter().chain(tail)
-    }
-
-    #[inline]
-    fn iter_timepoints_covering(
-        &self,
-        start: TimePoint<T>,
-        end: TimePoint<T>,
-    ) -> impl Iterator<Item = TimePoint<T>> + '_ {
-        let pred = self
-            .timeline
-            .range(..=start)
-            .next_back()
-            .map(|(t, _)| *t)
-            .into_iter();
-        let tail = self
-            .timeline
-            .range((Excluded(start), Unbounded))
-            .take_while(move |(t, _)| *t < &end)
-            .map(|(t, _)| *t);
-
-        pred.chain(tail)
     }
 }
 
@@ -673,61 +307,20 @@ where
     T: PrimInt + Signed,
     Q: QuayRead + QuayWrite + Clone + PartialEq,
 {
-    /// Marks the specified space interval as occupied during the given time interval.
-    ///
-    /// This operation:
-    /// 1. Creates timeline splits at the start and end times if needed
-    /// 2. Marks the space as occupied in all time slices within `[start_time, end_time)`
-    /// 3. Coalesces adjacent identical states to minimize timeline complexity
-    ///
-    /// If either interval is empty, the operation has no effect.
-    ///
-    /// # Panics
-    ///
-    /// Panics in debug builds if the space interval extends beyond the berth boundaries.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::BerthOccupancy;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let mut berth = Berth::new(SpaceLength::new(100));
-    ///
-    /// let time_window = TimeInterval::new(TimePoint::new(5), TimePoint::new(15));
-    /// let space_region = SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(50));
-    ///
-    /// // Occupy the space
-    /// berth.occupy(time_window, space_region);
-    ///
-    /// // Verify occupation
-    /// assert!(berth.is_occupied(time_window, space_region));
-    ///
-    /// // Space is free before and after the time window
-    /// assert!(berth.is_free(TimeInterval::new(TimePoint::new(0), TimePoint::new(5)), space_region));
-    /// assert!(berth.is_free(TimeInterval::new(TimePoint::new(15), TimePoint::new(25)), space_region));
-    /// ```
-    pub fn occupy(&mut self, time_interval: TimeInterval<T>, space_interval: SpaceInterval) {
-        if time_interval.is_empty() {
+    pub fn occupy(&mut self, rect: &SpaceTimeRectangle<T>) {
+        if rect.is_empty() {
             return;
         }
 
+        let time_interval = rect.time();
+        let space_interval = rect.space();
         let (start_time, end_time) = (time_interval.start(), time_interval.end());
-
-        // Preserve existing "empty space still creates splits" semantics.
-        if space_interval.is_empty() {
-            self.split_at(start_time);
-            self.split_at(end_time);
-            return;
-        }
 
         debug_assert!(self.space_within_quay(space_interval));
 
         if self
-            .iter_slices_covering(start_time, end_time)
-            .all(|(_, qs)| qs.check_occupied(space_interval))
+            .slices_covering(time_interval)
+            .all(|s| s.quay().check_occupied(space_interval))
         {
             return;
         }
@@ -737,7 +330,7 @@ where
 
         for (_, quay_state) in self
             .timeline
-            .range_mut((Included(start_time), Excluded(end_time)))
+            .range_mut(time_key_range(start_time, end_time))
         {
             quay_state.occupy(space_interval);
         }
@@ -745,64 +338,20 @@ where
         self.coalesce_range(start_time, end_time);
     }
 
-    /// Marks the specified space interval as free during the given time interval.
-    ///
-    /// This operation:
-    /// 1. Creates timeline splits at the start and end times if needed
-    /// 2. Marks the space as free in all time slices within `[start_time, end_time)`
-    /// 3. Coalesces adjacent identical states to minimize timeline complexity
-    ///
-    /// If either interval is empty, the operation has no effect.
-    ///
-    /// # Panics
-    ///
-    /// Panics in debug builds if the space interval extends beyond the berth boundaries.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::BerthOccupancy;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let mut berth = Berth::new(SpaceLength::new(100));
-    ///
-    /// let time_window = TimeInterval::new(TimePoint::new(5), TimePoint::new(15));
-    /// let space_region = SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(50));
-    ///
-    /// // First occupy the space
-    /// berth.occupy(time_window, space_region);
-    /// assert!(berth.is_occupied(time_window, space_region));
-    ///
-    /// // Then free part of the time interval
-    /// let partial_time = TimeInterval::new(TimePoint::new(8), TimePoint::new(12));
-    /// berth.free(partial_time, space_region);
-    ///
-    /// // Space is now free during the partial time but occupied at the edges
-    /// assert!(berth.is_free(partial_time, space_region));
-    /// assert!(berth.is_occupied(TimeInterval::new(TimePoint::new(5), TimePoint::new(8)), space_region));
-    /// assert!(berth.is_occupied(TimeInterval::new(TimePoint::new(12), TimePoint::new(15)), space_region));
-    /// ```
-    pub fn free(&mut self, time_interval: TimeInterval<T>, space_interval: SpaceInterval) {
-        if time_interval.is_empty() {
+    pub fn free(&mut self, rect: &SpaceTimeRectangle<T>) {
+        if rect.is_empty() {
             return;
         }
 
+        let time_interval = rect.time();
+        let space_interval = rect.space();
         let (start_time, end_time) = (time_interval.start(), time_interval.end());
-
-        // Preserve existing "empty space still creates splits" semantics.
-        if space_interval.is_empty() {
-            self.split_at(start_time);
-            self.split_at(end_time);
-            return;
-        }
 
         debug_assert!(self.space_within_quay(space_interval));
 
         if self
-            .iter_slices_covering(start_time, end_time)
-            .all(|(_, qs)| qs.check_free(space_interval))
+            .slices_covering(time_interval)
+            .all(|s| s.quay().check_free(space_interval))
         {
             return;
         }
@@ -812,106 +361,44 @@ where
 
         for (_, quay_state) in self
             .timeline
-            .range_mut((Included(start_time), Excluded(end_time)))
+            .range_mut(time_key_range(start_time, end_time))
         {
             quay_state.free(space_interval);
         }
 
         self.coalesce_range(start_time, end_time);
     }
+}
 
-    /// Marks the specified space interval as occupied for a duration starting at the given time.
-    ///
-    /// This is a convenience method equivalent to calling [`occupy`](Self::occupy) with
-    /// a time interval constructed from `start_time` and `start_time + duration`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::BerthOccupancy;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint, TimeDelta};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let mut berth = Berth::new(SpaceLength::new(100));
-    ///
-    /// let space_region = SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(50));
-    ///
-    /// // Occupy for 10 time units starting at t=5
-    /// berth.occupy_at(TimePoint::new(5), TimeDelta::new(10), space_region);
-    ///
-    /// // Equivalent to: berth.occupy(TimeInterval::new(TimePoint::new(5), TimePoint::new(15)), space_region);
-    /// let time_window = TimeInterval::new(TimePoint::new(5), TimePoint::new(15));
-    /// assert!(berth.is_occupied(time_window, space_region));
-    /// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FreeSlot<T>
+where
+    T: PrimInt + Signed,
+{
+    start_time: TimePoint<T>,
+    space: SpaceInterval,
+}
+
+impl<T> FreeSlot<T>
+where
+    T: PrimInt + Signed,
+{
     #[inline]
-    pub fn occupy_at(
-        &mut self,
-        start_time: TimePoint<T>,
-        duration: TimeDelta<T>,
-        space_interval: SpaceInterval,
-    ) {
-        self.occupy(
-            TimeInterval::new(start_time, start_time + duration),
-            space_interval,
-        );
+    fn new(space: SpaceInterval, start_time: TimePoint<T>) -> Self {
+        Self { start_time, space }
     }
 
-    /// Marks the specified space interval as free for a duration starting at the given time.
-    ///
-    /// This is a convenience method equivalent to calling [`free`](Self::free) with
-    /// a time interval constructed from `start_time` and `start_time + duration`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::BerthOccupancy;
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint, TimeDelta};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let mut berth = Berth::new(SpaceLength::new(100));
-    ///
-    /// let space_region = SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(50));
-    ///
-    /// // First occupy a larger time window
-    /// berth.occupy(TimeInterval::new(TimePoint::new(0), TimePoint::new(20)), space_region);
-    ///
-    /// // Then free for 5 time units starting at t=10
-    /// berth.free_at(TimePoint::new(10), TimeDelta::new(5), space_region);
-    ///
-    /// // Space is now free from t=10 to t=15
-    /// let freed_window = TimeInterval::new(TimePoint::new(10), TimePoint::new(15));
-    /// assert!(berth.is_free(freed_window, space_region));
-    /// ```
     #[inline]
-    pub fn free_at(
-        &mut self,
-        start_time: TimePoint<T>,
-        duration: TimeDelta<T>,
-        space_interval: SpaceInterval,
-    ) {
-        self.free(
-            TimeInterval::new(start_time, start_time + duration),
-            space_interval,
-        );
+    pub fn start_time(&self) -> TimePoint<T> {
+        self.start_time
+    }
+
+    #[inline]
+    pub fn space(&self) -> SpaceInterval {
+        self.space
     }
 }
 
-/// An iterator over free space-time slots within specified constraints.
-///
-/// `FreeIter` finds all combinations of start times and space intervals where an operation
-/// of a given duration can be scheduled. It iterates through candidate start times and
-/// computes which space intervals remain continuously free for the entire operation duration.
-///
-/// The iterator yields tuples of `(start_time, space_interval)` representing valid scheduling slots.
-///
-/// # Type Parameters
-///
-/// * `T` - The primitive integer type used for time values
-/// * `Q` - The quay implementation used to track space occupancy
-///
-/// This iterator is created by calling [`BerthOccupancy::iter_free`].
 pub struct BerthOccupancyFreeIter<'a, T, Q>
 where
     T: PrimInt + Signed + Copy,
@@ -1113,7 +600,7 @@ where
     T: PrimInt + Signed + Copy,
     Q: QuayRead,
 {
-    type Item = (TimePoint<T>, SpaceInterval);
+    type Item = FreeSlot<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -1121,7 +608,7 @@ where
                 if self.next_emit_index < self.feasible_runs.current().len() {
                     let run = self.feasible_runs.current()[self.next_emit_index];
                     self.next_emit_index += 1;
-                    return Some((start_time, run));
+                    return Some(FreeSlot::new(run, start_time));
                 }
                 self.current_start_time = None;
             }
@@ -1182,17 +669,41 @@ where
             let start_position = assignment.start_position();
             let end_position = SpacePosition::new(start_position.value() + length.value());
             let space_interval = SpaceInterval::new(start_position, end_position);
-            berth_occupancy.occupy(time_interval, space_interval);
+            let rect = SpaceTimeRectangle::new(space_interval, time_interval);
+            berth_occupancy.occupy(&rect);
         }
         berth_occupancy
     }
 }
 
-/// A collection of non-overlapping space intervals maintained in sorted order.
-///
-/// Represents a set of space intervals that are automatically coalesced to maintain
-/// non-overlapping, sorted intervals. Provides efficient operations for union,
-/// intersection, and subtraction of interval sets.
+#[inline]
+fn next_key_after<T: PrimInt + Signed, Q>(
+    base: &BTreeMap<TimePoint<T>, Q>,
+    overlay_free: &BTreeMap<TimePoint<T>, SpaceIntervalSet>,
+    overlay_occ: &BTreeMap<TimePoint<T>, SpaceIntervalSet>,
+    after: TimePoint<T>,
+) -> Option<TimePoint<T>> {
+    let nb = base
+        .range((Excluded(after), Unbounded))
+        .next()
+        .map(|(t, _)| *t);
+    let nf = overlay_free
+        .range((Excluded(after), Unbounded))
+        .next()
+        .map(|(t, _)| *t);
+    let no = overlay_occ
+        .range((Excluded(after), Unbounded))
+        .next()
+        .map(|(t, _)| *t);
+    match (nb, nf, no) {
+        (None, None, None) => None,
+        (Some(x), None, None) => Some(x),
+        (None, Some(y), None) => Some(y),
+        (None, None, Some(z)) => Some(z),
+        _ => [nb, nf, no].into_iter().flatten().min(),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct SpaceIntervalSet {
     intervals: Vec<SpaceInterval>,
@@ -1357,12 +868,9 @@ impl SpaceIntervalSet {
             return;
         }
         let intervals = &mut self.intervals;
-        let mut insertion_index = match intervals
-            .binary_search_by_key(&new_interval.start(), |interval| interval.start())
-        {
-            Ok(index) => index,
-            Err(index) => index,
-        };
+        let mut insertion_index = intervals
+            .binary_search_by_key(&new_interval.start(), |i| i.start())
+            .unwrap_or_else(|i| i);
         let mut merged_start = new_interval.start();
         let mut merged_end = new_interval.end();
         if insertion_index > 0 && intervals[insertion_index - 1].end() >= merged_start {
@@ -1698,10 +1206,6 @@ impl<'a> IntoIterator for &'a mut SpaceIntervalSet {
     }
 }
 
-/// Iterator that yields the union of keys from two time-indexed maps in sorted order.
-///
-/// Takes two `BTreeMap<TimePoint<T>, SpaceIntervalSet>` references and yields all unique
-/// time points from both maps in ascending order. Duplicate time points are yielded only once.
 struct KeysUnion<'a, T: PrimInt + Signed> {
     a: Peekable<Copied<std::collections::btree_map::Keys<'a, TimePoint<T>, SpaceIntervalSet>>>,
     b: Peekable<Copied<std::collections::btree_map::Keys<'a, TimePoint<T>, SpaceIntervalSet>>>,
@@ -1750,12 +1254,6 @@ impl<'a, T: PrimInt + Signed> Iterator for KeysUnion<'a, T> {
     }
 }
 
-/// Iterator over space intervals that remain free across all overlay time slices.
-///
-/// Computes the intersection of free space across all time points where an overlay
-/// has modifications. Yields `SpaceInterval`s that are free in the base berth state,
-/// remain free after applying all overlay modifications, meet the minimum length
-/// requirement, and fall within the specified search bounds.
 pub struct IntersectIter<'brand, 'a, T, Q>
 where
     T: PrimInt + Signed,
@@ -1832,7 +1330,7 @@ where
                 self.base.union_into(&self.clamp_buf, &mut self.union_buf);
             } else {
                 // no additions → union_buf := base
-                self.union_buf = self.base.clone();
+                self.union_buf = core::mem::take(&mut self.base);
             }
 
             // then subtract overlay occupied
@@ -1885,43 +1383,6 @@ where
     }
 }
 
-/// Temporary overlay that tracks space allocation modifications on top of a base berth.
-///
-/// Allows applying temporary changes (freeing or occupying space) to a berth without
-/// modifying the underlying `BerthOccupancy`. Useful for algorithms that need to explore
-/// "what-if" scenarios or make tentative allocations that can be easily undone.
-///
-/// # Examples
-///
-/// ```
-/// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
-/// use dock_alloc_solver::quay::BTreeMapQuay;
-/// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
-///
-/// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-/// let mut berth = Berth::new(SpaceLength::new(100));
-///
-/// // Create some base occupation
-/// berth.occupy(
-///     TimeInterval::new(TimePoint::new(5), TimePoint::new(15)),
-///     SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40))
-/// );
-///
-/// // Create overlay to test temporary changes
-/// let mut overlay = BerthOccupancyOverlay::new(&berth);
-///
-/// // Temporarily free part of the occupied space
-/// overlay.free(
-///     TimeInterval::new(TimePoint::new(8), TimePoint::new(12)),
-///     SpaceInterval::new(SpacePosition::new(25), SpacePosition::new(35))
-/// );
-///
-/// // Check that the overlay shows the space as free
-/// assert!(overlay.is_free(
-///     TimeInterval::new(TimePoint::new(8), TimePoint::new(12)),
-///     SpaceInterval::new(SpacePosition::new(25), SpacePosition::new(35))
-/// ));
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BerthOccupancyOverlay<'brand, 'a, T, Q>
 where
@@ -1939,22 +1400,6 @@ where
     T: PrimInt + Signed,
     Q: QuayRead,
 {
-    /// Creates a new overlay on top of the given berth occupancy.
-    ///
-    /// The overlay starts with no modifications, so all queries will initially
-    /// return the same results as the base berth.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::SpaceLength;
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let berth = Berth::new(SpaceLength::new(100));
-    /// let overlay = BerthOccupancyOverlay::new(&berth);
-    /// ```
     pub fn new(berth_occupancy: &'a BerthOccupancy<T, Q>) -> Self {
         Self {
             berth_occupancy,
@@ -1964,35 +1409,11 @@ where
         }
     }
 
-    /// Returns a reference to the underlying base berth occupancy.
-    ///
-    /// Provides access to the original berth state without any overlay modifications.
     #[inline]
     pub fn berth(&self) -> &'a BerthOccupancy<T, Q> {
         self.berth_occupancy
     }
 
-    /// Adds an occupation at a specific time point to the overlay.
-    ///
-    /// Marks the specified space interval as occupied at the given time point,
-    /// overriding any free state from the base berth. Empty space intervals are ignored.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let berth = Berth::new(SpaceLength::new(100));
-    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
-    ///
-    /// overlay.add_occupy(
-    ///     TimePoint::new(5),
-    ///     SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(20))
-    /// );
-    /// ```
     #[inline]
     pub fn add_occupy(&mut self, time: TimePoint<T>, space: SpaceInterval) {
         if space.start() >= space.end() {
@@ -2004,27 +1425,10 @@ where
             .push_coalesced(space);
     }
 
-    /// Marks the specified space interval as occupied during the given time interval.
-    ///
-    /// Applies the occupation to all relevant time slices that overlap with the time window.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let berth = Berth::new(SpaceLength::new(100));
-    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
-    ///
-    /// overlay.occupy(
-    ///     TimeInterval::new(TimePoint::new(5), TimePoint::new(15)),
-    ///     SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40))
-    /// );
-    /// ```
-    pub fn occupy(&mut self, time_window: TimeInterval<T>, space_interval: SpaceInterval) {
+    pub fn occupy(&mut self, rect: &SpaceTimeRectangle<T>) {
+        let time_window = rect.time();
+        let space_interval = rect.space();
+
         if let Some(predecessor_timepoint) = self
             .berth_occupancy
             .slice_predecessor_timepoint(time_window.start())
@@ -2036,27 +1440,6 @@ where
         }
     }
 
-    /// Removes an occupation at a specific time point from the overlay.
-    ///
-    /// Removes the specified space interval from the overlay's occupation at the given
-    /// time point. If this results in no occupied space remaining at that time point,
-    /// the time point is removed from the overlay entirely.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let berth = Berth::new(SpaceLength::new(100));
-    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
-    ///
-    /// let space = SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(20));
-    /// overlay.add_occupy(TimePoint::new(5), space);
-    /// overlay.remove_occupy(TimePoint::new(5), space);
-    /// ```
     pub fn remove_occupy(&mut self, time: TimePoint<T>, space: SpaceInterval) {
         if space.start() >= space.end() {
             return;
@@ -2072,30 +1455,10 @@ where
         }
     }
 
-    /// Undoes a previous occupy operation by removing occupations from all affected time points.
-    ///
-    /// This is the reverse of [`occupy`](Self::occupy), removing the specified space
-    /// interval from overlay occupations at all time points that would have been
-    /// affected by the original occupy call.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let berth = Berth::new(SpaceLength::new(100));
-    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
-    ///
-    /// let time_window = TimeInterval::new(TimePoint::new(5), TimePoint::new(15));
-    /// let space_region = SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40));
-    ///
-    /// overlay.occupy(time_window, space_region);
-    /// overlay.undo_occupy(time_window, space_region);
-    /// ```
-    pub fn undo_occupy(&mut self, time_window: TimeInterval<T>, space_interval: SpaceInterval) {
+    pub fn undo_occupy(&mut self, rect: &SpaceTimeRectangle<T>) {
+        let time_window = rect.time();
+        let space_interval = rect.space();
+
         if let Some(pred) = self
             .berth_occupancy
             .slice_predecessor_timepoint(time_window.start())
@@ -2107,27 +1470,6 @@ where
         }
     }
 
-    /// Adds a free space designation at a specific time point to the overlay.
-    ///
-    /// Marks the specified space interval as free at the given time point,
-    /// overriding any occupied state from the base berth. Empty space intervals are ignored.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let berth = Berth::new(SpaceLength::new(100));
-    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
-    ///
-    /// overlay.add_free(
-    ///     TimePoint::new(5),
-    ///     SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(20))
-    /// );
-    /// ```
     #[inline]
     pub fn add_free(&mut self, time: TimePoint<T>, space: SpaceInterval) {
         if space.start() >= space.end() {
@@ -2139,31 +1481,10 @@ where
             .push_coalesced(space);
     }
 
-    /// Marks the specified space interval as free during the given time interval.
-    ///
-    /// Applies the free designation to all relevant time slices that overlap with the time window.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let mut berth = Berth::new(SpaceLength::new(100));
-    /// berth.occupy(
-    ///     TimeInterval::new(TimePoint::new(5), TimePoint::new(15)),
-    ///     SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40))
-    /// );
-    ///
-    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
-    /// overlay.free(
-    ///     TimeInterval::new(TimePoint::new(8), TimePoint::new(12)),
-    ///     SpaceInterval::new(SpacePosition::new(25), SpacePosition::new(35))
-    /// );
-    /// ```
-    pub fn free(&mut self, time_window: TimeInterval<T>, space_interval: SpaceInterval) {
+    pub fn free(&mut self, rect: &SpaceTimeRectangle<T>) {
+        let time_window = rect.time();
+        let space_interval = rect.space();
+
         if let Some(predecessor_timepoint) = self
             .berth_occupancy
             .slice_predecessor_timepoint(time_window.start())
@@ -2175,27 +1496,6 @@ where
         }
     }
 
-    /// Removes a free space designation at a specific time point from the overlay.
-    ///
-    /// Removes the specified space interval from the overlay's free space at the given
-    /// time point. If this results in no free space remaining at that time point,
-    /// the time point is removed from the overlay entirely.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let berth = Berth::new(SpaceLength::new(100));
-    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
-    ///
-    /// let space = SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(20));
-    /// overlay.add_free(TimePoint::new(5), space);
-    /// overlay.remove_free(TimePoint::new(5), space);
-    /// ```
     pub fn remove_free(&mut self, time: TimePoint<T>, space: SpaceInterval) {
         if space.start() >= space.end() {
             return;
@@ -2212,30 +1512,10 @@ where
         }
     }
 
-    /// Undoes a previous free operation by removing free designations from all affected time points.
-    ///
-    /// This is the reverse of [`free`](Self::free), removing the specified space
-    /// interval from overlay free designations at all time points that would have
-    /// been affected by the original free call.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let berth = Berth::new(SpaceLength::new(100));
-    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
-    ///
-    /// let time_window = TimeInterval::new(TimePoint::new(5), TimePoint::new(15));
-    /// let space_region = SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40));
-    ///
-    /// overlay.free(time_window, space_region);
-    /// overlay.undo_free(time_window, space_region);
-    /// ```
-    pub fn undo_free(&mut self, time_window: TimeInterval<T>, space_interval: SpaceInterval) {
+    pub fn undo_free(&mut self, rect: &SpaceTimeRectangle<T>) {
+        let time_window = rect.time();
+        let space_interval = rect.space();
+
         if let Some(pred) = self
             .berth_occupancy
             .slice_predecessor_timepoint(time_window.start())
@@ -2247,38 +1527,10 @@ where
         }
     }
 
-    /// Checks if the specified space interval is completely free during the entire time interval.
-    ///
-    /// Considers both the base berth state and any overlay modifications. Returns `true`
-    /// if and only if every position within the space interval is free throughout the
-    /// entire duration of the time interval, accounting for overlay changes.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let mut berth = Berth::new(SpaceLength::new(100));
-    /// berth.occupy(
-    ///     TimeInterval::new(TimePoint::new(5), TimePoint::new(15)),
-    ///     SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40))
-    /// );
-    ///
-    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
-    /// overlay.free(
-    ///     TimeInterval::new(TimePoint::new(8), TimePoint::new(12)),
-    ///     SpaceInterval::new(SpacePosition::new(25), SpacePosition::new(35))
-    /// );
-    ///
-    /// assert!(overlay.is_free(
-    ///     TimeInterval::new(TimePoint::new(8), TimePoint::new(12)),
-    ///     SpaceInterval::new(SpacePosition::new(25), SpacePosition::new(35))
-    /// ));
-    /// ```
-    pub fn is_free(&self, time_window: TimeInterval<T>, space_interval: SpaceInterval) -> bool {
+    pub fn is_free(&self, rect: &SpaceTimeRectangle<T>) -> bool {
+        let time_window = rect.time();
+        let space_interval = rect.space();
+
         self.iter_slice_timepoints_for(time_window).all(|tp| {
             if self.occupied_overlaps_at(tp, space_interval) {
                 return false;
@@ -2301,34 +1553,10 @@ where
         })
     }
 
-    /// Checks if the specified space interval has any occupation during the time interval.
-    ///
-    /// Considers both the base berth state and any overlay modifications. Returns `true`
-    /// if there is any overlap between occupied space and the given space interval at any
-    /// point during the time interval, accounting for overlay changes.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let berth = Berth::new(SpaceLength::new(100));
-    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
-    ///
-    /// overlay.occupy(
-    ///     TimeInterval::new(TimePoint::new(3), TimePoint::new(7)),
-    ///     SpaceInterval::new(SpacePosition::new(25), SpacePosition::new(35))
-    /// );
-    ///
-    /// assert!(overlay.is_occupied(
-    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
-    ///     SpaceInterval::new(SpacePosition::new(20), SpacePosition::new(40))
-    /// ));
-    /// ```
-    pub fn is_occupied(&self, time_window: TimeInterval<T>, space_interval: SpaceInterval) -> bool {
+    pub fn is_occupied(&self, rect: &SpaceTimeRectangle<T>) -> bool {
+        let time_window = rect.time();
+        let space_interval = rect.space();
+
         self.iter_slice_timepoints_for(time_window).any(|tp| {
             if self.occupied_overlaps_at(tp, space_interval) {
                 return true;
@@ -2351,86 +1579,16 @@ where
         })
     }
 
-    /// Returns an iterator over all time points where free space has been added by the overlay.
-    ///
-    /// This iterator yields time points in sorted order where the overlay has explicitly
-    /// marked additional space as free beyond what the base berth provides.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let berth = Berth::new(SpaceLength::new(100));
-    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
-    ///
-    /// overlay.add_free(TimePoint::new(5), SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10)));
-    /// overlay.add_free(TimePoint::new(10), SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10)));
-    ///
-    /// let timepoints: Vec<_> = overlay.iter_free_timepoints().map(|t| t.value()).collect();
-    /// assert_eq!(timepoints, vec![5, 10]);
-    /// ```
     #[inline]
     pub fn iter_free_timepoints(&self) -> impl Iterator<Item = TimePoint<T>> + '_ {
         self.free_by_time.keys().copied()
     }
 
-    /// Returns an iterator over all time points where occupation has been added by the overlay.
-    ///
-    /// This iterator yields time points in sorted order where the overlay has explicitly
-    /// marked additional space as occupied beyond what the base berth provides.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimePoint};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let berth = Berth::new(SpaceLength::new(100));
-    /// let mut overlay = BerthOccupancyOverlay::new(&berth);
-    ///
-    /// overlay.add_occupy(TimePoint::new(3), SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10)));
-    /// overlay.add_occupy(TimePoint::new(7), SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10)));
-    ///
-    /// let timepoints: Vec<_> = overlay.iter_occupied_timepoints().map(|t| t.value()).collect();
-    /// assert_eq!(timepoints, vec![3, 7]);
-    /// ```
     #[inline]
     pub fn iter_occupied_timepoints(&self) -> impl Iterator<Item = TimePoint<T>> + '_ {
         self.occupied_by_time.keys().copied()
     }
 
-    /// Returns an iterator over all free space-time slots within the given constraints.
-    ///
-    /// Finds all combinations of start times and space intervals where an operation
-    /// of a given duration can be scheduled, considering both base berth state and
-    /// overlay modifications.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition, TimeInterval, TimePoint, TimeDelta};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let berth = Berth::new(SpaceLength::new(100));
-    /// let overlay = BerthOccupancyOverlay::new(&berth);
-    ///
-    /// let available_slots: Vec<_> = overlay.iter_free(
-    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(30)),
-    ///     TimeDelta::new(5),       // operation duration
-    ///     SpaceLength::new(20),    // required space
-    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100))
-    /// ).collect();
-    ///
-    /// assert!(!available_slots.is_empty());
-    /// ```
     #[inline]
     pub fn iter_free(
         &'a self,
@@ -2442,27 +1600,6 @@ where
         OverlayFreeIter::new(self, time_window, duration, required_space, space_window)
     }
 
-    /// Returns an iterator over free space intervals that remain free across all overlay time slices.
-    ///
-    /// Computes the intersection of free space across all time points where the overlay
-    /// has modifications, filtered by the minimum required length.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_solver::occupancy::{BerthOccupancy, BerthOccupancyOverlay};
-    /// use dock_alloc_solver::quay::BTreeMapQuay;
-    /// use dock_alloc_core::domain::{SpaceLength, SpaceInterval, SpacePosition};
-    ///
-    /// type Berth = BerthOccupancy<i64, BTreeMapQuay>;
-    /// let berth = Berth::new(SpaceLength::new(100));
-    /// let overlay = BerthOccupancyOverlay::new(&berth);
-    ///
-    /// let free_runs: Vec<_> = overlay.iter_intersect_free_runs(
-    ///     SpaceLength::new(10),
-    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100))
-    /// ).collect();
-    /// ```
     #[inline]
     pub fn iter_intersect_free_runs(
         &self,
@@ -2516,12 +1653,6 @@ where
     }
 }
 
-/// Iterator over free space-time slots within an overlay's constraints.
-///
-/// Finds all combinations of start times and space intervals where an operation
-/// of a given duration can be scheduled, considering both base berth state and
-/// overlay modifications. Yields tuples of `(start_time, space_interval)`
-/// representing valid scheduling slots.
 pub struct OverlayFreeIter<'brand, 'a, T, Q>
 where
     T: PrimInt + Signed + Copy,
@@ -2568,46 +1699,10 @@ where
         }
     }
 
-    #[inline]
-    fn berth_next_key_after(&self, after: TimePoint<T>) -> Option<TimePoint<T>> {
-        self.overlay
-            .berth_occupancy
-            .iter_timepoints(TimeInterval::new(after, self.time_window.end()))
-            .next()
-    }
-
-    #[inline]
-    fn overlay_next_key_after(&self, after: TimePoint<T>) -> Option<TimePoint<T>> {
-        let nf = self
-            .overlay
-            .free_by_time
-            .range((Excluded(after), Unbounded))
-            .next()
-            .map(|(tp, _)| *tp);
-        let no = self
-            .overlay
-            .occupied_by_time
-            .range((Excluded(after), Unbounded))
-            .next()
-            .map(|(tp, _)| *tp);
-
-        match (nf, no) {
-            (None, None) => None,
-            (Some(x), None) => Some(x),
-            (None, Some(y)) => Some(y),
-            (Some(x), Some(y)) => Some(if x < y { x } else { y }),
-        }
-    }
-
-    /// Next candidate start time = min(next berth key, next overlay key),
-    /// plus the window start (first) and possibly the window end for dur=0.
     fn next_candidate_start(&mut self) -> Option<TimePoint<T>> {
-        // Guard: if duration doesn't fit at all, nothing to do.
         if self.time_window.start() + self.duration > self.time_window.end() {
             return None;
         }
-
-        // First yield: the window start.
         if !self.yielded_window_start {
             self.yielded_window_start = true;
             let t0 = self.time_window.start();
@@ -2617,18 +1712,13 @@ where
 
         let last = self.last_start?;
         let wnd_end = self.time_window.end();
+        let next = next_key_after(
+            &self.overlay.berth_occupancy.timeline,
+            &self.overlay.free_by_time,
+            &self.overlay.occupied_by_time,
+            last,
+        );
 
-        // Next timeline key from berth or overlay
-        let next_berth = self.berth_next_key_after(last);
-        let next_overlay = self.overlay_next_key_after(last);
-        let next = match (next_berth, next_overlay) {
-            (None, None) => None,
-            (Some(x), None) => Some(x),
-            (None, Some(y)) => Some(y),
-            (Some(x), Some(y)) => Some(if x < y { x } else { y }),
-        };
-
-        // Filter by end-of-window wrt duration
         if let Some(tp) = next {
             if tp + self.duration <= wnd_end {
                 self.last_start = Some(tp);
@@ -2636,7 +1726,6 @@ where
             }
         }
 
-        // Special case: duration == 0 → allow exact key at window end
         if self.duration.value() == T::zero() && last < wnd_end {
             let berth_has_end = self
                 .overlay
@@ -2717,8 +1806,12 @@ where
             return;
         }
 
-        let base_start =
-            SpaceIntervalSet::from_iter(qs.iter_free_intervals(SpaceLength::new(1), self.bounds));
+        let qs_start = berth
+            .snapshot_at(start)
+            .expect("slice timepoint must exist");
+        let base_start = SpaceIntervalSet::from_iter(
+            qs_start.iter_free_intervals(SpaceLength::new(1), self.bounds),
+        );
         let adj_start = self
             .overlay
             .adjust_runs(start, base_start, self.bounds, self.required);
@@ -2731,43 +1824,16 @@ where
         if self.runs.current().is_empty() {
             return;
         }
-
         let end = start + self.duration;
-        if self.runs.current().is_empty() {
-            return;
-        }
 
         let mut cursor = start;
         loop {
-            let next_berth = berth.iter_timepoints(TimeInterval::new(cursor, end)).next();
-            let next_overlay = {
-                let nf = self
-                    .overlay
-                    .free_by_time
-                    .range((Excluded(cursor), Unbounded))
-                    .next()
-                    .map(|(tp, _)| *tp);
-                let no = self
-                    .overlay
-                    .occupied_by_time
-                    .range((Excluded(cursor), Unbounded))
-                    .next()
-                    .map(|(tp, _)| *tp);
-                match (nf, no) {
-                    (None, None) => None,
-                    (Some(x), None) => Some(x),
-                    (None, Some(y)) => Some(y),
-                    (Some(x), Some(y)) => Some(if x < y { x } else { y }),
-                }
-            };
-
-            let next_tp = match (next_berth, next_overlay) {
-                (None, None) => None,
-                (Some(x), None) => Some(x),
-                (None, Some(y)) => Some(y),
-                (Some(x), Some(y)) => Some(if x < y { x } else { y }),
-            };
-
+            let next_tp = next_key_after(
+                &berth.timeline,
+                &self.overlay.free_by_time,
+                &self.overlay.occupied_by_time,
+                cursor,
+            );
             let Some(tp) = next_tp else { break };
             if tp >= end {
                 break;
@@ -2804,7 +1870,7 @@ where
     T: PrimInt + Signed + Copy,
     Q: QuayRead,
 {
-    type Item = (TimePoint<T>, SpaceInterval);
+    type Item = FreeSlot<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -2813,7 +1879,7 @@ where
                 if self.emit_idx < self.runs.current().len() {
                     let iv = self.runs.current()[self.emit_idx];
                     self.emit_idx += 1;
-                    return Some((t0, iv));
+                    return Some(FreeSlot::new(iv, t0));
                 }
                 self.current_start = None;
             }
@@ -2858,6 +1924,10 @@ mod tests {
         TimeInterval::new(tp(a), tp(b))
     }
 
+    fn rect(tw: TimeInterval<T>, si: SpaceInterval) -> SpaceTimeRectangle<T> {
+        SpaceTimeRectangle::new(si, tw)
+    }
+
     fn collect_free_iter(
         berth: &BO,
         tw: TimeInterval<T>,
@@ -2867,7 +1937,12 @@ mod tests {
     ) -> Vec<(T, (usize, usize))> {
         berth
             .iter_free(tw, dur, need, bounds)
-            .map(|(t0, space)| (t0.value(), (space.start().value(), space.end().value())))
+            .map(|f| {
+                (
+                    f.start_time().value(),
+                    (f.space().start().value(), f.space().end().value()),
+                )
+            })
             .collect()
     }
 
@@ -2877,8 +1952,8 @@ mod tests {
         let berth_occupancy = BO::new(quay_length);
 
         assert_eq!(berth_occupancy.time_event_count(), 1);
-        assert!(berth_occupancy.is_free(ti(0, 100), si(0, 10)));
-        assert!(!berth_occupancy.is_occupied(ti(0, 100), si(0, 10)));
+        assert!(berth_occupancy.is_free(&rect(ti(0, 100), si(0, 10))));
+        assert!(!berth_occupancy.is_occupied(&rect(ti(0, 100), si(0, 10))));
     }
 
     #[test]
@@ -2886,20 +1961,20 @@ mod tests {
         let quay_length = len(10);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(ti(5, 10), si(2, 5));
+        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5)));
 
         // boundaries at 0 (origin), 5, 10
         assert_eq!(berth_occupancy.time_event_count(), 3);
 
         // before 5 -> free
-        assert!(berth_occupancy.is_free(ti(0, 5), si(2, 5)));
+        assert!(berth_occupancy.is_free(&rect(ti(0, 5), si(2, 5))));
 
         // [5,10) occupied in [2,5)
-        assert!(berth_occupancy.is_occupied(ti(5, 10), si(2, 5)));
-        assert!(!berth_occupancy.is_free(ti(5, 10), si(2, 5)));
+        assert!(berth_occupancy.is_occupied(&rect(ti(5, 10), si(2, 5))));
+        assert!(!berth_occupancy.is_free(&rect(ti(5, 10), si(2, 5))));
 
         // after 10 -> back to free
-        assert!(berth_occupancy.is_free(ti(10, 20), si(2, 5)));
+        assert!(berth_occupancy.is_free(&rect(ti(10, 20), si(2, 5))));
     }
 
     #[test]
@@ -2907,12 +1982,12 @@ mod tests {
         let quay_length = len(10);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(ti(5, 10), si(2, 5));
-        berth_occupancy.free(ti(5, 10), si(2, 5));
+        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5)));
+        berth_occupancy.free(&rect(ti(5, 10), si(2, 5)));
 
         // Should merge back to a single fully-free snapshot
         assert_eq!(berth_occupancy.time_event_count(), 1);
-        assert!(berth_occupancy.is_free(ti(0, 100), si(0, 10)));
+        assert!(berth_occupancy.is_free(&rect(ti(0, 100), si(0, 10))));
     }
 
     #[test]
@@ -2920,15 +1995,15 @@ mod tests {
         let quay_length = len(10);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(ti(5, 10), si(2, 5));
+        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5)));
 
         // Space outside [2,5) always free
-        assert!(berth_occupancy.is_free(ti(0, 100), si(0, 2)));
-        assert!(berth_occupancy.is_free(ti(0, 100), si(5, 10)));
+        assert!(berth_occupancy.is_free(&rect(ti(0, 100), si(0, 2))));
+        assert!(berth_occupancy.is_free(&rect(ti(0, 100), si(5, 10))));
 
         // Times outside [5,10) always free within [2,5)
-        assert!(berth_occupancy.is_free(ti(0, 5), si(2, 5)));
-        assert!(berth_occupancy.is_free(ti(10, 20), si(2, 5)));
+        assert!(berth_occupancy.is_free(&rect(ti(0, 5), si(2, 5))));
+        assert!(berth_occupancy.is_free(&rect(ti(10, 20), si(2, 5))));
     }
 
     #[test]
@@ -2959,19 +2034,19 @@ mod tests {
         let mut berth_occupancy = BO::new(quay_length);
 
         // Empty time: [3,3)
-        berth_occupancy.occupy(ti(3, 3), si(2, 4));
+        berth_occupancy.occupy(&rect(ti(3, 3), si(2, 4)));
         assert_eq!(berth_occupancy.time_event_count(), 1);
 
         // Empty space: [6,6)
-        berth_occupancy.occupy(ti(0, 5), si(6, 6));
+        berth_occupancy.occupy(&rect(ti(0, 5), si(6, 6)));
         assert_eq!(
             berth_occupancy.time_event_count(),
-            2,
-            "split_at(t0) still occurs"
+            1,
+            "empty space should be a no-op"
         );
 
         // But no mutation in the snapshot at t=0
-        assert!(berth_occupancy.is_free(ti(0, 5), si(0, 10)));
+        assert!(berth_occupancy.is_free(&rect(ti(0, 5), si(0, 10))));
     }
 
     #[test]
@@ -2979,16 +2054,16 @@ mod tests {
         let quay_length = len(10);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(ti(5, 12), si(2, 4));
-        berth_occupancy.occupy(ti(8, 15), si(1, 3));
+        berth_occupancy.occupy(&rect(ti(5, 12), si(2, 4)));
+        berth_occupancy.occupy(&rect(ti(8, 15), si(1, 3)));
 
         // boundaries: 0,5,8,12,15
         assert_eq!(berth_occupancy.time_event_count(), 5);
 
         // Check a few windows
-        assert!(berth_occupancy.is_occupied(ti(6, 7), si(2, 4))); // first occupy
-        assert!(berth_occupancy.is_occupied(ti(9, 11), si(1, 3))); // overlap of both
-        assert!(berth_occupancy.is_free(ti(12, 15), si(3, 10))); // free region in space
+        assert!(berth_occupancy.is_occupied(&rect(ti(6, 7), si(2, 4)))); // first occupy
+        assert!(berth_occupancy.is_occupied(&rect(ti(9, 11), si(1, 3)))); // overlap of both
+        assert!(berth_occupancy.is_free(&rect(ti(12, 15), si(3, 10)))); // free region in space
     }
 
     #[test]
@@ -2996,13 +2071,13 @@ mod tests {
         let quay_length = len(10);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(ti(5, 10), si(2, 5));
-        berth_occupancy.free(ti(7, 9), si(3, 4));
+        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5)));
+        berth_occupancy.free(&rect(ti(7, 9), si(3, 4)));
 
         // [7,9) now has [3,4) free but [2,3) and [4,5) still occupied
-        assert!(berth_occupancy.is_occupied(ti(7, 9), si(2, 3)));
-        assert!(berth_occupancy.is_free(ti(7, 9), si(3, 4)));
-        assert!(berth_occupancy.is_occupied(ti(7, 9), si(4, 5)));
+        assert!(berth_occupancy.is_occupied(&rect(ti(7, 9), si(2, 3))));
+        assert!(berth_occupancy.is_free(&rect(ti(7, 9), si(3, 4))));
+        assert!(berth_occupancy.is_occupied(&rect(ti(7, 9), si(4, 5))));
     }
 
     #[test]
@@ -3010,12 +2085,12 @@ mod tests {
         let quay_length = len(10);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(ti(5, 10), si(2, 5));
+        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5)));
 
         // Query [4,6): must consider predecessor of 4 (t=0) and key 5 in (4,6)
         // Since at t=5 it becomes occupied, overall "is_free" must be false.
-        assert!(!berth_occupancy.is_free(ti(4, 6), si(2, 5)));
-        assert!(berth_occupancy.is_occupied(ti(4, 6), si(2, 5)));
+        assert!(!berth_occupancy.is_free(&rect(ti(4, 6), si(2, 5))));
+        assert!(berth_occupancy.is_occupied(&rect(ti(4, 6), si(2, 5))));
     }
 
     #[test]
@@ -3024,7 +2099,7 @@ mod tests {
         let mut berth_occupancy = BO::new(quay_length);
 
         // Occupy [5,10):[2,5)
-        berth_occupancy.occupy(ti(5, 10), si(2, 5));
+        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5)));
 
         // For search_space [0,10), required >= 2
         let required_length = len(2);
@@ -3032,7 +2107,7 @@ mod tests {
 
         let mut collected_slices: Vec<(T, Vec<(usize, usize)>)> = Vec::new();
         for (start_time, free_intervals_iterator) in
-            berth_occupancy.iter_free_per_slice(ti(0, 10), required_length, search_interval)
+            berth_occupancy.iter_slice_free_runs(ti(0, 10), required_length, search_interval)
         {
             let mut intervals: Vec<(usize, usize)> = free_intervals_iterator
                 .map(|interval| (interval.start().value(), interval.end().value()))
@@ -3060,17 +2135,17 @@ mod tests {
         let quay_length = len(16);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(ti(10, 20), si(4, 12));
+        berth_occupancy.occupy(&rect(ti(10, 20), si(4, 12)));
         let events_after_first = berth_occupancy.time_event_count();
 
-        berth_occupancy.occupy(ti(10, 20), si(4, 12));
+        berth_occupancy.occupy(&rect(ti(10, 20), si(4, 12)));
         assert_eq!(
             berth_occupancy.time_event_count(),
             events_after_first,
             "idempotent occupy should not add events"
         );
 
-        assert!(berth_occupancy.is_occupied(ti(10, 20), si(4, 12)));
+        assert!(berth_occupancy.is_occupied(&rect(ti(10, 20), si(4, 12))));
     }
 
     #[test]
@@ -3078,17 +2153,17 @@ mod tests {
         let quay_length = len(16);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(ti(10, 20), si(4, 12));
-        berth_occupancy.free(ti(10, 20), si(4, 12));
+        berth_occupancy.occupy(&rect(ti(10, 20), si(4, 12)));
+        berth_occupancy.free(&rect(ti(10, 20), si(4, 12)));
         let events_after_first = berth_occupancy.time_event_count();
 
-        berth_occupancy.free(ti(10, 20), si(4, 12));
+        berth_occupancy.free(&rect(ti(10, 20), si(4, 12)));
         assert_eq!(
             berth_occupancy.time_event_count(),
             events_after_first,
             "idempotent free should not add events"
         );
-        assert!(berth_occupancy.is_free(ti(0, 100), si(0, 16)));
+        assert!(berth_occupancy.is_free(&rect(ti(0, 100), si(0, 16))));
     }
 
     #[test]
@@ -3097,11 +2172,11 @@ mod tests {
         let mut berth_occupancy = BO::new(quay_length);
 
         // Occupy [2,5) left, then [5,7) right, on same space
-        berth_occupancy.occupy(ti(2, 5), si(3, 6));
-        berth_occupancy.occupy(ti(5, 7), si(3, 6));
+        berth_occupancy.occupy(&rect(ti(2, 5), si(3, 6)));
+        berth_occupancy.occupy(&rect(ti(5, 7), si(3, 6)));
 
         // At t=5 they just touch; occupancy should be continuous across [2,7)
-        assert!(berth_occupancy.is_occupied(ti(2, 7), si(3, 6)));
+        assert!(berth_occupancy.is_occupied(&rect(ti(2, 7), si(3, 6))));
         // Boundaries: 0,2,5,7
         assert_eq!(berth_occupancy.time_event_count(), 4);
     }
@@ -3111,14 +2186,14 @@ mod tests {
         let quay_length = len(8);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(ti(3, 6), si(2, 4));
+        berth_occupancy.occupy(&rect(ti(3, 6), si(2, 4)));
         // Now revert with two frees that exactly cancel
-        berth_occupancy.free(ti(3, 4), si(2, 4));
-        berth_occupancy.free(ti(4, 6), si(2, 4));
+        berth_occupancy.free(&rect(ti(3, 4), si(2, 4)));
+        berth_occupancy.free(&rect(ti(4, 6), si(2, 4)));
 
         // Should fully coalesce back to one event
         assert_eq!(berth_occupancy.time_event_count(), 1);
-        assert!(berth_occupancy.is_free(ti(0, 10), si(0, 8)));
+        assert!(berth_occupancy.is_free(&rect(ti(0, 10), si(0, 8))));
     }
 
     #[test]
@@ -3126,7 +2201,7 @@ mod tests {
         let quay_length = len(6);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(ti(2, 4), si(1, 3));
+        berth_occupancy.occupy(&rect(ti(2, 4), si(1, 3)));
 
         // snapshot before 2: free
         {
@@ -3169,7 +2244,7 @@ mod tests {
         // Create additional timeline keys at 5 and 6 without affecting the searched bounds.
         let quay_length = len(10);
         let mut berth = BO::new(quay_length);
-        berth.occupy(ti(5, 6), si(9, 10)); // creates keys 5 and 6
+        berth.occupy(&rect(ti(5, 6), si(9, 10))); // creates keys 5 and 6
 
         let items = collect_free_iter(
             &berth,
@@ -3190,8 +2265,8 @@ mod tests {
         // Intersection across [5,8) => runs [0,2) and [9,10).
         let quay_length = len(10);
         let mut berth = BO::new(quay_length);
-        berth.occupy(ti(5, 9), si(2, 6)); // key at 5
-        berth.occupy(ti(7, 12), si(6, 9)); // key at 7
+        berth.occupy(&rect(ti(5, 9), si(2, 6))); // key at 5
+        berth.occupy(&rect(ti(7, 12), si(6, 9))); // key at 7
 
         let items = collect_free_iter(
             &berth,
@@ -3244,14 +2319,19 @@ mod tests {
         let quay_length = len(10);
         let mut berth = BO::new(quay_length);
         // Occupied at t=5 only in [2,6)
-        berth.occupy(ti(5, 6), si(2, 6));
+        berth.occupy(&rect(ti(5, 6), si(2, 6)));
 
         // Keys: 0 (origin), 5, 6
         // With dur=0, we’ll check predecessor snapshot for each candidate start:
         // start=0 → free everywhere; start=5 → [2,6) blocked; start=6 → free everywhere again.
         let items: Vec<_> = berth
             .iter_free(ti(0, 6), TimeDelta::new(0), len(2), si(0, 10))
-            .map(|(t, s)| (t.value(), (s.start().value(), s.end().value())))
+            .map(|f| {
+                (
+                    f.start_time().value(),
+                    (f.space().start().value(), f.space().end().value()),
+                )
+            })
             .collect();
 
         // Expect runs at t=0 and t=6, none at t=5 for [2,6).
@@ -3385,19 +2465,19 @@ mod tests {
         let mut berth = BO::new(quay_length);
 
         // Base: occupy [5,10):[2,6)
-        berth.occupy(ti(5, 10), si(2, 6));
+        berth.occupy(&rect(ti(5, 10), si(2, 6)));
 
         let mut overlay = BerthOccupancyOverlay::new(&berth);
 
         // At t=5, override a subrange as free via overlay
         overlay.add_free(tp(5), si(2, 4));
-        assert!(overlay.is_free(ti(5, 10), si(2, 4)));
-        assert!(overlay.is_occupied(ti(5, 10), si(4, 6))); // still blocked remainder
+        assert!(overlay.is_free(&rect(ti(5, 10), si(2, 4))));
+        assert!(overlay.is_occupied(&rect(ti(5, 10), si(4, 6)))); // still blocked remainder
 
         // Add an overlay-occupy on otherwise-free area at t=0
         overlay.add_occupy(tp(0), si(0, 1));
-        assert!(overlay.is_occupied(ti(0, 5), si(0, 1)));
-        assert!(overlay.is_free(ti(0, 5), si(1, 10)));
+        assert!(overlay.is_occupied(&rect(ti(0, 5), si(0, 1))));
+        assert!(overlay.is_free(&rect(ti(0, 5), si(1, 10))));
     }
 
     #[test]
@@ -3406,17 +2486,17 @@ mod tests {
         let mut berth = BO::new(quay_length);
 
         // Create a base boundary at t=5 by occupying [2,6)
-        berth.occupy(ti(5, 7), si(2, 6));
+        berth.occupy(&rect(ti(5, 7), si(2, 6)));
 
         let mut overlay = BerthOccupancyOverlay::new(&berth);
 
         // Free [4,5) across [4,6): will place free at predecessor of 4 (t=0) and at timepoint 5
-        overlay.free(ti(4, 6), si(4, 5));
-        assert!(overlay.is_free(ti(4, 6), si(4, 5)));
+        overlay.free(&rect(ti(4, 6), si(4, 5)));
+        assert!(overlay.is_free(&rect(ti(4, 6), si(4, 5))));
 
         // Undo the same free; should revert to base (occupied at t=5 in [2,6))
-        overlay.undo_free(ti(4, 6), si(4, 5));
-        assert!(overlay.is_occupied(ti(5, 6), si(4, 5)));
+        overlay.undo_free(&rect(ti(4, 6), si(4, 5)));
+        assert!(overlay.is_occupied(&rect(ti(5, 6), si(4, 5))));
     }
 
     #[test]
@@ -3429,7 +2509,7 @@ mod tests {
     #[test]
     fn slice_predecessor_equal_at_key() {
         let mut berth = BO::new(len(10));
-        berth.occupy(ti(5, 7), si(2, 3)); // keys: 0,5,7
+        berth.occupy(&rect(ti(5, 7), si(2, 3))); // keys: 0,5,7
         assert_eq!(berth.slice_predecessor_timepoint(tp(5)), Some(tp(5)));
         assert_eq!(berth.slice_predecessor_timepoint(tp(6)), Some(tp(5)));
         assert_eq!(berth.slice_predecessor_timepoint(tp(7)), Some(tp(7)));
@@ -3438,7 +2518,7 @@ mod tests {
     #[test]
     fn iter_timepoints_is_strictly_inside_half_open() {
         let mut berth = BO::new(len(10));
-        berth.occupy(ti(5, 10), si(0, 1)); // keys 0,5,10
+        berth.occupy(&rect(ti(5, 10), si(0, 1))); // keys 0,5,10
         let v: Vec<_> = berth
             .iter_timepoints(ti(5, 10))
             .map(|t| t.value())
@@ -3457,8 +2537,8 @@ mod tests {
     #[test]
     fn occupy_free_coalesce_chain_three_equal_states() {
         let mut berth = BO::new(len(10));
-        berth.occupy(ti(3, 7), si(1, 2)); // 0,3,7
-        berth.free(ti(3, 7), si(1, 2)); // should coalesce back to 0 only
+        berth.occupy(&rect(ti(3, 7), si(1, 2))); // 0,3,7
+        berth.free(&rect(ti(3, 7), si(1, 2))); // should coalesce back to 0 only
         assert_eq!(berth.time_event_count(), 1);
     }
 
@@ -3468,11 +2548,11 @@ mod tests {
         let berth = BO::new(quay_length);
         let mut overlay = BerthOccupancyOverlay::new(&berth);
 
-        overlay.occupy(ti(2, 6), si(3, 5));
-        assert!(overlay.is_occupied(ti(3, 5), si(3, 5)));
+        overlay.occupy(&rect(ti(2, 6), si(3, 5)));
+        assert!(overlay.is_occupied(&rect(ti(3, 5), si(3, 5))));
 
-        overlay.undo_occupy(ti(2, 6), si(3, 5));
-        assert!(overlay.is_free(ti(0, 10), si(0, 10)));
+        overlay.undo_occupy(&rect(ti(2, 6), si(3, 5)));
+        assert!(overlay.is_free(&rect(ti(0, 10), si(0, 10))));
     }
 
     #[test]
@@ -3499,7 +2579,7 @@ mod tests {
     fn overlay_iter_free_respects_overlay_through_duration() {
         // Base: occupy [5,9):[2,6). We'll "free" that space via overlay for the slices we care about.
         let mut berth = BO::new(len(10));
-        berth.occupy(ti(5, 9), si(2, 6));
+        berth.occupy(&rect(ti(5, 9), si(2, 6)));
 
         let mut overlay = BerthOccupancyOverlay::new(&berth);
 
@@ -3510,7 +2590,12 @@ mod tests {
 
         let items: Vec<_> = overlay
             .iter_free(ti(5, 9), TimeDelta::new(3), len(2), si(0, 10))
-            .map(|(t, s)| (t.value(), (s.start().value(), s.end().value())))
+            .map(|f| {
+                (
+                    f.start_time().value(),
+                    (f.space().start().value(), f.space().end().value()),
+                )
+            })
             .collect();
 
         // At start=5 there should be some free interval that *covers* [2,6) (it may be larger, e.g. [0,10))
@@ -3575,10 +2660,15 @@ mod tests {
     fn free_iter_zero_duration_yields_window_end_only_if_key_exists() {
         let mut berth = BO::new(len(10));
         // Ensure a key at end
-        berth.occupy(ti(0, 5), si(0, 1)); // keys 0,5
+        berth.occupy(&rect(ti(0, 5), si(0, 1))); // keys 0,5
         let items: Vec<_> = berth
             .iter_free(ti(0, 5), TimeDelta::new(0), len(1), si(0, 10))
-            .map(|(t, s)| (t.value(), (s.start().value(), s.end().value())))
+            .map(|f| {
+                (
+                    f.start_time().value(),
+                    (f.space().start().value(), f.space().end().value()),
+                )
+            })
             .collect();
         // both start=0 and end=5 should appear (end because a key exists at 5)
         assert!(items.iter().any(|(t, _)| *t == 0));
@@ -3643,7 +2733,7 @@ mod tests {
         // Duration 2 forces candidate starts at 0 and 7 (overlay key)
         let items: Vec<_> = ov
             .iter_free(ti(0, 10), TimeDelta::new(2), len(1), si(0, 10))
-            .map(|(t, _)| t.value())
+            .map(|f| f.start_time().value())
             .collect();
         assert!(items.contains(&0));
         assert!(items.contains(&7));
@@ -3664,10 +2754,10 @@ mod tests {
     fn overlay_changes_at_start_are_applied_when_pred_differs() {
         type BO = BerthOccupancy<i64, BooleanVecQuay>;
         let mut berth = BO::new(SpaceLength::new(10)); // fully free
-        berth.occupy(
+        berth.occupy(&rect(
             TimeInterval::new(TimePoint::new(7), TimePoint::new(9)),
             SpaceInterval::new(SpacePosition::new(2), SpacePosition::new(6)),
-        );
+        ));
         // keys now: 0,7,9
 
         let mut ov = BerthOccupancyOverlay::new(&berth);
@@ -3691,9 +2781,9 @@ mod tests {
             .collect();
 
         assert!(
-            items
-                .iter()
-                .any(|(t, s)| t.value() == 5 && s.start().value() <= 2 && s.end().value() >= 6),
+            items.iter().any(|f| f.start_time().value() == 5
+                && f.space().start().value() <= 2
+                && f.space().end().value() >= 6),
             "Expected overlay free at `start` to apply to the initial slice"
         );
     }

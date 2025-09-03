@@ -28,7 +28,7 @@ use crate::{
     quay::QuayRead,
 };
 use dock_alloc_core::domain::{SpaceInterval, TimeInterval};
-use dock_alloc_model::{MoveableRequest, Problem};
+use dock_alloc_model::{Assignment, MoveableRequest, Problem};
 use num_traits::{PrimInt, Signed};
 
 pub struct ProposeCtx<'base, T, C, Q>
@@ -101,6 +101,29 @@ impl<'brand, T: PrimInt + Signed> FreeSlot<'brand, T> {
 
     pub fn time(&self) -> TimeInterval<T> {
         self.time
+    }
+}
+
+impl<'brand, T, C> From<&Assignment<T, C>> for FreeSlot<'brand, T>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    fn from(assignment: &Assignment<T, C>) -> Self {
+        // Time
+        let start_time = assignment.start_time();
+        let processing_duration = assignment.request().processing_duration();
+        let end_time = start_time + processing_duration;
+
+        // Space
+        let space = assignment.start_position();
+        let length = assignment.request().length();
+        let end_space = space + length;
+
+        FreeSlot::new(
+            SpaceInterval::new(space, end_space),
+            TimeInterval::new(start_time, end_time),
+        )
     }
 }
 
@@ -191,7 +214,12 @@ where
     ) -> Result<FreeSlot<'brand, T>, StageError> {
         let free: FreeSlot<'brand, T> = assignment.into();
         let _ = self.assignment_overlay.uncommit_assignment(assignment)?;
-        self.berth_overlay.free(free.time(), free.space());
+        //self.berth_overlay.free_at(
+        //    assignment.start_time(),
+        //    assignment.processing_duration(),
+        //    assignment.start_position(),
+        //    assignment.length(),
+        //);
         Ok(free)
     }
 }
