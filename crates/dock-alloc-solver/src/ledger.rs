@@ -593,6 +593,13 @@ where
             .ok_or(LedgerError::NotCommitted)
     }
 
+    pub fn uncommit_assignment(
+        &mut self,
+        assignment: &'brand MovableAssignment<'brand, T, C>,
+    ) -> Result<MovableAssignment<'brand, T, C>, LedgerError> {
+        self.uncommit(assignment.handle())
+    }
+
     /// Returns an iterator over handles for all fixed (pre-assigned) assignments.
     ///
     /// Fixed assignments come from the problem definition and cannot be modified.
@@ -1139,6 +1146,13 @@ where
 
         self.staged_uncommits.insert(id, mh);
         Ok(ma)
+    }
+
+    pub fn uncommit_assignment(
+        &mut self,
+        assignment: &'brand MovableAssignment<'brand, T, C>,
+    ) -> Result<MovableAssignment<'brand, T, C>, StageError> {
+        self.uncommit(assignment.handle())
     }
 
     /// Returns an iterator over handles for all fixed assignments.

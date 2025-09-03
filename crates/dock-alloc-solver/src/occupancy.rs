@@ -28,6 +28,7 @@ use dock_alloc_model::Problem;
 use num_traits::{PrimInt, Signed, Zero};
 use std::collections::BTreeMap;
 use std::iter::{Copied, Peekable};
+use std::marker::PhantomData;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 
 /// A time-aware berth occupancy tracker that manages space allocation over time.
@@ -1755,12 +1756,12 @@ impl<'a, T: PrimInt + Signed> Iterator for KeysUnion<'a, T> {
 /// has modifications. Yields `SpaceInterval`s that are free in the base berth state,
 /// remain free after applying all overlay modifications, meet the minimum length
 /// requirement, and fall within the specified search bounds.
-pub struct IntersectIter<'a, T, Q>
+pub struct IntersectIter<'brand, 'a, T, Q>
 where
     T: PrimInt + Signed,
     Q: QuayRead,
 {
-    overlay: &'a BerthOccupancyOverlay<'a, T, Q>,
+    overlay: &'a BerthOccupancyOverlay<'brand, 'a, T, Q>,
     required: SpaceLength,
     bounds: SpaceInterval,
     computed: bool,
@@ -1774,13 +1775,13 @@ where
     sub_buf: SpaceIntervalSet,
 }
 
-impl<'a, T, Q> IntersectIter<'a, T, Q>
+impl<'brand, 'a, T, Q> IntersectIter<'brand, 'a, T, Q>
 where
     T: PrimInt + Signed,
     Q: QuayRead,
 {
     fn new(
-        overlay: &'a BerthOccupancyOverlay<'a, T, Q>,
+        overlay: &'a BerthOccupancyOverlay<'brand, 'a, T, Q>,
         required: SpaceLength,
         bounds: SpaceInterval,
     ) -> Self {
@@ -1867,7 +1868,7 @@ where
     }
 }
 
-impl<'a, T, Q> Iterator for IntersectIter<'a, T, Q>
+impl<'brand, 'a, T, Q> Iterator for IntersectIter<'brand, 'a, T, Q>
 where
     T: PrimInt + Signed,
     Q: QuayRead,
@@ -1922,7 +1923,7 @@ where
 /// ));
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BerthOccupancyOverlay<'a, T, Q>
+pub struct BerthOccupancyOverlay<'brand, 'a, T, Q>
 where
     T: PrimInt + Signed,
     Q: QuayRead,
@@ -1930,9 +1931,10 @@ where
     berth_occupancy: &'a BerthOccupancy<T, Q>,
     free_by_time: BTreeMap<TimePoint<T>, SpaceIntervalSet>,
     occupied_by_time: BTreeMap<TimePoint<T>, SpaceIntervalSet>,
+    _brand: PhantomData<&'brand ()>,
 }
 
-impl<'a, T, Q> BerthOccupancyOverlay<'a, T, Q>
+impl<'brand, 'a, T, Q> BerthOccupancyOverlay<'brand, 'a, T, Q>
 where
     T: PrimInt + Signed,
     Q: QuayRead,
@@ -1958,6 +1960,7 @@ where
             berth_occupancy,
             free_by_time: BTreeMap::new(),
             occupied_by_time: BTreeMap::new(),
+            _brand: PhantomData,
         }
     }
 
@@ -2435,7 +2438,7 @@ where
         duration: TimeDelta<T>,
         required_space: SpaceLength,
         space_window: SpaceInterval,
-    ) -> OverlayFreeIter<'a, T, Q> {
+    ) -> OverlayFreeIter<'brand, 'a, T, Q> {
         OverlayFreeIter::new(self, time_window, duration, required_space, space_window)
     }
 
@@ -2465,7 +2468,7 @@ where
         &self,
         required_length: SpaceLength,
         search_space: SpaceInterval,
-    ) -> IntersectIter<'_, T, Q> {
+    ) -> IntersectIter<'brand, '_, T, Q> {
         IntersectIter::new(self, required_length, search_space)
     }
 
@@ -2519,12 +2522,12 @@ where
 /// of a given duration can be scheduled, considering both base berth state and
 /// overlay modifications. Yields tuples of `(start_time, space_interval)`
 /// representing valid scheduling slots.
-pub struct OverlayFreeIter<'a, T, Q>
+pub struct OverlayFreeIter<'brand, 'a, T, Q>
 where
     T: PrimInt + Signed + Copy,
     Q: QuayRead,
 {
-    overlay: &'a BerthOccupancyOverlay<'a, T, Q>,
+    overlay: &'a BerthOccupancyOverlay<'brand, 'a, T, Q>,
     time_window: TimeInterval<T>,
     duration: TimeDelta<T>,
     required: SpaceLength,
@@ -2538,14 +2541,14 @@ where
     emit_idx: usize,
 }
 
-impl<'a, T, Q> OverlayFreeIter<'a, T, Q>
+impl<'brand, 'a, T, Q> OverlayFreeIter<'brand, 'a, T, Q>
 where
     T: PrimInt + Signed + Copy,
     Q: QuayRead,
 {
     #[inline]
     fn new(
-        overlay: &'a BerthOccupancyOverlay<'a, T, Q>,
+        overlay: &'a BerthOccupancyOverlay<'brand, 'a, T, Q>,
         time_window: TimeInterval<T>,
         duration: TimeDelta<T>,
         required: SpaceLength,
@@ -2796,7 +2799,7 @@ where
     }
 }
 
-impl<'a, T, Q> Iterator for OverlayFreeIter<'a, T, Q>
+impl<'brand, 'a, T, Q> Iterator for OverlayFreeIter<'brand, 'a, T, Q>
 where
     T: PrimInt + Signed + Copy,
     Q: QuayRead,

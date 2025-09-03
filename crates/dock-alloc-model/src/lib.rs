@@ -262,10 +262,10 @@ impl<T: PrimInt + Signed> TimeWindowTooShortError<T> {
     ///     TimeDelta::new(10),
     ///     window
     /// );
-    /// assert_eq!(error.time_window(), &window);
+    /// assert_eq!(error.time_window(), window);
     /// ```
-    pub fn time_window(&self) -> &TimeInterval<T> {
-        &self.window
+    pub fn time_window(&self) -> TimeInterval<T> {
+        self.window
     }
 }
 
@@ -387,10 +387,10 @@ impl SpaceWindowTooShortError {
     ///     SpaceLength::new(20),
     ///     window
     /// );
-    /// assert_eq!(error.space_window(), &window);
+    /// assert_eq!(error.space_window(), window);
     /// ```
-    pub fn space_window(&self) -> &SpaceInterval {
-        &self.window
+    pub fn space_window(&self) -> SpaceInterval {
+        self.window
     }
 }
 
@@ -785,11 +785,11 @@ where
     /// #     window, SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
     /// # ).unwrap();
     ///
-    /// assert_eq!(request.feasible_time_window(), &window);
+    /// assert_eq!(request.feasible_time_window(), window);
     /// ```
     #[inline]
-    pub fn feasible_time_window(&self) -> &TimeInterval<T> {
-        &self.feasible_time_window
+    pub fn feasible_time_window(&self) -> TimeInterval<T> {
+        self.feasible_time_window
     }
 
     /// Returns a reference to the feasible space window for this request.
@@ -808,11 +808,11 @@ where
     /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)), window
     /// # ).unwrap();
     ///
-    /// assert_eq!(request.feasible_space_window(), &window);
+    /// assert_eq!(request.feasible_space_window(), window);
     /// ```
     #[inline]
-    pub fn feasible_space_window(&self) -> &SpaceInterval {
-        &self.feasible_space_window
+    pub fn feasible_space_window(&self) -> SpaceInterval {
+        self.feasible_space_window
     }
 }
 
@@ -1300,10 +1300,10 @@ impl<T: PrimInt + Signed> AssignmentOutsideTimeWindowError<T> {
     ///     window,
     ///     TimeInterval::new(TimePoint::new(8), TimePoint::new(15))
     /// );
-    /// assert_eq!(error.time_window(), &window);
+    /// assert_eq!(error.time_window(), window);
     /// ```
-    pub fn time_window(&self) -> &TimeInterval<T> {
-        &self.time_window
+    pub fn time_window(&self) -> TimeInterval<T> {
+        self.time_window
     }
 
     /// Returns a reference to the assigned time interval that caused the error.
@@ -1320,10 +1320,10 @@ impl<T: PrimInt + Signed> AssignmentOutsideTimeWindowError<T> {
     ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
     ///     assigned
     /// );
-    /// assert_eq!(error.assigned_interval(), &assigned);
+    /// assert_eq!(error.assigned_interval(), assigned);
     /// ```
-    pub fn assigned_interval(&self) -> &TimeInterval<T> {
-        &self.assigned_interval
+    pub fn assigned_interval(&self) -> TimeInterval<T> {
+        self.assigned_interval
     }
 }
 
@@ -1433,10 +1433,10 @@ impl AssignmentOutsideSpaceWindowError {
     ///     window,
     ///     SpaceInterval::new(SpacePosition::new(25), SpacePosition::new(35))
     /// );
-    /// assert_eq!(error.space_window(), &window);
+    /// assert_eq!(error.space_window(), window);
     /// ```
-    pub fn space_window(&self) -> &SpaceInterval {
-        &self.space_window
+    pub fn space_window(&self) -> SpaceInterval {
+        self.space_window
     }
 
     /// Returns a reference to the assigned space interval that caused the error.
@@ -1453,10 +1453,10 @@ impl AssignmentOutsideSpaceWindowError {
     ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(30)),
     ///     assigned
     /// );
-    /// assert_eq!(error.assigned_interval(), &assigned);
+    /// assert_eq!(error.assigned_interval(), assigned);
     /// ```
-    pub fn assigned_interval(&self) -> &SpaceInterval {
-        &self.assigned_interval
+    pub fn assigned_interval(&self) -> SpaceInterval {
+        self.assigned_interval
     }
 }
 
@@ -1578,10 +1578,10 @@ impl AssignmentExceedsQuayError {
     ///     SpaceLength::new(100),
     ///     assigned
     /// );
-    /// assert_eq!(error.assigned_interval(), &assigned);
+    /// assert_eq!(error.assigned_interval(), assigned);
     /// ```
-    pub fn assigned_interval(&self) -> &SpaceInterval {
-        &self.assigned_interval
+    pub fn assigned_interval(&self) -> SpaceInterval {
+        self.assigned_interval
     }
 }
 
@@ -2137,14 +2137,14 @@ where
         let tw = r.feasible_time_window();
         if !tw.contains_interval(&tspan) {
             return Err(ProblemBuildError::AssignmentOutsideTimeWindow(
-                AssignmentOutsideTimeWindowError::new(id, *tw, tspan),
+                AssignmentOutsideTimeWindowError::new(id, tw, tspan),
             ));
         }
 
         let sw = r.feasible_space_window();
         if !sw.contains_interval(&sspan) {
             return Err(ProblemBuildError::AssignmentOutsideSpaceWindow(
-                AssignmentOutsideSpaceWindowError::new(id, *sw, sspan),
+                AssignmentOutsideSpaceWindowError::new(id, sw, sspan),
             ));
         }
 
