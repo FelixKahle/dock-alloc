@@ -32,7 +32,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::hash::Hash;
 use std::iter::FusedIterator;
-use std::ops::{Add, Div, Sub};
+use std::ops::{Add, Div, RangeBounds, Sub};
 
 /// A half-open interval `[start, end)`.
 ///
@@ -626,6 +626,21 @@ impl<T: Default> Default for Interval<T> {
             start_inclusive: T::default(),
             end_exclusive: T::default(),
         }
+    }
+}
+
+impl<T> RangeBounds<T> for Interval<T>
+where
+    T: PartialOrd + Copy,
+{
+    #[inline]
+    fn start_bound(&self) -> std::ops::Bound<&T> {
+        std::ops::Bound::Included(&self.start_inclusive)
+    }
+
+    #[inline]
+    fn end_bound(&self) -> std::ops::Bound<&T> {
+        std::ops::Bound::Excluded(&self.end_exclusive)
     }
 }
 

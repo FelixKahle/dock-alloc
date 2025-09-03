@@ -22,6 +22,7 @@
 use crate::domain::SpaceTimeRectangle;
 use crate::intervalset::IntervalSet;
 use crate::quay::{Quay, QuayRead, QuayWrite};
+use crate::timeline::Timeline;
 use dock_alloc_core::domain::{
     SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
 };
@@ -31,7 +32,7 @@ use num_traits::{PrimInt, Signed, Zero};
 use std::collections::BTreeMap;
 use std::iter::{Copied, Peekable};
 use std::marker::PhantomData;
-use std::ops::Bound::{self, Excluded, Included, Unbounded};
+use std::ops::Bound::{Excluded, Unbounded};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TimeSliceRef<'a, T, Q>
@@ -62,37 +63,13 @@ where
     }
 }
 
-type TimeKeyRange<T> = (Bound<TimePoint<T>>, Bound<TimePoint<T>>);
-
-#[inline]
-fn time_key_range<T: PrimInt + Signed>(start: TimePoint<T>, end: TimePoint<T>) -> TimeKeyRange<T> {
-    (Bound::Included(start), Bound::Excluded(end))
-}
-
-fn strict_predecessor_key<T: PrimInt + Signed, Q>(
-    map: &BTreeMap<TimePoint<T>, Q>,
-    t: TimePoint<T>,
-) -> Option<TimePoint<T>> {
-    map.range(..t).next_back().map(|(tp, _)| *tp)
-}
-
-#[inline]
-fn first_key_after<T: PrimInt + Signed, Q>(
-    map: &BTreeMap<TimePoint<T>, Q>,
-    t: TimePoint<T>,
-) -> Option<TimePoint<T>> {
-    map.range((Excluded(t), Unbounded))
-        .next()
-        .map(|(tp, _)| *tp)
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BerthOccupancy<T, Q>
 where
     T: PrimInt + Signed,
 {
     quay_length: SpaceLength,
-    timeline: BTreeMap<TimePoint<T>, Q>,
+    timeline: Timeline<TimePoint<T>, Q>,
 }
 
 impl<T, Q> BerthOccupancy<T, Q>
@@ -102,11 +79,11 @@ where
 {
     #[inline]
     pub fn new(quay_length: SpaceLength) -> Self {
-        let mut timeline = BTreeMap::new();
-        timeline.insert(TimePoint::new(T::zero()), Q::new(quay_length, true));
+        let origin = TimePoint::new(T::zero());
+        let q0 = Q::new(quay_length, true);
         Self {
             quay_length,
-            timeline,
+            timeline: Timeline::new(origin, q0),
         }
     }
 
@@ -131,17 +108,13 @@ where
     }
 
     #[inline]
-    pub fn snapshot_at(&self, time_point: TimePoint<T>) -> Option<&Q> {
-        self.timeline
-            .range(..=time_point)
-            .next_back()
-            .map(|(_, quay_state)| quay_state)
+    pub fn snapshot_at(&self, t: TimePoint<T>) -> Option<&Q> {
+        self.timeline.at(t)
     }
 
     #[inline]
-    pub fn snapshot_at_mut(&mut self, time_point: TimePoint<T>) -> Option<&mut Q> {
-        self.split_at(time_point);
-        self.timeline.get_mut(&time_point)
+    pub fn snapshot_at_mut(&mut self, t: TimePoint<T>) -> Option<&mut Q> {
+        self.timeline.ensure_key(t)
     }
 
     pub fn is_free(&self, rect: &SpaceTimeRectangle<T>) -> bool {
@@ -162,12 +135,12 @@ where
 
     pub fn iter_slice_free_runs<'a>(
         &'a self,
-        time_interval: TimeInterval<T>,
+        ti: TimeInterval<T>,
         required_space: SpaceLength,
         search_space: SpaceInterval,
     ) -> impl Iterator<Item = (TimePoint<T>, <Q as QuayRead>::FreeIter<'a>)> + 'a {
         debug_assert!(self.space_within_quay(search_space));
-        self.slices_covering(time_interval).map(move |s| {
+        self.slices_covering(ti).map(move |s| {
             (
                 s.time(),
                 s.quay().iter_free_intervals(required_space, search_space),
@@ -176,24 +149,18 @@ where
     }
 
     #[inline]
-    pub fn slice_predecessor_timepoint(&self, time_point: TimePoint<T>) -> Option<TimePoint<T>> {
-        self.timeline
-            .range(..=time_point)
-            .next_back()
-            .map(|(tp, _)| *tp)
+    pub fn slice_predecessor_timepoint(&self, t: TimePoint<T>) -> Option<TimePoint<T>> {
+        self.timeline.prev_key(t)
     }
 
+    /// Interior change keys in (start, end).
     #[inline]
     pub fn iter_timepoints(
         &self,
         interval: TimeInterval<T>,
     ) -> impl Iterator<Item = TimePoint<T>> + '_ {
-        let start = interval.start();
-        let end = interval.end();
-        self.timeline
-            .range((Excluded(start), Unbounded))
-            .take_while(move |(tp, _)| *tp < &end)
-            .map(|(time_key, _)| *time_key)
+        let (start, end) = (interval.start(), interval.end());
+        self.timeline.keys(start..end).filter(move |&k| k > start)
     }
 
     #[inline]
@@ -208,72 +175,11 @@ where
     }
 
     #[inline]
-    pub fn space_within_quay(&self, space_interval: SpaceInterval) -> bool {
-        let quay_bounds = self.quay_space_interval();
-        quay_bounds.contains_interval(&space_interval)
+    pub fn space_within_quay(&self, si: SpaceInterval) -> bool {
+        self.quay_space_interval().contains_interval(&si)
     }
 
-    fn coalesce_range(&mut self, start_time: TimePoint<T>, end_time: TimePoint<T>) {
-        if self.timeline.is_empty() {
-            return;
-        }
-
-        let (left_boundary, right_boundary) =
-            coalesce_brackets(&self.timeline, start_time, end_time);
-
-        // Collect first to avoid borrow invalidation while mutating.
-        let timepoints_in_range: Vec<_> = self
-            .timeline
-            .range((Included(left_boundary), Included(right_boundary)))
-            .map(|(time_point, _)| *time_point)
-            .collect();
-
-        for tp in timepoints_in_range {
-            self.coalesce_at(tp);
-        }
-    }
-
-    fn split_at(&mut self, time_point: TimePoint<T>) {
-        if self.timeline.contains_key(&time_point) {
-            return;
-        }
-        debug_assert!(
-            self.timeline
-                .keys()
-                .next()
-                .is_none_or(|&timepoint| timepoint <= time_point),
-            "split_at called with time_point earlier than origin"
-        );
-        if let Some((_, previous_state)) = self.timeline.range(..=time_point).next_back() {
-            self.timeline.insert(time_point, previous_state.clone());
-        }
-    }
-
-    fn coalesce_at(&mut self, time_point: TimePoint<T>) {
-        let Some(current) = self.timeline.get(&time_point) else {
-            return;
-        };
-
-        let previous_state_is_equal = self
-            .timeline
-            .range(..time_point)
-            .next_back()
-            .is_some_and(|(_, prev)| prev == current);
-
-        let next_state_is_equal_or_none = match self
-            .timeline
-            .range((Excluded(time_point), Unbounded))
-            .next()
-        {
-            None => true,
-            Some((_, next)) => next == current,
-        };
-
-        if previous_state_is_equal && next_state_is_equal_or_none {
-            self.timeline.remove(&time_point);
-        }
-    }
-
+    /// Include the floor at `start` and any change keys in (start, end).
     #[inline]
     pub fn slices_covering(
         &self,
@@ -284,17 +190,22 @@ where
 
         let pred = self
             .timeline
-            .range(..=start)
-            .next_back()
-            .map(|(t, q)| TimeSliceRef { time: *t, quay: q });
+            .floor(start)
+            .map(|(t, q)| TimeSliceRef { time: t, quay: q });
 
         let tail = self
             .timeline
-            .range((Excluded(start), Unbounded))
-            .take_while(move |(t, _)| *t < &end)
+            .raw()
+            .range(start..end)
+            .filter(move |(t, _)| *t > &start)
             .map(|(t, q)| TimeSliceRef { time: *t, quay: q });
 
         pred.into_iter().chain(tail)
+    }
+
+    #[inline]
+    pub fn next_time_key_after(&self, t: TimePoint<T>) -> Option<TimePoint<T>> {
+        self.timeline.next_key(t)
     }
 }
 
@@ -303,66 +214,47 @@ where
     T: PrimInt + Signed,
     Q: QuayRead + QuayWrite + Clone + PartialEq,
 {
+    fn apply_in<F>(&mut self, rect: &SpaceTimeRectangle<T>, mut f: F)
+    where
+        F: FnMut(&mut Q, SpaceInterval),
+    {
+        if rect.is_empty() {
+            return;
+        }
+
+        let ti = rect.time();
+        let si = rect.space();
+        let (start, end) = (ti.start(), ti.end());
+
+        debug_assert!(self.space_within_quay(si));
+
+        // Ensure keys exactly at [start, end)
+        let _ = self.timeline.ensure_key(start);
+        let _ = self.timeline.ensure_key(end);
+
+        // Mutate only inside [start, end)
+        self.timeline.apply_in(start..end, |quay_state| {
+            f(quay_state, si);
+        });
+
+        // Merge equal neighbors around the touched span.
+        self.timeline.coalesce_in(start..end);
+    }
+
+    #[inline]
     pub fn occupy(&mut self, rect: &SpaceTimeRectangle<T>) {
         if rect.is_empty() {
             return;
         }
-
-        let time_interval = rect.time();
-        let space_interval = rect.space();
-        let (start_time, end_time) = (time_interval.start(), time_interval.end());
-
-        debug_assert!(self.space_within_quay(space_interval));
-
-        if self
-            .slices_covering(time_interval)
-            .all(|s| s.quay().check_occupied(space_interval))
-        {
-            return;
-        }
-
-        self.split_at(start_time);
-        self.split_at(end_time);
-
-        for (_, quay_state) in self
-            .timeline
-            .range_mut(time_key_range(start_time, end_time))
-        {
-            quay_state.occupy(space_interval);
-        }
-
-        self.coalesce_range(start_time, end_time);
+        self.apply_in(rect, |q, si| q.occupy(si));
     }
 
+    #[inline]
     pub fn free(&mut self, rect: &SpaceTimeRectangle<T>) {
         if rect.is_empty() {
             return;
         }
-
-        let time_interval = rect.time();
-        let space_interval = rect.space();
-        let (start_time, end_time) = (time_interval.start(), time_interval.end());
-
-        debug_assert!(self.space_within_quay(space_interval));
-
-        if self
-            .slices_covering(time_interval)
-            .all(|s| s.quay().check_free(space_interval))
-        {
-            return;
-        }
-
-        self.split_at(start_time);
-        self.split_at(end_time);
-
-        for (_, quay_state) in self
-            .timeline
-            .range_mut(time_key_range(start_time, end_time))
-        {
-            quay_state.free(space_interval);
-        }
-
-        self.coalesce_range(start_time, end_time);
+        self.apply_in(rect, |q, si| q.free(si));
     }
 }
 
@@ -610,16 +502,13 @@ where
 type SpaceIntervalSet = IntervalSet<SpacePosition>;
 
 #[inline]
-fn next_key_after<T: PrimInt + Signed, Q>(
-    base: &BTreeMap<TimePoint<T>, Q>,
+fn next_key_after<T: PrimInt + Signed, Q: Clone + QuayRead>(
+    berth: &BerthOccupancy<T, Q>,
     overlay_free: &BTreeMap<TimePoint<T>, SpaceIntervalSet>,
     overlay_occ: &BTreeMap<TimePoint<T>, SpaceIntervalSet>,
     after: TimePoint<T>,
 ) -> Option<TimePoint<T>> {
-    let nb = base
-        .range((Excluded(after), Unbounded))
-        .next()
-        .map(|(t, _)| *t);
+    let nb = berth.next_time_key_after(after);
     let nf = overlay_free
         .range((Excluded(after), Unbounded))
         .next()
@@ -628,6 +517,7 @@ fn next_key_after<T: PrimInt + Signed, Q>(
         .range((Excluded(after), Unbounded))
         .next()
         .map(|(t, _)| *t);
+
     match (nb, nf, no) {
         (None, None, None) => None,
         (Some(x), None, None) => Some(x),
@@ -1153,7 +1043,7 @@ where
         let last = self.last_start?;
         let wnd_end = self.time_window.end();
         let next = next_key_after(
-            &self.overlay.berth_occupancy.timeline,
+            self.overlay.berth_occupancy,
             &self.overlay.free_by_time,
             &self.overlay.occupied_by_time,
             last,
@@ -1244,7 +1134,7 @@ where
 
         loop {
             let next_tp = next_key_after(
-                &berth.timeline,
+                berth,
                 &self.overlay.free_by_time,
                 &self.overlay.occupied_by_time,
                 cursor,
@@ -1307,20 +1197,6 @@ where
             }
         }
     }
-}
-
-#[inline]
-fn coalesce_brackets<T, Q>(
-    map: &std::collections::BTreeMap<TimePoint<T>, Q>,
-    start: TimePoint<T>,
-    end: TimePoint<T>,
-) -> (TimePoint<T>, TimePoint<T>)
-where
-    T: PrimInt + Signed + Copy,
-{
-    let left = strict_predecessor_key(map, start).unwrap_or(start);
-    let right = first_key_after(map, end).unwrap_or(end);
-    (left, right)
 }
 
 #[inline]
