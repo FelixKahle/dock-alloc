@@ -2683,8 +2683,6 @@ where
         }
     }
 
-    /// For a given candidate start, build feasible runs at predecessor slice and
-    /// intersect across all union keys from (start, end).
     fn build_runs_for_start(&mut self, start: TimePoint<T>) {
         self.runs.clear();
         self.emit_idx = 0;
@@ -2695,7 +2693,6 @@ where
             .slice_predecessor_timepoint(start)
             .expect("timeline has origin snapshot");
 
-        // Seed from predecessor snapshot, overlay-adjusted at `pred`.
         let qs = berth.snapshot_at(pred).expect("slice timepoint must exist");
         let base =
             SpaceIntervalSet::from_iter(qs.iter_free_intervals(SpaceLength::new(1), self.bounds));
@@ -2714,27 +2711,22 @@ where
         self.runs
             .seed_from_iter(adj_seed.as_slice().iter().copied());
         if self.runs.current().is_empty() {
-            return; // nothing feasible at this start
+            return;
         }
 
-        // Also apply overlay adjustments that take effect exactly at `start`
-        // (the base snapshot for [start, next_key) is still the predecessor slice).
-        {
-            let base_start = SpaceIntervalSet::from_iter(
-                qs.iter_free_intervals(SpaceLength::new(1), self.bounds),
-            );
-            let adj_start = self
-                .overlay
-                .adjust_runs(start, base_start, self.bounds, self.required);
+        let base_start =
+            SpaceIntervalSet::from_iter(qs.iter_free_intervals(SpaceLength::new(1), self.bounds));
+        let adj_start = self
+            .overlay
+            .adjust_runs(start, base_start, self.bounds, self.required);
 
-            let req = self.required;
-            let adj_slice = adj_start.as_slice();
-            self.runs.step(|cur, next| {
-                Self::intersect_with_set_into(req, cur, adj_slice, next);
-            });
-            if self.runs.current().is_empty() {
-                return; // nothing feasible at this start
-            }
+        let req = self.required;
+        let adj_slice = adj_start.as_slice();
+        self.runs.step(|cur, next| {
+            Self::intersect_with_set_into(req, cur, adj_slice, next);
+        });
+        if self.runs.current().is_empty() {
+            return;
         }
 
         let end = start + self.duration;
@@ -2742,7 +2734,6 @@ where
             return;
         }
 
-        // Walk union of berth keys and overlay keys strictly inside (start, end)
         let mut cursor = start;
         loop {
             let next_berth = berth.iter_timepoints(TimeInterval::new(cursor, end)).next();
@@ -2784,7 +2775,6 @@ where
                 break;
             }
 
-            // Overlay-adjusted free runs for this slice key
             let qs_tp = berth.snapshot_at(tp).expect("slice timepoint must exist");
             let base_tp = SpaceIntervalSet::from_iter(
                 qs_tp.iter_free_intervals(SpaceLength::new(1), self.bounds),
@@ -2825,14 +2815,11 @@ where
                 self.current_start = None;
             }
 
-            // Advance to next candidate start time
             let cand = self.next_candidate_start()?;
             if cand + self.duration > self.time_window.end() {
                 return None;
             }
             self.build_runs_for_start(cand);
-
-            // If none feasible for this start, continue to the next candidate
             if self.current_start.is_none() {
                 continue;
             }

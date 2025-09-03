@@ -23,3 +23,4 @@ pub mod domain;
 pub mod ledger;
 pub mod occupancy;
 pub mod quay;
+pub mod search;

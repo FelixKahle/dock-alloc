@@ -19,7 +19,9 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use dock_alloc_model::{Assignment, Fixed, Problem, RequestId, Solution};
+use dock_alloc_model::{
+    Assignment, FixedAssignment, MoveableRequest, Problem, RequestId, Solution,
+};
 use num_traits::{PrimInt, Signed};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -114,7 +116,7 @@ impl<'brand> std::fmt::Display for MovableHandle<'brand> {
 ///
 /// ```
 /// use dock_alloc_solver::ledger::AssignmentLedger;
-/// use dock_alloc_model::{ProblemBuilder, Request, RequestId, Assignment, Fixed};
+/// use dock_alloc_model::{ProblemBuilder, Request, RequestId, Assignment, FixedAssignment};
 /// use dock_alloc_core::domain::*;
 ///
 /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
@@ -125,7 +127,7 @@ impl<'brand> std::fmt::Display for MovableHandle<'brand> {
 ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
 /// ).unwrap();
 /// let assignment = Assignment::new(request, SpacePosition::new(5), TimePoint::new(10));
-/// builder.add_preassigned(Fixed::new(assignment)).unwrap();
+/// builder.add_preassigned(FixedAssignment::new(assignment)).unwrap();
 /// let problem = builder.build();
 ///
 /// let ledger: AssignmentLedger<'_, '_, i64, i64> = AssignmentLedger::new(&problem);
@@ -146,7 +148,7 @@ impl<'brand> FixedHandle<'brand> {
     ///
     /// ```
     /// use dock_alloc_solver::ledger::AssignmentLedger;
-    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId, Assignment, Fixed};
+    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId, Assignment, FixedAssignment};
     /// use dock_alloc_core::domain::*;
     ///
     /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
@@ -157,7 +159,7 @@ impl<'brand> FixedHandle<'brand> {
     ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
     /// ).unwrap();
     /// let assignment = Assignment::new(request, SpacePosition::new(5), TimePoint::new(10));
-    /// builder.add_preassigned(Fixed::new(assignment)).unwrap();
+    /// builder.add_preassigned(FixedAssignment::new(assignment)).unwrap();
     /// let problem = builder.build();
     ///
     /// let ledger: AssignmentLedger<'_, '_, i64, i64> = AssignmentLedger::new(&problem);
@@ -214,7 +216,7 @@ impl<'brand> std::fmt::Display for FixedHandle<'brand> {
 /// assert_eq!(movables.len(), 0); // No assignments committed yet
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Movable<'brand, T, C>
+pub struct MovableAssignment<'brand, T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
@@ -224,7 +226,7 @@ where
     _phantom: PhantomData<&'brand ()>,
 }
 
-impl<'brand, T: PrimInt + Signed, C: PrimInt + Signed> Movable<'brand, T, C> {
+impl<'brand, T: PrimInt + Signed, C: PrimInt + Signed> MovableAssignment<'brand, T, C> {
     /// Returns the assignment associated with this movable.
     ///
     /// The returned assignment contains the complete allocation information
@@ -254,8 +256,8 @@ impl<'brand, T: PrimInt + Signed, C: PrimInt + Signed> Movable<'brand, T, C> {
     /// }
     /// ```
     #[inline]
-    pub fn assignment(&self) -> Assignment<T, C> {
-        self.assignment
+    pub fn assignment(&self) -> &Assignment<T, C> {
+        &self.assignment
     }
 
     /// Returns the handle for this movable assignment.
@@ -369,7 +371,7 @@ impl<'brand, T: PrimInt + Signed, C: PrimInt + Signed> Movable<'brand, T, C> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssignmentLedger<'brand, 'a, T: PrimInt + Signed, C: PrimInt + Signed> {
     problem: &'a Problem<T, C>,
-    committed: HashMap<RequestId, Movable<'brand, T, C>>,
+    committed: HashMap<RequestId, MovableAssignment<'brand, T, C>>,
     _phantom: PhantomData<&'brand ()>,
 }
 
@@ -504,7 +506,7 @@ where
     /// assert!(committed.is_empty());
     /// ```
     #[inline]
-    pub fn committed(&self) -> &HashMap<RequestId, Movable<'brand, T, C>> {
+    pub fn committed(&self) -> &HashMap<RequestId, MovableAssignment<'brand, T, C>> {
         &self.committed
     }
 
@@ -540,7 +542,7 @@ where
     /// // In practice, commit() would be called with movables from solver algorithms
     /// assert_eq!(ledger.committed().len(), 0);
     /// ```
-    pub fn commit(&mut self, ma: Movable<'brand, T, C>) -> Result<(), LedgerError> {
+    pub fn commit(&mut self, ma: MovableAssignment<'brand, T, C>) -> Result<(), LedgerError> {
         let id = ma.id();
         if self.committed.contains_key(&id) {
             return Err(LedgerError::AlreadyCommitted);
@@ -585,7 +587,7 @@ where
     pub fn uncommit(
         &mut self,
         mh: MovableHandle<'brand>,
-    ) -> Result<Movable<'brand, T, C>, LedgerError> {
+    ) -> Result<MovableAssignment<'brand, T, C>, LedgerError> {
         self.committed
             .remove(&mh.id())
             .ok_or(LedgerError::NotCommitted)
@@ -600,7 +602,7 @@ where
     ///
     /// ```
     /// use dock_alloc_solver::ledger::AssignmentLedger;
-    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId, Assignment, Fixed};
+    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId, Assignment, FixedAssignment};
     /// use dock_alloc_core::domain::*;
     ///
     /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
@@ -611,7 +613,7 @@ where
     ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
     /// ).unwrap();
     /// let assignment = Assignment::new(request, SpacePosition::new(5), TimePoint::new(10));
-    /// builder.add_preassigned(Fixed::new(assignment)).unwrap();
+    /// builder.add_preassigned(FixedAssignment::new(assignment)).unwrap();
     /// let problem = builder.build();
     ///
     /// let ledger: AssignmentLedger<'_, '_, i64, i64> = AssignmentLedger::new(&problem);
@@ -633,7 +635,7 @@ where
     ///
     /// ```
     /// use dock_alloc_solver::ledger::AssignmentLedger;
-    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId, Assignment, Fixed};
+    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId, Assignment, FixedAssignment};
     /// use dock_alloc_core::domain::*;
     ///
     /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
@@ -644,7 +646,7 @@ where
     ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
     /// ).unwrap();
     /// let assignment = Assignment::new(request, SpacePosition::new(5), TimePoint::new(10));
-    /// builder.add_preassigned(Fixed::new(assignment)).unwrap();
+    /// builder.add_preassigned(FixedAssignment::new(assignment)).unwrap();
     /// let problem = builder.build();
     ///
     /// let ledger: AssignmentLedger<'_, '_, i64, i64> = AssignmentLedger::new(&problem);
@@ -653,7 +655,7 @@ where
     /// assert_eq!(fixed[0].assignment().request().id(), RequestId::new(100));
     /// ```
     #[inline]
-    pub fn iter_fixed_assignments(&self) -> impl Iterator<Item = &Fixed<T, C>> + '_ {
+    pub fn iter_fixed_assignments(&self) -> impl Iterator<Item = &FixedAssignment<T, C>> + '_ {
         self.problem.preassigned().values()
     }
 
@@ -719,7 +721,9 @@ where
     /// assert_eq!(movables.len(), 0); // No assignments committed yet
     /// ```
     #[inline]
-    pub fn iter_movable_assignments(&self) -> impl Iterator<Item = &Movable<'brand, T, C>> + '_ {
+    pub fn iter_movable_assignments(
+        &self,
+    ) -> impl Iterator<Item = &MovableAssignment<'brand, T, C>> + '_ {
         self.committed.values()
     }
 
@@ -750,8 +754,102 @@ where
     /// assert_eq!(committed.len(), 0); // No assignments committed yet
     /// ```
     #[inline]
-    pub fn iter_committed(&self) -> impl Iterator<Item = &Movable<'brand, T, C>> {
+    pub fn iter_committed(&self) -> impl Iterator<Item = &MovableAssignment<'brand, T, C>> {
         self.committed.values()
+    }
+
+    /// Returns an iterator over all unassigned movable requests.
+    ///
+    /// This iterator provides access to requests from the problem definition that have
+    /// not been committed to this ledger. These are requests that are available for
+    /// assignment in the solving process.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::ledger::AssignmentLedger;
+    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    ///
+    /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
+    /// let request1 = Request::new(
+    ///     RequestId::new(1), SpaceLength::new(4), TimeDelta::new(3),
+    ///     SpacePosition::new(10), Cost::new(1), Cost::new(1),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(100)),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
+    /// ).unwrap();
+    /// let request2 = Request::new(
+    ///     RequestId::new(2), SpaceLength::new(4), TimeDelta::new(3),
+    ///     SpacePosition::new(20), Cost::new(1), Cost::new(1),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(100)),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
+    /// ).unwrap();
+    /// builder.add_unassigned_request(request1).unwrap();
+    /// builder.add_unassigned_request(request2).unwrap();
+    /// let problem = builder.build();
+    ///
+    /// let mut ledger: AssignmentLedger<'_, '_, i64, i64> = AssignmentLedger::new(&problem);
+    ///
+    /// // Initially all requests are unassigned
+    /// let unassigned: Vec<_> = ledger.iter_unassigned_requests()
+    ///     .map(|req| req.request().id())
+    ///     .collect();
+    /// assert_eq!(unassigned.len(), 2);
+    /// assert!(unassigned.contains(&RequestId::new(1)));
+    /// assert!(unassigned.contains(&RequestId::new(2)));
+    /// ```
+    #[inline]
+    pub fn iter_unassigned_requests(&self) -> impl Iterator<Item = &MoveableRequest<T, C>> + '_ {
+        self.problem
+            .unassigned()
+            .values()
+            .filter(move |req| !self.committed.contains_key(&req.request().id()))
+    }
+
+    /// Returns an iterator over all assigned movable requests.
+    ///
+    /// This iterator provides access to requests that have been committed to this
+    /// ledger. These are requests that have been assigned positions and times
+    /// during the solving process.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::ledger::AssignmentLedger;
+    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    ///
+    /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
+    /// let request1 = Request::new(
+    ///     RequestId::new(1), SpaceLength::new(4), TimeDelta::new(3),
+    ///     SpacePosition::new(10), Cost::new(1), Cost::new(1),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(100)),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
+    /// ).unwrap();
+    /// let request2 = Request::new(
+    ///     RequestId::new(2), SpaceLength::new(4), TimeDelta::new(3),
+    ///     SpacePosition::new(20), Cost::new(1), Cost::new(1),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(100)),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
+    /// ).unwrap();
+    /// builder.add_unassigned_request(request1).unwrap();
+    /// builder.add_unassigned_request(request2).unwrap();
+    /// let problem = builder.build();
+    ///
+    /// let mut ledger: AssignmentLedger<'_, '_, i64, i64> = AssignmentLedger::new(&problem);
+    ///
+    /// // Initially no requests are assigned
+    /// assert_eq!(ledger.iter_assigned_requests().count(), 0);
+    ///
+    /// // After committing, the request appears in assigned requests
+    /// // (In practice, you'd use solver algorithms to create movable assignments)
+    /// ```
+    #[inline]
+    pub fn iter_assigned_requests(&self) -> impl Iterator<Item = &MoveableRequest<T, C>> + '_ {
+        self.problem
+            .unassigned()
+            .values()
+            .filter(move |req| self.committed.contains_key(&req.request().id()))
     }
 
     /// Returns an iterator over all assignments (both fixed and committed movable).
@@ -764,7 +862,7 @@ where
     ///
     /// ```
     /// use dock_alloc_solver::ledger::AssignmentLedger;
-    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId, Assignment, Fixed};
+    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId, Assignment, FixedAssignment};
     /// use dock_alloc_core::domain::*;
     ///
     /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
@@ -777,7 +875,7 @@ where
     ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
     /// ).unwrap();
     /// let fixed_assignment = Assignment::new(fixed_request, SpacePosition::new(5), TimePoint::new(10));
-    /// builder.add_preassigned(Fixed::new(fixed_assignment)).unwrap();
+    /// builder.add_preassigned(FixedAssignment::new(fixed_assignment)).unwrap();
     ///
     /// // Add an unassigned request
     /// let movable_request = Request::new(
@@ -794,12 +892,12 @@ where
     /// assert_eq!(assignments.len(), 1); // Only the fixed assignment
     /// assert_eq!(assignments[0].request().id(), RequestId::new(100));
     /// ```
-    pub fn iter_assignments(&self) -> impl Iterator<Item = Assignment<T, C>> + '_ {
+    pub fn iter_assignments(&self) -> impl Iterator<Item = &Assignment<T, C>> + '_ {
         let fixed_iter = self
             .problem
             .preassigned()
             .values()
-            .map(|fixed| *fixed.assignment());
+            .map(|fixed| fixed.assignment());
 
         let movable_iter = self.committed.values().map(|ma| ma.assignment());
         fixed_iter.chain(movable_iter)
@@ -851,7 +949,7 @@ where
     C: PrimInt + Signed,
 {
     ledger: &'l AssignmentLedger<'brand, 'a, T, C>,
-    staged_commits: BTreeMap<RequestId, Movable<'brand, T, C>>,
+    staged_commits: BTreeMap<RequestId, MovableAssignment<'brand, T, C>>,
     staged_uncommits: BTreeMap<RequestId, MovableHandle<'brand>>,
 }
 
@@ -971,7 +1069,7 @@ where
     /// // Since movables can't be created externally, this demonstrates the concept
     /// assert_eq!(overlay.iter_staged_commits().count(), 0);
     /// ```
-    pub fn commit(&mut self, ma: Movable<'brand, T, C>) -> Result<(), StageError> {
+    pub fn commit(&mut self, ma: MovableAssignment<'brand, T, C>) -> Result<(), StageError> {
         let id = ma.id();
         if self.ledger.committed().contains_key(&id) {
             return Err(StageError::AlreadyCommittedInBase(id));
@@ -1025,7 +1123,7 @@ where
     pub fn uncommit(
         &mut self,
         mh: MovableHandle<'brand>,
-    ) -> Result<Movable<'brand, T, C>, StageError> {
+    ) -> Result<MovableAssignment<'brand, T, C>, StageError> {
         let id = mh.id();
         if let Some(ma) = self.staged_commits.remove(&id) {
             return Ok(ma);
@@ -1052,7 +1150,7 @@ where
     ///
     /// ```
     /// use dock_alloc_solver::ledger::{AssignmentLedger, AssignmentOverlay};
-    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId, Assignment, Fixed};
+    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId, Assignment, FixedAssignment};
     /// use dock_alloc_core::domain::*;
     ///
     /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
@@ -1063,7 +1161,7 @@ where
     ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
     /// ).unwrap();
     /// let assignment = Assignment::new(request, SpacePosition::new(5), TimePoint::new(10));
-    /// builder.add_preassigned(Fixed::new(assignment)).unwrap();
+    /// builder.add_preassigned(FixedAssignment::new(assignment)).unwrap();
     /// let problem = builder.build();
     ///
     /// let ledger: AssignmentLedger<'_, '_, i64, i64> = AssignmentLedger::new(&problem);
@@ -1087,7 +1185,7 @@ where
     ///
     /// ```
     /// use dock_alloc_solver::ledger::{AssignmentLedger, AssignmentOverlay};
-    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId, Assignment, Fixed};
+    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId, Assignment, FixedAssignment};
     /// use dock_alloc_core::domain::*;
     ///
     /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
@@ -1098,7 +1196,7 @@ where
     ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
     /// ).unwrap();
     /// let assignment = Assignment::new(request, SpacePosition::new(5), TimePoint::new(10));
-    /// builder.add_preassigned(Fixed::new(assignment)).unwrap();
+    /// builder.add_preassigned(FixedAssignment::new(assignment)).unwrap();
     /// let problem = builder.build();
     ///
     /// let ledger: AssignmentLedger<'_, '_, i64, i64> = AssignmentLedger::new(&problem);
@@ -1109,7 +1207,7 @@ where
     /// assert_eq!(fixed[0].assignment().request().id(), RequestId::new(100));
     /// ```
     #[inline]
-    pub fn iter_fixed_assignments(&self) -> impl Iterator<Item = &Fixed<T, C>> + '_ {
+    pub fn iter_fixed_assignments(&self) -> impl Iterator<Item = &FixedAssignment<T, C>> + '_ {
         self.ledger.iter_fixed_assignments()
     }
 
@@ -1138,10 +1236,10 @@ where
     /// This includes assignments from the base ledger that are not staged for uncommit,
     /// plus assignments that are staged for commit. The result represents the effective
     /// view of movable assignments in this overlay.
-    ///
-
     #[inline]
-    pub fn iter_movable_assignments(&self) -> impl Iterator<Item = &Movable<'brand, T, C>> + '_ {
+    pub fn iter_movable_assignments(
+        &self,
+    ) -> impl Iterator<Item = &MovableAssignment<'brand, T, C>> + '_ {
         let base_visible = self.ledger.iter_movable_assignments().filter(move |ma| {
             let id = ma.id();
             !self.staged_uncommits.contains_key(&id) && !self.staged_commits.contains_key(&id)
@@ -1180,7 +1278,7 @@ where
     /// assert_eq!(staged.len(), 0); // No staged commits initially
     /// ```
     #[inline]
-    pub fn iter_staged_commits(&self) -> impl Iterator<Item = &Movable<'brand, T, C>> {
+    pub fn iter_staged_commits(&self) -> impl Iterator<Item = &MovableAssignment<'brand, T, C>> {
         self.staged_commits.values()
     }
 
@@ -1231,7 +1329,7 @@ where
     ///
     /// ```
     /// use dock_alloc_solver::ledger::{AssignmentLedger, AssignmentOverlay};
-    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId, Assignment, Fixed};
+    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId, Assignment, FixedAssignment};
     /// use dock_alloc_core::domain::*;
     ///
     /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
@@ -1244,7 +1342,7 @@ where
     ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
     /// ).unwrap();
     /// let fixed_assignment = Assignment::new(fixed_request, SpacePosition::new(5), TimePoint::new(10));
-    /// builder.add_preassigned(Fixed::new(fixed_assignment)).unwrap();
+    /// builder.add_preassigned(FixedAssignment::new(fixed_assignment)).unwrap();
     ///
     /// // Add an unassigned request
     /// let movable_request = Request::new(
@@ -1280,6 +1378,113 @@ where
         let staged = self.staged_commits.values().map(|ma| &ma.assignment);
         fixed.chain(base).chain(staged)
     }
+
+    /// Returns an iterator over all unassigned movable requests in the overlay view.
+    ///
+    /// This iterator provides access to requests from the problem definition that have
+    /// not been committed to the base ledger and not staged for commit in this overlay.
+    /// These are requests that are still available for assignment in the overlay's view.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::ledger::{AssignmentLedger, AssignmentOverlay};
+    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    ///
+    /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
+    /// let request1 = Request::new(
+    ///     RequestId::new(1), SpaceLength::new(4), TimeDelta::new(3),
+    ///     SpacePosition::new(10), Cost::new(1), Cost::new(1),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(100)),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
+    /// ).unwrap();
+    /// let request2 = Request::new(
+    ///     RequestId::new(2), SpaceLength::new(4), TimeDelta::new(3),
+    ///     SpacePosition::new(20), Cost::new(1), Cost::new(1),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(100)),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
+    /// ).unwrap();
+    /// builder.add_unassigned_request(request1).unwrap();
+    /// builder.add_unassigned_request(request2).unwrap();
+    /// let problem = builder.build();
+    ///
+    /// let ledger: AssignmentLedger<'_, '_, i64, i64> = AssignmentLedger::new(&problem);
+    /// let overlay = AssignmentOverlay::new(&ledger);
+    ///
+    /// // Initially all requests are unassigned
+    /// let unassigned: Vec<_> = overlay.iter_unassigned_requests()
+    ///     .map(|req| req.request().id())
+    ///     .collect();
+    /// assert_eq!(unassigned.len(), 2);
+    /// assert!(unassigned.contains(&RequestId::new(1)));
+    /// assert!(unassigned.contains(&RequestId::new(2)));
+    /// ```
+    pub fn iter_unassigned_requests(&self) -> impl Iterator<Item = &MoveableRequest<T, C>> + '_ {
+        self.ledger
+            .problem
+            .unassigned()
+            .values()
+            .filter(move |req| {
+                let id = req.request().id();
+                !self.ledger.committed.contains_key(&id) && !self.staged_commits.contains_key(&id)
+            })
+    }
+
+    /// Returns an iterator over all assigned movable requests in the overlay view.
+    ///
+    /// This iterator provides access to requests that either:
+    /// - Have been committed to the base ledger and not staged for uncommit in this overlay, or
+    /// - Have been staged for commit in this overlay.
+    ///
+    /// The result represents requests that would be considered assigned if all
+    /// staged operations in this overlay were applied.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_solver::ledger::{AssignmentLedger, AssignmentOverlay};
+    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId};
+    /// use dock_alloc_core::domain::*;
+    ///
+    /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
+    /// let request1 = Request::new(
+    ///     RequestId::new(1), SpaceLength::new(4), TimeDelta::new(3),
+    ///     SpacePosition::new(10), Cost::new(1), Cost::new(1),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(100)),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
+    /// ).unwrap();
+    /// let request2 = Request::new(
+    ///     RequestId::new(2), SpaceLength::new(4), TimeDelta::new(3),
+    ///     SpacePosition::new(20), Cost::new(1), Cost::new(1),
+    ///     TimeInterval::new(TimePoint::new(0), TimePoint::new(100)),
+    ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
+    /// ).unwrap();
+    /// builder.add_unassigned_request(request1).unwrap();
+    /// builder.add_unassigned_request(request2).unwrap();
+    /// let problem = builder.build();
+    ///
+    /// let ledger: AssignmentLedger<'_, '_, i64, i64> = AssignmentLedger::new(&problem);
+    /// let overlay = AssignmentOverlay::new(&ledger);
+    ///
+    /// // Initially no requests are assigned
+    /// assert_eq!(overlay.iter_assigned_requests().count(), 0);
+    ///
+    /// // After staging commits or with committed assignments in the base ledger
+    /// // that aren't staged for uncommit, requests would appear here
+    /// ```
+    pub fn iter_assigned_requests(&self) -> impl Iterator<Item = &MoveableRequest<T, C>> + '_ {
+        self.ledger
+            .problem
+            .unassigned()
+            .values()
+            .filter(move |req| {
+                let id = req.request().id();
+                (self.ledger.committed.contains_key(&id)
+                    && !self.staged_uncommits.contains_key(&id))
+                    || self.staged_commits.contains_key(&id)
+            })
+    }
 }
 
 /// Converts an assignment ledger into a solution.
@@ -1292,7 +1497,7 @@ where
 ///
 /// ```
 /// use dock_alloc_solver::ledger::AssignmentLedger;
-/// use dock_alloc_model::{ProblemBuilder, Request, RequestId, Assignment, Fixed, Solution};
+/// use dock_alloc_model::{ProblemBuilder, Request, RequestId, Assignment, FixedAssignment, Solution};
 /// use dock_alloc_core::domain::*;
 ///
 /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
@@ -1305,7 +1510,7 @@ where
 ///     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
 /// ).unwrap();
 /// let fixed_assignment = Assignment::new(fixed_request, SpacePosition::new(5), TimePoint::new(10));
-/// builder.add_preassigned(Fixed::new(fixed_assignment)).unwrap();
+/// builder.add_preassigned(FixedAssignment::new(fixed_assignment)).unwrap();
 ///
 /// // Add an unassigned request
 /// let movable_request = Request::new(
@@ -1332,7 +1537,7 @@ where
     fn from(ledger: &AssignmentLedger<'brand, 'a, T, C>) -> Self {
         let decisions: HashMap<_, _> = ledger
             .iter_assignments()
-            .map(|a| (a.request().id(), a))
+            .map(|a| (a.request().id(), a.clone()))
             .collect();
         Solution::from_assignments(decisions)
     }
@@ -1344,7 +1549,7 @@ mod overlay_ledger_tests {
     use dock_alloc_core::domain::{
         Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
     };
-    use dock_alloc_model::{Fixed, Request};
+    use dock_alloc_model::{FixedAssignment, Request};
     use std::collections::{BTreeSet, HashSet};
 
     type T = i64;
@@ -1391,10 +1596,10 @@ mod overlay_ledger_tests {
         rid: u64,
         start_pos: usize,
         start_time: i64,
-    ) -> (Request<T, C>, Movable<'b, T, C>) {
+    ) -> (Request<T, C>, MovableAssignment<'b, T, C>) {
         let r = req_ok(rid);
         let a = asg(r, start_pos, start_time);
-        let ma = Movable {
+        let ma = MovableAssignment {
             assignment: a,
             handle: mhandle::<'b>(rid),
             _phantom: PhantomData,
@@ -1421,12 +1626,14 @@ mod overlay_ledger_tests {
         for &(id, spos, t0) in fixed {
             let r = req_ok(id);
             let a = asg(r, spos, t0);
-            b.add_preassigned(Fixed::new(a)).unwrap();
+            b.add_preassigned(FixedAssignment::new(a)).unwrap();
         }
         b.build()
     }
 
-    fn ids_from_assignments(it: impl Iterator<Item = Assignment<T, C>>) -> BTreeSet<RequestId> {
+    fn ids_from_assignments<'a>(
+        it: impl Iterator<Item = &'a Assignment<T, C>>,
+    ) -> BTreeSet<RequestId> {
         it.map(|a| a.request().id()).collect()
     }
 
@@ -1661,8 +1868,6 @@ mod overlay_ledger_tests {
         let handle_ids: BTreeSet<_> = ledger.iter_fixed_handles().map(|h| h.id()).collect();
         let expected: BTreeSet<_> = [100u64, 101u64].into_iter().map(RequestId::new).collect();
         assert_eq!(handle_ids, expected);
-
-        // Assignments (&Fixed<T,C> → &Assignment<T,C>)
         let asg_ids: BTreeSet<_> = ledger
             .iter_fixed_assignments()
             .map(|fx| fx.assignment().request().id())
@@ -1787,5 +1992,110 @@ mod overlay_ledger_tests {
         let ids = ids_from_solution(&sol);
         let expect: BTreeSet<_> = [100u64, 1u64].into_iter().map(RequestId::new).collect();
         assert_eq!(ids, expect);
+    }
+
+    #[test]
+    fn ledger_iter_unassigned_requests_excludes_committed() {
+        // unassigned: 1,2,3 -> commit(2)
+        let prob = problem_with_unassigned(&[1, 2, 3]);
+        let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
+
+        // Initially all requests are unassigned
+        let ids_before: BTreeSet<_> = ledger
+            .iter_unassigned_requests()
+            .map(|req| req.request().id())
+            .collect();
+        let expected_before: BTreeSet<_> =
+            [1u64, 2u64, 3u64].into_iter().map(RequestId::new).collect();
+        assert_eq!(ids_before, expected_before);
+
+        // After committing request 2, it should no longer be in unassigned
+        let (_r2, ma2) = movable::<'static>(2, 5, 10);
+        ledger.commit(ma2).unwrap();
+
+        let ids_after: BTreeSet<_> = ledger
+            .iter_unassigned_requests()
+            .map(|req| req.request().id())
+            .collect();
+        let expected_after: BTreeSet<_> = [1u64, 3u64].into_iter().map(RequestId::new).collect();
+        assert_eq!(ids_after, expected_after);
+    }
+
+    #[test]
+    fn ledger_iter_assigned_requests_includes_only_committed() {
+        // unassigned: 1,2,3 -> commit(1)
+        let prob = problem_with_unassigned(&[1, 2, 3]);
+        let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
+
+        // Initially no requests are assigned
+        let ids_before: BTreeSet<_> = ledger
+            .iter_assigned_requests()
+            .map(|req| req.request().id())
+            .collect();
+        assert!(ids_before.is_empty());
+
+        // After committing request 1, only it should be in assigned
+        let (_r1, ma1) = movable::<'static>(1, 3, 0);
+        ledger.commit(ma1).unwrap();
+
+        let ids_after: BTreeSet<_> = ledger
+            .iter_assigned_requests()
+            .map(|req| req.request().id())
+            .collect();
+        let expected_after: BTreeSet<_> = [1u64].into_iter().map(RequestId::new).collect();
+        assert_eq!(ids_after, expected_after);
+    }
+
+    #[test]
+    fn overlay_iter_unassigned_requests_respects_staged_commits() {
+        // unassigned: 5,6,7; base commits: 6; overlay stages: 7
+        let prob = problem_with_unassigned(&[5, 6, 7]);
+        let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
+
+        // Commit request 6 to the base ledger
+        let (_r6, ma6) = movable::<'static>(6, 2, 0);
+        ledger.commit(ma6).unwrap();
+
+        let mut overlay = AssignmentOverlay::new(&ledger);
+
+        // Stage a commit for request 7
+        let (_r7, ma7) = movable::<'static>(7, 3, 0);
+        overlay.commit(ma7).unwrap();
+
+        // Unassigned should only contain request 5
+        let ids: BTreeSet<_> = overlay
+            .iter_unassigned_requests()
+            .map(|req| req.request().id())
+            .collect();
+        let expected: BTreeSet<_> = [5u64].into_iter().map(RequestId::new).collect();
+        assert_eq!(ids, expected);
+    }
+
+    #[test]
+    fn overlay_iter_assigned_requests_includes_base_and_staged_commits() {
+        // unassigned: 10,11,12; base commits: 10; overlay stages: 12, uncommits: 10
+        let prob = problem_with_unassigned(&[10, 11, 12]);
+        let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
+
+        // Commit request 10 to the base ledger
+        let (_r10, ma10) = movable::<'static>(10, 1, 0);
+        ledger.commit(ma10).unwrap();
+
+        let mut overlay = AssignmentOverlay::new(&ledger);
+
+        // Stage an uncommit for request 10
+        overlay.uncommit(mhandle::<'static>(10)).unwrap();
+
+        // Stage a commit for request 12
+        let (_r12, ma12) = movable::<'static>(12, 3, 0);
+        overlay.commit(ma12).unwrap();
+
+        // Assigned should only include request 12 (not 10 because it's staged for uncommit)
+        let ids: BTreeSet<_> = overlay
+            .iter_assigned_requests()
+            .map(|req| req.request().id())
+            .collect();
+        let expected: BTreeSet<_> = [12u64].into_iter().map(RequestId::new).collect();
+        assert_eq!(ids, expected);
     }
 }

@@ -1069,15 +1069,75 @@ where
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FixedRequest<'a, T = i64, C = i64>(&'a Request<T, C>)
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed;
+
+impl<'a, T, C> FixedRequest<'a, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    fn new(r: &'a Request<T, C>) -> Self {
+        Self(r)
+    }
+
+    pub fn request(&self) -> &'a Request<T, C> {
+        &self.0
+    }
+}
+
+impl<'a, T, C> Display for FixedRequest<'a, T, C>
+where
+    T: PrimInt + Signed + Display,
+    C: PrimInt + Signed + Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FixedRequest({})", self.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MoveableRequest<T = i64, C = i64>(Request<T, C>)
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed;
+
+impl<T, C> MoveableRequest<T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    fn new(r: Request<T, C>) -> Self {
+        Self(r)
+    }
+
+    pub fn request(&self) -> &Request<T, C> {
+        &self.0
+    }
+}
+
+impl<T, C> Display for MoveableRequest<T, C>
+where
+    T: PrimInt + Signed + Display,
+    C: PrimInt + Signed + Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MoveableRequest({})", self.0)
+    }
+}
+
 /// A wrapper around an `Assignment` indicating that it is fixed (preassigned).
 ///
-/// Fixed assignments represent requests that have already been assigned and cannot
+/// FixedAssignment assignments represent requests that have already been assigned and cannot
 /// be changed during optimization. They must be respected by any solution.
 ///
 /// # Examples
 ///
 /// ```
-/// use dock_alloc_model::{Fixed, Assignment, Request, RequestId};
+/// use dock_alloc_model::{FixedAssignment, Assignment, Request, RequestId};
 /// use dock_alloc_core::domain::*;
 /// # let request = Request::new(
 /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
@@ -1087,16 +1147,16 @@ where
 /// # ).unwrap();
 ///
 /// let assignment = Assignment::new(request, SpacePosition::new(15), TimePoint::new(2));
-/// let fixed = Fixed::new(assignment);
+/// let fixed = FixedAssignment::new(assignment);
 /// assert_eq!(fixed.assignment().start_position(), SpacePosition::new(15));
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Fixed<T = i64, C = i64>(Assignment<T, C>)
+pub struct FixedAssignment<T = i64, C = i64>(Assignment<T, C>)
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed;
 
-impl<T, C> Fixed<T, C>
+impl<T, C> FixedAssignment<T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
@@ -1110,7 +1170,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_model::{Fixed, Assignment, Request, RequestId};
+    /// use dock_alloc_model::{FixedAssignment, Assignment, Request, RequestId};
     /// use dock_alloc_core::domain::*;
     /// # let request = Request::new(
     /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
@@ -1120,7 +1180,7 @@ where
     /// # ).unwrap();
     ///
     /// let assignment = Assignment::new(request, SpacePosition::new(10), TimePoint::new(1));
-    /// let fixed = Fixed::new(assignment);
+    /// let fixed = FixedAssignment::new(assignment);
     /// ```
     pub fn new(a: Assignment<T, C>) -> Self {
         Self(a)
@@ -1131,7 +1191,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_model::{Fixed, Assignment, Request, RequestId};
+    /// use dock_alloc_model::{FixedAssignment, Assignment, Request, RequestId};
     /// use dock_alloc_core::domain::*;
     /// # let request = Request::new(
     /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
@@ -1140,7 +1200,7 @@ where
     /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
     /// # ).unwrap();
     /// # let assignment = Assignment::new(request, SpacePosition::new(10), TimePoint::new(1));
-    /// # let fixed = Fixed::new(assignment);
+    /// # let fixed = FixedAssignment::new(assignment);
     ///
     /// assert_eq!(fixed.assignment().start_position(), SpacePosition::new(10));
     /// ```
@@ -1718,9 +1778,32 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    unassigned: HashMap<RequestId, Request<T, C>>,
-    preassigned: HashMap<RequestId, Fixed<T, C>>,
+    unassigned: HashMap<RequestId, MoveableRequest<T, C>>,
+    preassigned: HashMap<RequestId, FixedAssignment<T, C>>,
     quay_length: SpaceLength,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProblemRequest<'a, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    Moveable(&'a MoveableRequest<T, C>),
+    Fixed(FixedRequest<'a, T, C>),
+}
+
+impl<'a, T, C> Display for ProblemRequest<'a, T, C>
+where
+    T: PrimInt + Signed + Display,
+    C: PrimInt + Signed + Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProblemRequest::Moveable(mr) => write!(f, "Moveable({})", mr),
+            ProblemRequest::Fixed(fr) => write!(f, "Fixed({})", fr),
+        }
+    }
 }
 
 impl<T, C> Problem<T, C>
@@ -1730,8 +1813,8 @@ where
 {
     #[inline]
     fn new(
-        unassigned: HashMap<RequestId, Request<T, C>>,
-        preassigned: HashMap<RequestId, Fixed<T, C>>,
+        unassigned: HashMap<RequestId, MoveableRequest<T, C>>,
+        preassigned: HashMap<RequestId, FixedAssignment<T, C>>,
         quay_length: SpaceLength,
     ) -> Self {
         Self {
@@ -1741,59 +1824,13 @@ where
         }
     }
 
-    /// Returns a reference to the map of unassigned requests.
-    ///
-    /// These are requests that need to be allocated a berth position and time.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_model::{ProblemBuilder, Request, RequestId};
-    /// use dock_alloc_core::domain::*;
-    /// # let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
-    /// # let request = Request::new(
-    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
-    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
-    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
-    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
-    /// # ).unwrap();
-    /// # builder.add_unassigned_request(request).unwrap();
-    /// # let problem = builder.build();
-    ///
-    /// assert_eq!(problem.unassigned().len(), 1);
-    /// assert!(problem.unassigned().contains_key(&RequestId::new(1)));
-    /// ```
     #[inline]
-    pub fn unassigned(&self) -> &HashMap<RequestId, Request<T, C>> {
+    pub fn unassigned(&self) -> &HashMap<RequestId, MoveableRequest<T, C>> {
         &self.unassigned
     }
 
-    /// Returns a reference to the map of preassigned (fixed) assignments.
-    ///
-    /// These are assignments that are already decided and must be respected
-    /// in any solution to the problem.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use dock_alloc_model::{ProblemBuilder, Fixed, Assignment, Request, RequestId};
-    /// use dock_alloc_core::domain::*;
-    /// # let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
-    /// # let request = Request::new(
-    /// #     RequestId::new(1), SpaceLength::new(10), TimeDelta::new(5),
-    /// #     SpacePosition::new(20), Cost::new(2), Cost::new(1),
-    /// #     TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
-    /// #     SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(50))
-    /// # ).unwrap();
-    /// # let assignment = Assignment::new(request, SpacePosition::new(15), TimePoint::new(2));
-    /// # builder.add_preassigned(Fixed::new(assignment)).unwrap();
-    /// # let problem = builder.build();
-    ///
-    /// assert_eq!(problem.preassigned().len(), 1);
-    /// assert!(problem.preassigned().contains_key(&RequestId::new(1)));
-    /// ```
     #[inline]
-    pub fn preassigned(&self) -> &HashMap<RequestId, Fixed<T, C>> {
+    pub fn preassigned(&self) -> &HashMap<RequestId, FixedAssignment<T, C>> {
         &self.preassigned
     }
 
@@ -1849,6 +1886,31 @@ where
     pub fn total_requests(&self) -> usize {
         self.unassigned.len() + self.preassigned.len()
     }
+
+    pub fn iter_moveable_requests(&self) -> impl Iterator<Item = &MoveableRequest<T, C>> {
+        self.unassigned.values()
+    }
+
+    pub fn iter_fixed_requests(&self) -> impl Iterator<Item = FixedRequest<'_, T, C>> {
+        self.preassigned
+            .values()
+            .map(|fa| FixedRequest::new(fa.assignment().request()))
+    }
+
+    pub fn iter_requests(&self) -> impl Iterator<Item = ProblemRequest<'_, T, C>> {
+        self.unassigned
+            .values()
+            .map(ProblemRequest::Moveable)
+            .chain(
+                self.preassigned
+                    .values()
+                    .map(|fa| ProblemRequest::Fixed(FixedRequest::new(fa.assignment().request()))),
+            )
+    }
+
+    pub fn iter_fixed_assignments(&self) -> impl Iterator<Item = &FixedAssignment<T, C>> {
+        self.preassigned.values()
+    }
 }
 
 /// Type alias for a berth allocation problem using standard integer types.
@@ -1871,7 +1933,7 @@ pub type BerthAllocationProblem = Problem<i64, i64>;
 /// # Examples
 ///
 /// ```
-/// use dock_alloc_model::{ProblemBuilder, Request, Fixed, Assignment, RequestId};
+/// use dock_alloc_model::{ProblemBuilder, Request, FixedAssignment, Assignment, RequestId};
 /// use dock_alloc_core::domain::*;
 ///
 /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
@@ -1901,7 +1963,7 @@ pub type BerthAllocationProblem = Problem<i64, i64>;
 ///     SpaceInterval::new(SpacePosition::new(60), SpacePosition::new(80))
 /// ).unwrap();
 /// let assignment = Assignment::new(request2, SpacePosition::new(65), TimePoint::new(1));
-/// builder.add_preassigned(Fixed::new(assignment)).unwrap();
+/// builder.add_preassigned(FixedAssignment::new(assignment)).unwrap();
 ///
 /// let problem = builder.build();
 /// assert_eq!(problem.total_requests(), 2);
@@ -1911,8 +1973,8 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    unassigned: HashMap<RequestId, Request<T, C>>,
-    preassigned: HashMap<RequestId, Fixed<T, C>>,
+    unassigned: HashMap<RequestId, MoveableRequest<T, C>>,
+    preassigned: HashMap<RequestId, FixedAssignment<T, C>>,
     quay_length: SpaceLength,
 }
 
@@ -2005,7 +2067,7 @@ where
         if self.unassigned.contains_key(&id) || self.preassigned.contains_key(&id) {
             return Err(ProblemBuildError::DuplicateRequestId(id));
         }
-        self.unassigned.insert(id, request);
+        self.unassigned.insert(id, MoveableRequest::new(request));
         Ok(self)
     }
 
@@ -2041,7 +2103,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use dock_alloc_model::{ProblemBuilder, Fixed, Assignment, Request, RequestId};
+    /// use dock_alloc_model::{ProblemBuilder, FixedAssignment, Assignment, Request, RequestId};
     /// use dock_alloc_core::domain::*;
     ///
     /// let mut builder = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
@@ -2057,11 +2119,11 @@ where
     /// ).unwrap();
     ///
     /// let assignment = Assignment::new(request, SpacePosition::new(15), TimePoint::new(2));
-    /// builder.add_preassigned(Fixed::new(assignment)).unwrap();
+    /// builder.add_preassigned(FixedAssignment::new(assignment)).unwrap();
     /// ```
     pub fn add_preassigned(
         &mut self,
-        fixed: Fixed<T, C>,
+        fixed: FixedAssignment<T, C>,
     ) -> Result<&mut Self, ProblemBuildError<T>> {
         let a = fixed.assignment();
         let r = a.request();
@@ -2505,7 +2567,7 @@ mod builder_tests {
         let r = req_ok(1, 4, 5, 10, 20, 0, 20);
         let a = Assignment::new(r, SpacePosition::new(0), TimePoint::new(16)); // [16,21) leaks past 20
         assert!(matches!(
-            b.add_preassigned(Fixed::new(a)),
+            b.add_preassigned(FixedAssignment::new(a)),
             Err(ProblemBuildError::AssignmentOutsideTimeWindow(_))
         ));
     }
@@ -2516,7 +2578,7 @@ mod builder_tests {
         let r = req_ok(1, 6, 2, 0, 10, 5, 12);
         let a = Assignment::new(r, SpacePosition::new(7), TimePoint::new(1)); // [7,13) leaks past 12
         assert!(matches!(
-            b.add_preassigned(Fixed::new(a)),
+            b.add_preassigned(FixedAssignment::new(a)),
             Err(ProblemBuildError::AssignmentOutsideSpaceWindow(_))
         ));
     }
@@ -2527,7 +2589,7 @@ mod builder_tests {
         let r = req_ok(1, 6, 2, 0, 10, 0, 20);
         let a = Assignment::new(r, SpacePosition::new(6), TimePoint::new(1)); // [6,12) > quay 10
         assert!(matches!(
-            b.add_preassigned(Fixed::new(a)),
+            b.add_preassigned(FixedAssignment::new(a)),
             Err(ProblemBuildError::AssignmentExceedsQuay(_))
         ));
     }
@@ -2537,7 +2599,7 @@ mod builder_tests {
         let mut b = ProblemBuilder::<i64, i64>::new(SpaceLength::new(20));
         let r1 = req_ok(1, 4, 5, 0, 20, 0, 20);
         let r2 = req_ok(2, 4, 5, 0, 20, 0, 20);
-        b.add_preassigned(Fixed::new(Assignment::new(
+        b.add_preassigned(FixedAssignment::new(Assignment::new(
             r1,
             SpacePosition::new(5),
             TimePoint::new(2),
@@ -2545,7 +2607,7 @@ mod builder_tests {
         .unwrap(); // t[2,7), s[5,9)
         let a2 = Assignment::new(r2, SpacePosition::new(7), TimePoint::new(4)); // t[4,9), s[7,11) -> intersects both axes
         assert!(matches!(
-            b.add_preassigned(Fixed::new(a2)),
+            b.add_preassigned(FixedAssignment::new(a2)),
             Err(ProblemBuildError::PreassignedOverlap(_))
         ));
     }
@@ -2556,7 +2618,7 @@ mod builder_tests {
         let r1 = req_ok(1, 4, 3, 0, 10, 0, 20);
         let r2 = req_ok(2, 4, 3, 0, 10, 0, 20);
         b.add_unassigned_request(r1).unwrap();
-        b.add_preassigned(Fixed::new(Assignment::new(
+        b.add_preassigned(FixedAssignment::new(Assignment::new(
             r2,
             SpacePosition::new(10),
             TimePoint::new(0),
