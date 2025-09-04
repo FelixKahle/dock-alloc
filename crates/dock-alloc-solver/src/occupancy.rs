@@ -481,16 +481,15 @@ impl<'a, T: PrimInt + Signed> Iterator for KeysUnion<'a, T> {
             (None, None) => None,
             (Some(_), None) => self.a.next(),
             (None, Some(_)) => self.b.next(),
-            (Some(x), Some(y)) => {
-                if x < y {
-                    self.a.next()
-                } else if y < x {
-                    self.b.next()
-                } else {
+            (Some(x), Some(y)) => match x.cmp(&y) {
+                std::cmp::Ordering::Less => self.a.next(),
+                std::cmp::Ordering::Greater => self.b.next(),
+                std::cmp::Ordering::Equal => {
                     self.a.next();
-                    self.b.next()
+                    self.b.next();
+                    Some(x)
                 }
-            }
+            },
         }
     }
 }
@@ -540,16 +539,10 @@ where
 
         let keys =
             KeysUnion::<'a, T>::new(&self.overlay.free_by_time, &self.overlay.occupied_by_time);
-
-        let mut first = true;
-        let mut saw_any_key = false;
-
+        let mut acc_opt: Option<SpaceIntervalSet> = None;
         let mut current_runs = SpaceIntervalSet::new();
 
         for tp in keys {
-            saw_any_key = true;
-
-            // Collect adjusted runs at this timepoint
             current_runs.clear_and_fill_from_iter(
                 self.overlay
                     .free_runs_at(tp)
@@ -558,20 +551,22 @@ where
                     .filter(|iv| iv.length() >= self.required),
             );
 
-            if first {
-                self.acc = core::mem::take(&mut current_runs);
-                first = false;
-            } else {
-                self.tmp.clear();
-                self.acc.intersection_into(&current_runs, &mut self.tmp);
-                core::mem::swap(&mut self.acc, &mut self.tmp);
+            match acc_opt.as_mut() {
+                None => {
+                    acc_opt = Some(core::mem::take(&mut current_runs));
+                }
+                Some(acc) => {
+                    self.tmp.clear();
+                    acc.intersection_into(&current_runs, &mut self.tmp);
+                    core::mem::swap(acc, &mut self.tmp);
+                    if acc.is_empty() {
+                        break;
+                    }
+                }
             }
         }
 
-        if !saw_any_key {
-            self.acc = SpaceIntervalSet::from_vec(vec![self.bounds]);
-        }
-
+        self.acc = acc_opt.unwrap_or_else(|| SpaceIntervalSet::from_vec(vec![self.bounds]));
         self.acc.retain_min_length(self.required);
     }
 }
@@ -676,19 +671,34 @@ where
 
     #[inline]
     fn free_runs_at(&self, t: TimePoint<T>) -> Self::FreeRunsIter<'_> {
-        if !self.free_by_time.contains_key(&t) && !self.occupied_by_time.contains_key(&t) {
+        let f = self.free_by_time.get(&t);
+        let o = self.occupied_by_time.get(&t);
+        if f.is_none() && o.is_none() {
             return OverlayRunsIter::Base(self.berth_occupancy.free_runs_at(t));
         }
 
-        let mut set = SpaceIntervalSet::from_iter(self.berth_occupancy.free_runs_at(t));
-        if let Some(free_set) = self.free_by_time.get(&t) {
-            set = set.union(free_set);
-        }
-        if let Some(occ_set) = self.occupied_by_time.get(&t) {
-            set = set.subtract(occ_set);
+        let base_iter = self.berth_occupancy.free_runs_at(t);
+        let (base_lo, base_hi) = base_iter.size_hint();
+        let base_cap = base_hi.unwrap_or(base_lo);
+
+        let f_len = f.map(|s| s.len()).unwrap_or(0);
+        let o_len = o.map(|s| s.len()).unwrap_or(0);
+
+        let mut a = SpaceIntervalSet::with_capacity(base_cap);
+        a.clear_and_fill_from_iter(base_iter);
+        let mut b = SpaceIntervalSet::with_capacity(a.len().saturating_add(f_len.max(o_len)));
+
+        if let Some(fset) = f {
+            a.union_into(fset, &mut b);
+            core::mem::swap(&mut a, &mut b);
         }
 
-        OverlayRunsIter::Owned(set.into_intervals().into_iter())
+        if let Some(oset) = o {
+            a.subtract_into(oset, &mut b);
+            core::mem::swap(&mut a, &mut b);
+        }
+
+        OverlayRunsIter::Owned(a.into_intervals().into_iter())
     }
 }
 
@@ -845,11 +855,16 @@ where
         let base_pred = self.berth().slice_predecessor_timepoint(start);
         let base_interior = self.berth().slices(start, end).interior_keys();
 
+        let overlay_start = (self.free_by_time.contains_key(&start)
+            || self.occupied_by_time.contains_key(&start))
+        .then_some(start);
+
         let overlay_union = KeysUnion::new(&self.free_by_time, &self.occupied_by_time)
             .filter(move |&t| t > start && t < end);
 
-        base_pred
+        overlay_start
             .into_iter()
+            .chain(base_pred)
             .chain(base_interior)
             .chain(overlay_union)
     }
@@ -917,6 +932,7 @@ where
     current_start: Option<TimePoint<T>>,
     runs: DoubleBuf<SpaceInterval>,
     emit_idx: usize,
+    is_empty: bool,
 }
 
 impl<'a, T, V> FreeIter<'a, T, V>
@@ -932,7 +948,7 @@ where
         required: SpaceLength,
         bounds: SpaceInterval,
     ) -> Self {
-        let mut this = Self {
+        Self {
             view,
             time_window,
             duration,
@@ -943,14 +959,8 @@ where
             current_start: None,
             runs: DoubleBuf::new(),
             emit_idx: 0,
-        };
-
-        if required > bounds.length() {
-            this.yielded_window_start = true;
-            this.last_candidate = None;
+            is_empty: required > bounds.length(),
         }
-
-        this
     }
 
     /// Finds the next valid timepoint that could begin a free slot.
@@ -992,11 +1002,10 @@ where
         self.emit_idx = 0;
         self.current_start = None;
 
-        if self.required > self.bounds.length() {
-            return;
-        }
-
-        let pred = self.view.pred(start).expect("timeline has origin");
+        let pred = match self.view.pred(start) {
+            Some(p) => p,
+            None => return,
+        };
         let seed_tp = if self.view.has_key_at(start) {
             start
         } else {
@@ -1047,6 +1056,10 @@ where
     type Item = FreeSlot<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.is_empty {
+            return None;
+        }
+
         loop {
             if let Some(t0) = self.current_start {
                 if self.emit_idx < self.runs.current().len() {
@@ -1176,10 +1189,7 @@ where
                 self.cur_l = self.left.next();
             }
             if self.cur_r.is_none() {
-                self.cur_r = match self.cur_r.take() {
-                    some @ Some(_) => some,
-                    None => self.right.next(),
-                };
+                self.cur_r = self.right.next();
             }
             let (a, b) = match (self.cur_l, self.cur_r) {
                 (Some(a), Some(b)) => (a, b),

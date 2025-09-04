@@ -22,7 +22,7 @@
 use std::marker::PhantomData;
 
 use crate::{
-    domain::Version,
+    domain::{SpaceTimeRectangle, Version},
     ledger::{AssignmentLedger, AssignmentOverlay, MovableAssignment, MovableHandle, StageError},
     occupancy::{BerthOccupancy, BerthOccupancyOverlay},
     quay::QuayRead,
@@ -80,6 +80,7 @@ where
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Copy)]
 pub struct FreeSlot<'brand, T: PrimInt + Signed> {
     space: SpaceInterval,
     time: TimeInterval<T>,
@@ -101,29 +102,6 @@ impl<'brand, T: PrimInt + Signed> FreeSlot<'brand, T> {
 
     pub fn time(&self) -> TimeInterval<T> {
         self.time
-    }
-}
-
-impl<'brand, T, C> From<&Assignment<T, C>> for FreeSlot<'brand, T>
-where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
-{
-    fn from(assignment: &Assignment<T, C>) -> Self {
-        // Time
-        let start_time = assignment.start_time();
-        let processing_duration = assignment.request().processing_duration();
-        let end_time = start_time + processing_duration;
-
-        // Space
-        let space = assignment.start_position();
-        let length = assignment.request().length();
-        let end_space = space + length;
-
-        FreeSlot::new(
-            SpaceInterval::new(space, end_space),
-            TimeInterval::new(start_time, end_time),
-        )
     }
 }
 
@@ -152,13 +130,55 @@ where
     }
 }
 
+impl<'brand, T, C> From<&MovableAssignment<'brand, T, C>> for SpaceTimeRectangle<T>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    fn from(m: &MovableAssignment<'brand, T, C>) -> Self {
+        let assignment = m.assignment();
+
+        // Time
+        let start_time = assignment.start_time();
+        let processing_duration = assignment.request().processing_duration();
+        let end_time = start_time + processing_duration;
+
+        // Space
+        let space = assignment.start_position();
+        let length = assignment.request().length();
+        let end_space = space + length;
+
+        SpaceTimeRectangle::new(
+            SpaceInterval::new(space, end_space),
+            TimeInterval::new(start_time, end_time),
+        )
+    }
+}
+
 pub struct UnassignOperation<'brand, T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    moveable: &'brand MoveableRequest<T, C>,
+    moveable: &'brand MovableAssignment<'brand, T, C>,
     _brand: PhantomData<&'brand ()>,
+}
+
+impl<'brand, T, C> UnassignOperation<'brand, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    fn new(assignment: &'brand MovableAssignment<'brand, T, C>) -> Self {
+        Self {
+            moveable: assignment,
+            _brand: PhantomData,
+        }
+    }
+
+    pub fn moveable(&self) -> &'brand MovableAssignment<'brand, T, C> {
+        self.moveable
+    }
 }
 
 pub struct AssignOperation<'brand, T, C>
@@ -168,6 +188,23 @@ where
 {
     assignment: &'brand MovableAssignment<'brand, T, C>,
     _brand: PhantomData<&'brand ()>,
+}
+
+impl<'brand, T, C> AssignOperation<'brand, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    fn new(assignment: &'brand MovableAssignment<'brand, T, C>) -> Self {
+        Self {
+            assignment,
+            _brand: PhantomData,
+        }
+    }
+
+    pub fn assignment(&self) -> &'brand MovableAssignment<'brand, T, C> {
+        self.assignment
+    }
 }
 
 pub enum Operation<'brand, T, C>
@@ -213,13 +250,14 @@ where
         assignment: &'brand MovableAssignment<'brand, T, C>,
     ) -> Result<FreeSlot<'brand, T>, StageError> {
         let free: FreeSlot<'brand, T> = assignment.into();
-        let _ = self.assignment_overlay.uncommit_assignment(assignment)?;
-        //self.berth_overlay.free_at(
-        //    assignment.start_time(),
-        //    assignment.processing_duration(),
-        //    assignment.start_position(),
-        //    assignment.length(),
-        //);
+        let rect: SpaceTimeRectangle<T> = assignment.into();
+
+        self.assignment_overlay.uncommit_assignment(assignment)?;
+        self.berth_overlay.free(&rect);
+
+        self.operations
+            .push(Operation::Unassign(UnassignOperation::new(assignment)));
+
         Ok(free)
     }
 }
