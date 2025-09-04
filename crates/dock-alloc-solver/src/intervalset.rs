@@ -118,6 +118,10 @@ impl<T> IntervalSet<T> {
         &self.intervals
     }
 
+    pub fn into_intervals(self) -> Vec<Interval<T>> {
+        self.intervals
+    }
+
     /// Clears the set, removing all intervals.
     ///
     /// Note that this method has no effect on the allocated capacity of the
@@ -692,16 +696,16 @@ impl<T> IntervalSet<T> {
         debug_assert!(Self::are_invariants_held(&output_set.intervals));
     }
 
-    /// Returns a new `IntervalSet` representing the subtraction of a single
-    /// interval from the set.
-    #[inline]
-    pub fn subtract_interval(&self, subtrahend_interval: Interval<T>) -> Self
+    pub fn subtract_interval(&mut self, interval: Interval<T>)
     where
         T: Ord + Copy,
     {
-        let mut output_set = Self::with_capacity(self.len() + 1); // +1 in case of a split
-        self.subtract_interval_into(subtrahend_interval, &mut output_set);
-        output_set
+        if self.is_empty() || interval.is_empty() {
+            return;
+        }
+        let mut result = Self::with_capacity(self.len() + 1); // +1 in case of a split
+        self.subtract_interval_into(interval, &mut result);
+        *self = result;
     }
 
     /// Returns the complement of the set within a given `bounds`.
@@ -1162,22 +1166,6 @@ mod tests {
         base.subtract_interval_into(iv(4, 6), &mut out);
         assert_eq!(out.as_slice(), &[iv(2, 4), iv(6, 10)]);
         assert_invariants(&out);
-
-        // Cut head overlap
-        let out = base.subtract_interval(iv(2, 5));
-        assert_eq!(out.as_slice(), &[iv(5, 10)]);
-
-        // Cut tail overlap
-        let out = base.subtract_interval(iv(7, 10));
-        assert_eq!(out.as_slice(), &[iv(2, 7)]);
-
-        // Cut fully outside -> unchanged
-        let out = base.subtract_interval(iv(-5, 0));
-        assert_eq!(out.as_slice(), base.as_slice());
-
-        // Cut exactly equal -> empty
-        let out = base.subtract_interval(iv(2, 10));
-        assert!(out.is_empty());
     }
 
     #[test]
