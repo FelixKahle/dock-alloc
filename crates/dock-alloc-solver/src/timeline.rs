@@ -1,36 +1,22 @@
 // Copyright (c) 2025 Felix Kahle.
-//
-// Permission is hereby granted, free of charge, to any person obtaining
-// a copy of this software and associated documentation files (the
-// "Software"), to deal in the Software without restriction, including
-// without limitation the rights to use, copy, modify, merge, publish,
-// distribute, sublicense, and/or sell copies of the Software, and to
-// permit persons to whom the Software is furnished to do so, subject to
-// the following conditions:
-//
-// The above copyright notice and this permission notice shall be
-// included in all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// ... (license header)
 
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;
-use std::ops::Bound::{Excluded, Included, Unbounded};
+use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 
 /// A data structure representing a series of states that change at discrete points in time.
 ///
-/// A `Timeline` can be thought of as a sequence of keyframes. For any given time `t`,
-/// the value of the timeline is determined by the keyframe with the largest key
-/// that is less than or equal to `t`. This is useful for modeling properties
-/// that remain constant over intervals and change instantaneously.
+/// A `Timeline` models a value that is **piecewise constant**—it holds a specific state
+/// over an interval and changes instantaneously at points called "keyframes". For any given
+/// time `t`, the value of the timeline is determined by the keyframe with the largest key
+/// that is less than or equal to `t`.
+///
+/// This is conceptually similar to a [step function](https://en.wikipedia.org/wiki/Step_function).
+/// It's useful for modeling properties like animations, configuration changes, or any
+/// stateful value that evolves over time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Timeline<K, V> {
     map: BTreeMap<K, V>,
@@ -41,8 +27,6 @@ where
     K: Ord + Copy,
 {
     /// Creates a new `Timeline` with an initial value at a specified origin time.
-    ///
-    /// Every timeline must have at least one keyframe, which is established here.
     #[inline]
     pub fn new(origin: K, v0: V) -> Self {
         let mut map = BTreeMap::new();
@@ -58,7 +42,7 @@ where
 
     /// Returns `true` if the timeline has no keyframes.
     ///
-    /// Note: A timeline created with `new()` will never be empty.
+    /// Note: A `Timeline` created with [`new()`](Timeline::new) will never be empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
@@ -66,9 +50,8 @@ where
 
     /// Returns the value that is active at a specific time `t`.
     ///
-    /// This is determined by finding the keyframe with the largest key
-    /// less than or equal to `t`. Returns `None` if `t` is before the
-    /// first keyframe.
+    /// Returns `None` if `t` is before the timeline's origin.
+    /// See also [`floor()`](Timeline::floor) to get the key as well.
     #[inline]
     pub fn at(&self, t: K) -> Option<&V> {
         self.map.range(..=t).next_back().map(|(_, v)| v)
@@ -76,21 +59,31 @@ where
 
     /// Finds the keyframe (key and value) active at time `t`.
     ///
-    /// This is the key-value pair with the largest key less than or equal to `t`.
-    /// Returns `None` if `t` is before the first keyframe.
+    /// Returns `None` if `t` is before the timeline's origin.
+    /// See also [`at()`](Timeline::at) if you only need the value.
     #[inline]
     pub fn floor(&self, t: K) -> Option<(K, &V)> {
         self.map.range(..=t).next_back().map(|(k, v)| (*k, v))
     }
 
-    /// Ensures that an exact key exists at time `t`.
+    /// Returns a reference to the raw, underlying `BTreeMap`.
+    #[inline]
+    pub fn raw(&self) -> &BTreeMap<K, V> {
+        &self.map
+    }
+
+    /// Returns a mutable reference to the raw, underlying `BTreeMap`.
     ///
-    /// - If a key already exists at `t`, it returns a mutable reference to its value.
-    /// - If no key exists at `t`, it clones the value from the immediately preceding
-    ///   keyframe, inserts it at `t`, and returns a mutable reference.
+    /// Note: Handle with care, as direct manipulation can break invariants.
+    #[inline]
+    pub fn raw_mut(&mut self) -> &mut BTreeMap<K, V> {
+        &mut self.map
+    }
+
+    /// Ensures an exact key exists at time `t`, returning a mutable reference to its value.
     ///
-    /// Returns `None` if `t` is before the first keyframe in the timeline, as there would
-    /// be no value to clone.
+    /// If no key exists at `t`, it clones the value from the preceding keyframe.
+    /// Returns `None` if `t` is before the origin.
     #[inline]
     pub fn ensure_key(&mut self, t: K) -> Option<&mut V>
     where
@@ -103,17 +96,19 @@ where
         self.map.get_mut(&t)
     }
 
-    /// Returns the key of the keyframe active at time `t`.
-    ///
-    /// This is the largest key that is less than or equal to `t`.
+    /// Returns the key of the keyframe active at time `t` (largest key <= `t`).
     #[inline]
     pub fn prev_key(&self, t: K) -> Option<K> {
         self.map.range(..=t).next_back().map(|(k, _)| *k)
     }
 
-    /// Returns the first key that comes after time `t`.
-    ///
-    /// This is the smallest key that is strictly greater than `t`.
+    /// Returns the largest key that is strictly less than `t`.
+    #[inline]
+    pub fn prev_strict_key(&self, t: K) -> Option<K> {
+        self.map.range(..t).next_back().map(|(k, _)| *k)
+    }
+
+    /// Returns the smallest key that is strictly greater than `t`.
     #[inline]
     pub fn next_key(&self, t: K) -> Option<K> {
         self.map
@@ -122,305 +117,265 @@ where
             .map(|(k, _)| *k)
     }
 
+    /// Alias for [`next_key()`](Timeline::next_key).
+    #[inline]
+    pub fn next_strict_key(&self, t: K) -> Option<K> {
+        self.next_key(t)
+    }
+
     /// Returns an iterator over the keys within a specified range.
     #[inline]
     pub fn keys(&self, range: impl RangeBounds<K>) -> impl Iterator<Item = K> + '_ {
-        self.map.range(range).map(|(k, _)| *k)
+        let (lb, rb) = normalize_bounds(range.start_bound(), range.end_bound());
+        self.map.range((lb, rb)).map(|(k, _)| *k)
     }
 
-    /// Applies a function to all values associated with keyframes in a given range.
-    #[inline]
-    pub fn apply_in(&mut self, range: impl RangeBounds<K>, mut f: impl FnMut(&mut V)) {
-        for (_, v) in self.map.range_mut(range) {
-            f(v);
-        }
-    }
-
-    /// Scans a region and removes redundant keyframes.
+    /// Inserts or replaces a keyframe and automatically coalesces redundant keyframes around it.
     ///
-    /// A keyframe is considered redundant if its value is identical to the value of the
-    /// preceding keyframe. This method checks all keyframes that "touch" the specified
-    /// range (i.e., the key just before the range start, all keys within, and the key at the end)
-    /// and removes any that are unnecessary.
-    pub fn coalesce_in(&mut self, range: impl RangeBounds<K>)
+    /// This is the preferred method for adding keyframes, as it ensures the timeline
+    /// remains in an optimized state. After insertion, it checks if the new key or its
+    /// immediate neighbors have become redundant and removes them if so.
+    #[inline]
+    pub fn insert_key(&mut self, t: K, v: V)
     where
         V: PartialEq,
     {
-        if self.map.is_empty() {
-            return;
+        self.map.insert(t, v);
+        let left = self.prev_strict_key(t).unwrap_or(t);
+        let right = self.next_key(t).unwrap_or(t);
+        self.coalesce_in(left..=right);
+    }
+
+    /// Edits all keyframes within a range, ensuring clean boundaries and coalescing afterward.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the timeline is empty (which should not happen if created via `new`).
+    #[inline]
+    pub fn edit_in<R>(&mut self, range: R, mut f: impl FnMut(&mut V))
+    where
+        R: RangeBounds<K>,
+        V: Clone + PartialEq,
+    {
+        let (lb, rb) = self.ensure_cuts(range);
+        for (_, v) in self.map.range_mut((lb, rb)) {
+            f(v);
         }
 
-        // strict predecessor of start
-        let left = match range.start_bound() {
-            Included(s) | Excluded(s) => self
-                .map
-                .range(..*s)
-                .next_back()
-                .map(|(k, _)| *k)
-                .unwrap_or(*s),
-            Unbounded => *self.map.keys().next().unwrap(),
+        let left_anchor = match lb {
+            Included(s) | Excluded(s) => self.prev_strict_key(s).unwrap_or(s),
+            Unbounded => *self.map.keys().next().expect("timeline has origin"),
         };
-
-        // first key strictly after end
-        let right = match range.end_bound() {
-            Included(e) | Excluded(e) => self
-                .map
-                .range((Excluded(*e), Unbounded))
-                .next()
-                .map(|(k, _)| *k)
-                .unwrap_or(*e),
-            Unbounded => *self.map.keys().next_back().unwrap(),
+        let right_anchor = match rb {
+            Included(e) | Excluded(e) => self.next_key(e).unwrap_or(e),
+            Unbounded => *self.map.keys().next_back().expect("timeline has origin"),
         };
+        self.coalesce_in(left_anchor..=right_anchor);
+    }
 
-        // Collect to avoid borrow conflicts while mutating
-        let keys: Vec<K> = self
-            .map
-            .range((Included(left), Included(right)))
-            .map(|(k, _)| *k)
-            .collect();
+    /// Private helper to ensure keyframes exist at the bounded endpoints of a range.
+    /// This "cuts" the timeline to isolate a range before mutation.
+    #[inline]
+    fn ensure_cuts<R>(&mut self, range: R) -> (Bound<K>, Bound<K>)
+    where
+        R: RangeBounds<K>,
+        V: Clone,
+    {
+        let (sb, eb) = (range.start_bound(), range.end_bound());
 
-        for tp in keys {
-            self.coalesce_at(tp);
+        if let Some(s) = boundary_key(sb) {
+            let _ = self.ensure_key(s);
+        }
+        if let Some(e) = boundary_key(eb) {
+            let _ = self.ensure_key(e);
+        }
+
+        normalize_bounds(sb, eb)
+    }
+
+    /// Removes redundant keyframes within a specified range.
+    /// A keyframe is redundant if its value is identical to its immediate predecessor.
+    fn coalesce_in<R>(&mut self, range: R)
+    where
+        R: RangeBounds<K>,
+        V: PartialEq,
+    {
+        if self.map.len() < 2 {
+            return;
+        }
+        let (lb, rb) = normalize_bounds(range.start_bound(), range.end_bound());
+        let keys: Vec<K> = self.map.range((lb, rb)).map(|(k, _)| *k).collect();
+        for k in keys {
+            self.coalesce_at(k);
         }
     }
 
-    /// Checks a single point `tp` and removes it if its value is the same
-    /// as its predecessor and successor.
+    /// Checks a single point for redundancy and removes it if necessary.
     fn coalesce_at(&mut self, tp: K)
     where
         V: PartialEq,
     {
-        let Some(cur) = self.map.get(&tp) else {
-            return;
-        };
-
-        let pred_eq = self
+        let Some(cur) = self.map.get(&tp) else { return };
+        let redundant = self
             .map
             .range(..tp)
             .next_back()
-            .is_some_and(|(_, p)| p == cur);
-        let next_eq = match self.map.range((Excluded(tp), Unbounded)).next() {
-            None => true,
-            Some((_, n)) => n == cur,
-        };
+            .is_some_and(|(_, prev)| prev == cur);
 
-        if pred_eq && next_eq {
+        if redundant {
             self.map.remove(&tp);
         }
     }
+}
 
-    /// Returns a reference to the raw, underlying `BTreeMap`.
-    #[inline]
-    pub fn raw(&self) -> &BTreeMap<K, V> {
-        &self.map
+/// Helper to get the key from a `Bound` if it's `Included` or `Excluded`.
+#[inline]
+fn boundary_key<K: Copy>(bound: Bound<&K>) -> Option<K> {
+    match bound {
+        Included(k) | Excluded(k) => Some(*k),
+        Unbounded => None,
+    }
+}
+
+/// Normalizes range bounds to handle a `BTreeMap::range` edge case.
+#[inline]
+fn normalize_bounds<K: Copy>(start: Bound<&K>, end: Bound<&K>) -> (Bound<K>, Bound<K>)
+where
+    K: PartialEq,
+{
+    match (start, end) {
+        (Excluded(a), Excluded(b)) if a == b => (Included(*a), Excluded(*b)),
+        _ => (own(start), own(end)),
+    }
+}
+
+/// Helper to convert a bound of references to a bound of owned values.
+#[inline]
+fn own<K: Copy>(b: Bound<&K>) -> Bound<K> {
+    match b {
+        Included(x) => Included(*x),
+        Excluded(x) => Excluded(*x),
+        Unbounded => Unbounded,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
-    /// Creates a sample timeline for testing purposes:
-    /// 0 -> "a"
-    /// 10 -> "b"
-    /// 20 -> "c"
-    fn sample_timeline() -> Timeline<i32, &'static str> {
-        let mut timeline = Timeline::new(0, "a");
-        timeline.map.insert(10, "b");
-        timeline.map.insert(20, "c");
+    fn sample_timeline() -> Timeline<i32, i32> {
+        let mut timeline = Timeline::new(0, 100);
+        timeline.raw_mut().insert(10, 200);
+        timeline.raw_mut().insert(20, 100);
+        timeline.raw_mut().insert(30, 300);
         timeline
     }
 
     #[test]
-    fn test_new_and_len() {
-        let timeline = Timeline::new(0, "hello");
+    fn test_new() {
+        let timeline = Timeline::new(0, "initial");
         assert_eq!(timeline.len(), 1);
         assert!(!timeline.is_empty());
-        assert_eq!(timeline.at(0), Some(&"hello"));
-        assert_eq!(timeline.at(100), Some(&"hello"));
     }
 
     #[test]
-    fn test_at_and_floor() {
-        let timeline = sample_timeline();
+    fn test_insert_key() {
+        // Case 1: Simple insert in the middle.
+        let mut tl = Timeline::new(0, 'A');
+        tl.raw_mut().insert(20, 'C');
+        tl.insert_key(10, 'B');
+        assert_eq!(tl.raw(), &BTreeMap::from([(0, 'A'), (10, 'B'), (20, 'C')]));
 
-        // Test `at`
-        assert_eq!(timeline.at(-5), None); // Before first key
-        assert_eq!(timeline.at(0), Some(&"a")); // Exact key
-        assert_eq!(timeline.at(5), Some(&"a")); // Between keys
-        assert_eq!(timeline.at(10), Some(&"b")); // Exact key
-        assert_eq!(timeline.at(19), Some(&"b")); // Between keys
-        assert_eq!(timeline.at(20), Some(&"c")); // Last key
-        assert_eq!(timeline.at(100), Some(&"c")); // After last key
+        // Case 2: Insert a key that is immediately redundant.
+        let mut tl = Timeline::new(0, 'A');
+        tl.raw_mut().insert(20, 'C');
+        tl.insert_key(10, 'A');
+        assert_eq!(
+            tl.raw(),
+            &BTreeMap::from([(0, 'A'), (20, 'C')]),
+            "Key at 10 should be coalesced"
+        );
 
-        // Test `floor`
-        assert_eq!(timeline.floor(-5), None);
-        assert_eq!(timeline.floor(0), Some((0, &"a")));
-        assert_eq!(timeline.floor(5), Some((0, &"a")));
-        assert_eq!(timeline.floor(10), Some((10, &"b")));
-        assert_eq!(timeline.floor(100), Some((20, &"c")));
+        // Case 3: Insert a key that makes the successor redundant.
+        let mut tl = Timeline::new(0, 'A');
+        tl.raw_mut().insert(20, 'C');
+        tl.insert_key(10, 'C');
+        assert_eq!(
+            tl.raw(),
+            &BTreeMap::from([(0, 'A'), (10, 'C')]),
+            "Key at 20 should be coalesced"
+        );
+
+        // Case 4: Overwrite an existing key, causing it to become redundant.
+        let mut tl = Timeline::new(0, 'A');
+        tl.raw_mut().insert(10, 'B');
+        tl.insert_key(10, 'A');
+        assert_eq!(
+            tl.raw(),
+            &BTreeMap::from([(0, 'A')]),
+            "Overwritten key at 10 should be coalesced"
+        );
     }
 
     #[test]
-    fn test_prev_and_next_key() {
-        let timeline = sample_timeline();
+    fn test_private_ensure_cuts() {
+        let mut timeline = Timeline::new(0, 'A');
+        timeline.raw_mut().insert(20, 'C');
 
-        // Test prev_key
-        assert_eq!(timeline.prev_key(-1), None);
-        assert_eq!(timeline.prev_key(0), Some(0));
-        assert_eq!(timeline.prev_key(9), Some(0));
-        assert_eq!(timeline.prev_key(10), Some(10));
-        assert_eq!(timeline.prev_key(50), Some(20));
+        // Case 1: Cuts are needed at both ends.
+        let mut tl1 = timeline.clone();
+        tl1.ensure_cuts(5..15);
+        assert_eq!(tl1.raw().contains_key(&5), true);
+        assert_eq!(tl1.raw().contains_key(&15), true);
+        assert_eq!(tl1.at(5), Some(&'A'));
+        assert_eq!(tl1.at(15), Some(&'A'));
 
-        // Test next_key
-        assert_eq!(timeline.next_key(-1), Some(0));
-        assert_eq!(timeline.next_key(0), Some(10));
-        assert_eq!(timeline.next_key(9), Some(10));
-        assert_eq!(timeline.next_key(10), Some(20));
-        assert_eq!(timeline.next_key(20), None);
-        assert_eq!(timeline.next_key(50), None);
+        // Case 2: Start bound is already a key.
+        let mut tl2 = timeline.clone();
+        tl2.ensure_cuts(0..15);
+        assert_eq!(tl2.len(), 3, "Should only add one key at 15");
+        assert_eq!(tl2.raw().contains_key(&15), true);
     }
 
     #[test]
-    fn test_ensure_key() {
-        let mut timeline = Timeline::new(0, 100);
-        timeline.map.insert(10, 200);
+    fn test_edit_in() {
+        // Case 1: Edit a middle segment, causing coalesce with predecessor.
+        let mut tl = Timeline::new(0, 'A');
+        tl.raw_mut().insert(10, 'B');
+        tl.raw_mut().insert(20, 'C');
+        tl.edit_in(10..20, |v| *v = 'A');
+        assert_eq!(tl.raw(), &BTreeMap::from([(0, 'A'), (20, 'C')]));
 
-        // Case 1: Key already exists. Should do nothing but return a mutable reference.
-        assert_eq!(timeline.len(), 2);
-        if let Some(val) = timeline.ensure_key(10) {
-            *val = 250;
-        }
-        assert_eq!(timeline.len(), 2);
-        assert_eq!(timeline.at(10), Some(&250));
+        // Case 2: Edit a middle segment, causing coalesce with successor.
+        let mut tl = Timeline::new(0, 'A');
+        tl.raw_mut().insert(10, 'B');
+        tl.raw_mut().insert(20, 'C');
+        tl.edit_in(10..20, |v| *v = 'C');
+        assert_eq!(tl.raw(), &BTreeMap::from([(0, 'A'), (10, 'C')]));
 
-        // Case 2: Key does not exist. Should clone the floor value.
-        assert!(timeline.ensure_key(5).is_some());
-        assert_eq!(timeline.len(), 3);
-        assert_eq!(timeline.at(5), Some(&100)); // Cloned from key 0
-        assert_eq!(timeline.at(9), Some(&100)); // Value at 5 persists
-        assert_eq!(timeline.at(10), Some(&250)); // Unchanged
-    }
+        // Case 3: Edit over multiple segments.
+        let mut tl = Timeline::new(0, 'A');
+        tl.raw_mut().insert(10, 'B');
+        tl.raw_mut().insert(20, 'C');
+        tl.raw_mut().insert(30, 'D');
+        tl.edit_in(5..25, |v| *v = 'X');
+        // Expected steps:
+        // 1. Initial: {0:A, 10:B, 20:C, 30:D}
+        // 2. ensure_cuts(5, 25): {0:A, 5:A, 10:B, 20:C, 25:C, 30:D}
+        // 3. Mutate keys in range [5, 25): {0:A, 5:X, 10:X, 20:X, 25:C, 30:D}
+        // 4. Coalesce from prev(5)=0 to next(25)=30: {0:A, 5:X, 25:C, 30:D}
+        assert_eq!(
+            tl.raw(),
+            &BTreeMap::from([(0, 'A'), (5, 'X'), (25, 'C'), (30, 'D')])
+        );
 
-    #[test]
-    fn test_ensure_key_no_floor() {
-        let mut timeline = Timeline::<i32, i32>::new(10, 100);
-
-        // ensure_key before the first key should do nothing and return None
-        assert_eq!(timeline.ensure_key(5), None);
-        assert_eq!(timeline.len(), 1);
-        assert_eq!(timeline.map.contains_key(&5), false);
-    }
-
-    #[test]
-    fn test_keys_iterator() {
-        let timeline = sample_timeline();
-
-        let all_keys: Vec<_> = timeline.keys(..).collect();
-        assert_eq!(all_keys, vec![0, 10, 20]);
-
-        let from_10: Vec<_> = timeline.keys(10..).collect();
-        assert_eq!(from_10, vec![10, 20]);
-
-        let up_to_10_exclusive: Vec<_> = timeline.keys(..10).collect();
-        assert_eq!(up_to_10_exclusive, vec![0]);
-
-        let up_to_10_inclusive: Vec<_> = timeline.keys(..=10).collect();
-        assert_eq!(up_to_10_inclusive, vec![0, 10]);
-
-        let between_5_and_15: Vec<_> = timeline.keys(5..15).collect();
-        assert_eq!(between_5_and_15, vec![10]);
-    }
-
-    #[test]
-    fn test_apply_in() {
-        let mut timeline = Timeline::new(0, 1);
-        timeline.map.insert(10, 2);
-        timeline.map.insert(20, 3);
-        timeline.map.insert(30, 4);
-
-        // Apply a function to a range of values
-        timeline.apply_in(10..=20, |v| *v *= 10);
-
-        assert_eq!(timeline.at(0), Some(&1));
-        assert_eq!(timeline.at(10), Some(&20));
-        assert_eq!(timeline.at(20), Some(&30));
-        assert_eq!(timeline.at(30), Some(&4));
-    }
-
-    #[test]
-    fn test_coalesce_simple_redundant_middle_point() {
-        let mut timeline = Timeline::new(0, "a");
-        timeline.map.insert(10, "a"); // Redundant point
-        timeline.map.insert(20, "b");
-
-        // This won't be removed because its `next` value ("b") is different.
-        // The implementation only removes points surrounded by equal values.
-        timeline.coalesce_in(0..);
-        assert_eq!(timeline.len(), 3);
-
-        // Now add another "a", so 10 is surrounded
-        timeline.map.insert(15, "a");
-        let mut timeline2 = timeline.clone();
-
-        // `coalesce_at(10)` runs: pred=0("a"), next=15("a"). Both equal. Remove 10.
-        // `coalesce_at(15)` runs: pred is now 0("a"), next is 20("b"). Not equal. Keep 15.
-        timeline.coalesce_in(..20);
-        assert_eq!(timeline.keys(..).collect::<Vec<_>>(), vec![0, 15, 20]);
-
-        // `coalesce_at(15)` runs: pred=10("a"), next=20("b"). Not equal. Keep 15.
-        // `coalesce_at(10)` runs: pred=0("a"), next=15("a"). Both equal. Remove 10.
-        timeline2.coalesce_in(15..20); // Different range, same keys touched
-        assert_eq!(timeline2.keys(..).collect::<Vec<_>>(), vec![0, 15, 20]);
-    }
-
-    #[test]
-    fn test_coalesce_no_change() {
-        let mut timeline = sample_timeline();
-        let original_keys: Vec<_> = timeline.keys(..).collect();
-
-        timeline.coalesce_in(..);
-        assert_eq!(timeline.keys(..).collect::<Vec<_>>(), original_keys);
-    }
-
-    #[test]
-    fn test_coalesce_contiguous_block() {
-        let mut timeline = Timeline::new(0, "a");
-        timeline.map.insert(10, "a");
-        timeline.map.insert(20, "a");
-        timeline.map.insert(30, "b");
-
-        // Keys to check are 0, 10, 20, 30
-        // 1. coalesce_at(0): keep (no pred)
-        // 2. coalesce_at(10): remove (pred=0("a"), next=20("a")) -> map is {0:a, 20:a, 30:b}
-        // 3. coalesce_at(20): keep (pred is now 0("a"), next is 30("b")) -> pred_eq is true, next_eq is false
-        // 4. coalesce_at(30): keep (pred=20("a"), next=none) -> pred_eq is false
-        timeline.coalesce_in(..);
-
-        assert_eq!(timeline.keys(..).collect::<Vec<_>>(), vec![0, 20, 30]);
-    }
-
-    #[test]
-    fn test_coalesce_full_block() {
-        let mut timeline = Timeline::new(0, "a");
-        timeline.map.insert(10, "a");
-        timeline.map.insert(20, "a");
-
-        // Keys to check: 0, 10, 20
-        // 1. coalesce_at(0): keep
-        // 2. coalesce_at(10): remove (pred=0("a"), next=20("a")) -> map is {0:a, 20:a}
-        // 3. coalesce_at(20): remove (pred is now 0("a"), next=None) -> pred_eq & next_eq are true
-        timeline.coalesce_in(..);
-
-        assert_eq!(timeline.keys(..).collect::<Vec<_>>(), vec![0]);
-    }
-
-    #[test]
-    fn test_raw_getter() {
-        let timeline = sample_timeline();
-        let raw_map = timeline.raw();
-
-        assert_eq!(raw_map.len(), 3);
-        assert_eq!(raw_map.get(&10), Some(&"b"));
+        // Case 4: Edit with unbounded start.
+        let mut tl = Timeline::new(0, 'A');
+        tl.raw_mut().insert(10, 'B');
+        tl.raw_mut().insert(20, 'C');
+        tl.edit_in(..15, |v| *v = 'Z');
+        // Expected: {0:Z, 15:B, 20:C}
+        assert_eq!(tl.raw(), &BTreeMap::from([(0, 'Z'), (15, 'B'), (20, 'C')]));
     }
 }

@@ -221,24 +221,12 @@ where
         if rect.is_empty() {
             return;
         }
-
         let ti = rect.time();
         let si = rect.space();
-        let (start, end) = (ti.start(), ti.end());
-
         debug_assert!(self.space_within_quay(si));
-
-        // Ensure keys exactly at [start, end)
-        let _ = self.timeline.ensure_key(start);
-        let _ = self.timeline.ensure_key(end);
-
-        // Mutate only inside [start, end)
-        self.timeline.apply_in(start..end, |quay_state| {
+        self.timeline.edit_in(ti.start()..ti.end(), |quay_state| {
             f(quay_state, si);
         });
-
-        // Merge equal neighbors around the touched span.
-        self.timeline.coalesce_in(start..end);
     }
 
     #[inline]
@@ -1514,10 +1502,10 @@ mod tests {
         berth_occupancy.occupy(&rect(ti(2, 5), si(3, 6)));
         berth_occupancy.occupy(&rect(ti(5, 7), si(3, 6)));
 
-        // At t=5 they just touch; occupancy should be continuous across [2,7)
+        // At t=5 they just touch; the occupancy is continuous across [2,7).
+        // With redundancy coalescing, the boundary at 5 is removed.
         assert!(berth_occupancy.is_occupied(&rect(ti(2, 7), si(3, 6))));
-        // Boundaries: 0,2,5,7
-        assert_eq!(berth_occupancy.time_event_count(), 4);
+        assert_eq!(berth_occupancy.time_event_count(), 3); // keys: 0, 2, 7
     }
 
     #[test]

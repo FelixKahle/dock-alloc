@@ -25,4 +25,4 @@ pub mod ledger;
 pub mod occupancy;
 pub mod quay;
 pub mod search;
-mod timeline;
+pub mod timeline;
