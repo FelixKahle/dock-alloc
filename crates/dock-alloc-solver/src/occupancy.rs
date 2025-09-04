@@ -34,6 +34,20 @@ use std::iter::{Copied, Peekable};
 use std::marker::PhantomData;
 use std::ops::Bound::{Excluded, Unbounded};
 
+pub trait SliceView<T: PrimInt + Signed> {
+    fn pred(&self, t: TimePoint<T>) -> Option<TimePoint<T>>;
+    fn next_key_after(&self, after: TimePoint<T>) -> Option<TimePoint<T>>;
+    fn has_key_at(&self, t: TimePoint<T>) -> bool;
+    fn adjusted_free_runs_at(
+        &self,
+        t: TimePoint<T>,
+        bounds: SpaceInterval,
+        min_len: SpaceLength,
+        scratch_base: &mut SpaceIntervalSet,
+        scratch_buf: &mut SpaceIntervalSet,
+    ) -> SpaceIntervalSet;
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TimeSliceRef<'a, T, Q>
 where
@@ -63,6 +77,93 @@ where
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Slices<'a, T, Q>
+where
+    T: PrimInt + Signed,
+    Q: QuayRead,
+{
+    berth: &'a BerthOccupancy<T, Q>,
+    start: TimePoint<T>,
+    end: TimePoint<T>,
+}
+
+impl<'a, T, Q> Slices<'a, T, Q>
+where
+    T: PrimInt + Signed,
+    Q: QuayRead,
+{
+    #[inline]
+    pub fn new(berth: &'a BerthOccupancy<T, Q>, start: TimePoint<T>, end: TimePoint<T>) -> Self {
+        let s = core::cmp::min(start, end);
+        let e = core::cmp::max(start, end);
+        Self {
+            berth,
+            start: s,
+            end: e,
+        }
+    }
+
+    #[inline]
+    pub fn interior_keys(self) -> impl DoubleEndedIterator<Item = TimePoint<T>> + 'a {
+        let start = self.start;
+        let end = self.end;
+        let tl = &self.berth.timeline;
+        tl.keys((Excluded(start), Excluded(end)))
+    }
+
+    #[inline]
+    pub fn interior_refs(self) -> impl DoubleEndedIterator<Item = TimeSliceRef<'a, T, Q>> + 'a {
+        let start = self.start;
+        let end = self.end;
+        let tl = &self.berth.timeline;
+        tl.entries((Excluded(start), Excluded(end)))
+            .map(|(t, q)| TimeSliceRef::new(t, q))
+    }
+
+    #[inline]
+    pub fn within_keys(self) -> impl DoubleEndedIterator<Item = TimePoint<T>> + 'a {
+        let start = self.start;
+        let end = self.end;
+        let tl = &self.berth.timeline;
+        tl.keys(start..end)
+    }
+
+    #[inline]
+    pub fn within_refs(self) -> impl DoubleEndedIterator<Item = TimeSliceRef<'a, T, Q>> + 'a {
+        let start = self.start;
+        let end = self.end;
+        let tl = &self.berth.timeline;
+        tl.entries(start..end).map(|(t, q)| TimeSliceRef::new(t, q))
+    }
+
+    #[inline]
+    pub fn covering_keys(self) -> impl DoubleEndedIterator<Item = TimePoint<T>> + 'a {
+        let start = self.start;
+        let end = self.end;
+        let tl = &self.berth.timeline;
+
+        let pred = tl.floor(start).map(|(t, _)| t);
+        let tail = tl.keys((Excluded(start), Excluded(end)));
+
+        pred.into_iter().chain(tail)
+    }
+
+    #[inline]
+    pub fn covering_refs(self) -> impl DoubleEndedIterator<Item = TimeSliceRef<'a, T, Q>> + 'a {
+        let start = self.start;
+        let end = self.end;
+        let tl = &self.berth.timeline;
+
+        let pred = tl.floor(start).map(|(t, q)| TimeSliceRef::new(t, q));
+        let tail = tl
+            .entries((Excluded(start), Excluded(end)))
+            .map(|(t, q)| TimeSliceRef::new(t, q));
+
+        pred.into_iter().chain(tail)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BerthOccupancy<T, Q>
 where
@@ -70,6 +171,51 @@ where
 {
     quay_length: SpaceLength,
     timeline: Timeline<TimePoint<T>, Q>,
+}
+
+impl<T, Q> BerthOccupancy<T, Q>
+where
+    T: PrimInt + Signed,
+    Q: QuayRead + Clone + PartialEq,
+{
+    #[inline]
+    pub fn slices(&self, start: TimePoint<T>, end: TimePoint<T>) -> Slices<'_, T, Q> {
+        Slices::new(self, start, end)
+    }
+}
+
+impl<T, Q> SliceView<T> for BerthOccupancy<T, Q>
+where
+    T: PrimInt + Signed,
+    Q: QuayRead,
+{
+    fn pred(&self, t: TimePoint<T>) -> Option<TimePoint<T>> {
+        self.slice_predecessor_timepoint(t)
+    }
+    fn next_key_after(&self, after: TimePoint<T>) -> Option<TimePoint<T>> {
+        self.next_time_key_after(after)
+    }
+
+    fn has_key_at(&self, t: TimePoint<T>) -> bool {
+        self.slice_predecessor_timepoint(t)
+            .is_some_and(|tp| tp == t)
+    }
+
+    fn adjusted_free_runs_at(
+        &self,
+        t: TimePoint<T>,
+        bounds: SpaceInterval,
+        min_len: SpaceLength,
+        base: &mut SpaceIntervalSet,
+        _buf: &mut SpaceIntervalSet,
+    ) -> SpaceIntervalSet {
+        base.clear_and_fill_from_iter(
+            self.snapshot_at(t)
+                .expect("slice exists")
+                .iter_free_intervals(SpaceLength::new(1), bounds),
+        );
+        core::mem::take(base).filter_min_length(min_len)
+    }
 }
 
 impl<T, Q> BerthOccupancy<T, Q>
@@ -108,13 +254,23 @@ where
     }
 
     #[inline]
-    pub fn snapshot_at(&self, t: TimePoint<T>) -> Option<&Q> {
-        self.timeline.at(t)
+    pub fn slice_predecessor_timepoint(&self, t: TimePoint<T>) -> Option<TimePoint<T>> {
+        self.timeline.prev_key(t)
     }
 
     #[inline]
-    pub fn snapshot_at_mut(&mut self, t: TimePoint<T>) -> Option<&mut Q> {
-        self.timeline.ensure_key(t)
+    pub fn space_within_quay(&self, si: SpaceInterval) -> bool {
+        self.quay_space_interval().contains_interval(&si)
+    }
+
+    #[inline]
+    pub fn next_time_key_after(&self, t: TimePoint<T>) -> Option<TimePoint<T>> {
+        self.timeline.next_key(t)
+    }
+
+    #[inline]
+    pub fn snapshot_at(&self, t: TimePoint<T>) -> Option<&Q> {
+        self.timeline.at(t)
     }
 
     pub fn is_free(&self, rect: &SpaceTimeRectangle<T>) -> bool {
@@ -123,44 +279,20 @@ where
         }
         debug_assert!(self.space_within_quay(rect.space()));
         let ti = rect.time();
+        let start_time = ti.start();
+        let end_time = ti.end();
         let si = rect.space();
-        self.slices_covering(ti)
-            .all(|s| !s.quay().check_occupied(si))
+        for s in self.slices(start_time, end_time).covering_refs() {
+            if s.quay().check_occupied(si) {
+                return false;
+            }
+        }
+        true
     }
 
     #[inline]
     pub fn is_occupied(&self, rect: &SpaceTimeRectangle<T>) -> bool {
         !self.is_free(rect)
-    }
-
-    pub fn iter_slice_free_runs<'a>(
-        &'a self,
-        ti: TimeInterval<T>,
-        required_space: SpaceLength,
-        search_space: SpaceInterval,
-    ) -> impl Iterator<Item = (TimePoint<T>, <Q as QuayRead>::FreeIter<'a>)> + 'a {
-        debug_assert!(self.space_within_quay(search_space));
-        self.slices_covering(ti).map(move |s| {
-            (
-                s.time(),
-                s.quay().iter_free_intervals(required_space, search_space),
-            )
-        })
-    }
-
-    #[inline]
-    pub fn slice_predecessor_timepoint(&self, t: TimePoint<T>) -> Option<TimePoint<T>> {
-        self.timeline.prev_key(t)
-    }
-
-    /// Interior change keys in (start, end).
-    #[inline]
-    pub fn iter_timepoints(
-        &self,
-        interval: TimeInterval<T>,
-    ) -> impl Iterator<Item = TimePoint<T>> + '_ {
-        let (start, end) = (interval.start(), interval.end());
-        self.timeline.keys(start..end).filter(move |&k| k > start)
     }
 
     #[inline]
@@ -170,42 +302,27 @@ where
         duration: TimeDelta<T>,
         required_space: SpaceLength,
         space_window: SpaceInterval,
-    ) -> BerthOccupancyFreeIter<'_, T, Q> {
-        BerthOccupancyFreeIter::new(self, time_window, duration, required_space, space_window)
+    ) -> impl Iterator<Item = FreeSlot<T>> + '_ {
+        FreeIter::new(self, time_window, duration, required_space, space_window)
     }
 
-    #[inline]
-    pub fn space_within_quay(&self, si: SpaceInterval) -> bool {
-        self.quay_space_interval().contains_interval(&si)
-    }
-
-    /// Include the floor at `start` and any change keys in (start, end).
-    #[inline]
-    pub fn slices_covering(
-        &self,
-        interval: TimeInterval<T>,
-    ) -> impl Iterator<Item = TimeSliceRef<'_, T, Q>> {
-        let start = interval.start();
-        let end = interval.end();
-
-        let pred = self
-            .timeline
-            .floor(start)
-            .map(|(t, q)| TimeSliceRef { time: t, quay: q });
-
-        let tail = self
-            .timeline
-            .raw()
-            .range(start..end)
-            .filter(move |(t, _)| *t > &start)
-            .map(|(t, q)| TimeSliceRef { time: *t, quay: q });
-
-        pred.into_iter().chain(tail)
-    }
-
-    #[inline]
-    pub fn next_time_key_after(&self, t: TimePoint<T>) -> Option<TimePoint<T>> {
-        self.timeline.next_key(t)
+    pub fn iter_slice_free_runs<'a>(
+        &'a self,
+        ti: TimeInterval<T>,
+        required_space: SpaceLength,
+        search_space: SpaceInterval,
+    ) -> impl Iterator<Item = (TimePoint<T>, <Q as QuayRead>::FreeIter<'a>)> + 'a {
+        debug_assert!(self.space_within_quay(search_space));
+        let start_time = ti.start();
+        let end_time = ti.end();
+        self.slices(start_time, end_time)
+            .covering_refs()
+            .map(move |s| {
+                (
+                    s.time(),
+                    s.quay().iter_free_intervals(required_space, search_space),
+                )
+            })
     }
 }
 
@@ -272,192 +389,6 @@ where
     #[inline]
     pub fn space(&self) -> SpaceInterval {
         self.space
-    }
-}
-
-pub struct BerthOccupancyFreeIter<'a, T, Q>
-where
-    T: PrimInt + Signed + Copy,
-    Q: QuayRead,
-{
-    berth: &'a BerthOccupancy<T, Q>,
-    time_window: TimeInterval<T>,
-    processing_duration: TimeDelta<T>,
-    required_length: SpaceLength,
-    search_bounds: SpaceInterval,
-
-    yielded_window_start: bool,
-    last_start_time: Option<TimePoint<T>>,
-    current_start_time: Option<TimePoint<T>>,
-
-    feasible_runs: DoubleBuf<SpaceInterval>,
-    next_emit_index: usize,
-}
-
-impl<'a, T, Q> BerthOccupancyFreeIter<'a, T, Q>
-where
-    T: PrimInt + Signed + Copy,
-    Q: QuayRead,
-{
-    fn new(
-        berth: &'a BerthOccupancy<T, Q>,
-        time_window: TimeInterval<T>,
-        processing_duration: TimeDelta<T>,
-        required_length: SpaceLength,
-        search_bounds: SpaceInterval,
-    ) -> Self {
-        Self {
-            berth,
-            time_window,
-            processing_duration,
-            required_length,
-            search_bounds,
-            yielded_window_start: false,
-            last_start_time: None,
-            current_start_time: None,
-            feasible_runs: DoubleBuf::new(),
-            next_emit_index: 0,
-        }
-    }
-
-    fn next_candidate_start_time(&mut self) -> Option<TimePoint<T>> {
-        if self.time_window.start() + self.processing_duration > self.time_window.end() {
-            return None;
-        }
-        if !self.yielded_window_start {
-            self.yielded_window_start = true;
-            let window_start = self.time_window.start();
-            self.last_start_time = Some(window_start);
-            return Some(window_start);
-        }
-
-        let last_emitted = self.last_start_time?;
-        if let Some(next_key) = self
-            .berth
-            .iter_timepoints(TimeInterval::new(last_emitted, self.time_window.end()))
-            .next()
-            && next_key + self.processing_duration <= self.time_window.end()
-        {
-            self.last_start_time = Some(next_key);
-            return Some(next_key);
-        }
-        let window_end = self.time_window.end();
-        if self.processing_duration.value() == T::zero()
-            && last_emitted < window_end
-            && self
-                .berth
-                .slice_predecessor_timepoint(window_end)
-                .is_some_and(|tp| tp == window_end)
-        {
-            self.last_start_time = Some(window_end);
-            return Some(window_end);
-        }
-
-        None
-    }
-
-    fn intersect_source_runs_with_quay_into(
-        quay_snapshot: &Q,
-        bounds: SpaceInterval,
-        required_length: SpaceLength,
-        source_runs: &[SpaceInterval],
-        destination_runs: &mut Vec<SpaceInterval>,
-    ) {
-        let free_runs: Vec<SpaceInterval> = quay_snapshot
-            .iter_free_intervals(required_length, bounds)
-            .collect();
-        intersect_sorted_min_len(required_length, source_runs, &free_runs, destination_runs);
-    }
-
-    fn build_runs_for_start_time(&mut self, start_time: TimePoint<T>) {
-        self.feasible_runs.clear();
-        self.next_emit_index = 0;
-        self.current_start_time = None;
-
-        // Early guard: required length exceeds bounds capacity
-        let bounds_len = self.search_bounds.end().value() - self.search_bounds.start().value();
-        if self.required_length.value() > bounds_len {
-            return;
-        }
-
-        let predecessor_timepoint = self
-            .berth
-            .slice_predecessor_timepoint(start_time)
-            .expect("timeline has origin snapshot");
-
-        {
-            let quay_snapshot = self
-                .berth
-                .snapshot_at(predecessor_timepoint)
-                .expect("slice timepoint must exist");
-
-            self.feasible_runs.seed_from_iter(
-                quay_snapshot.iter_free_intervals(self.required_length, self.search_bounds),
-            );
-        }
-
-        // Intersect across all internal slice keys in [start, end)
-        let end_time = start_time + self.processing_duration;
-        for timepoint in self
-            .berth
-            .iter_timepoints(TimeInterval::new(start_time, end_time))
-        {
-            if self.feasible_runs.current().is_empty() {
-                break;
-            }
-            let quay_snapshot = self
-                .berth
-                .snapshot_at(timepoint)
-                .expect("slice timepoint must exist");
-
-            let req = self.required_length;
-            let bnd = self.search_bounds;
-            self.feasible_runs.step(|current_runs, next_runs| {
-                Self::intersect_source_runs_with_quay_into(
-                    quay_snapshot,
-                    bnd,
-                    req,
-                    current_runs,
-                    next_runs,
-                );
-            });
-        }
-
-        if !self.feasible_runs.current().is_empty() {
-            self.current_start_time = Some(start_time);
-        }
-    }
-}
-
-impl<'a, T, Q> Iterator for BerthOccupancyFreeIter<'a, T, Q>
-where
-    T: PrimInt + Signed + Copy,
-    Q: QuayRead,
-{
-    type Item = FreeSlot<T>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if let Some(start_time) = self.current_start_time {
-                if self.next_emit_index < self.feasible_runs.current().len() {
-                    let run = self.feasible_runs.current()[self.next_emit_index];
-                    self.next_emit_index += 1;
-                    return Some(FreeSlot::new(run, start_time));
-                }
-                self.current_start_time = None;
-            }
-
-            let candidate_start = self.next_candidate_start_time()?;
-            if candidate_start + self.processing_duration > self.time_window.end() {
-                return None;
-            }
-
-            self.build_runs_for_start_time(candidate_start);
-
-            if self.current_start_time.is_none() {
-                continue;
-            }
-        }
     }
 }
 
@@ -679,6 +610,44 @@ where
     _brand: PhantomData<&'brand ()>,
 }
 
+impl<'b, 'a, T, Q> SliceView<T> for BerthOccupancyOverlay<'b, 'a, T, Q>
+where
+    T: PrimInt + Signed,
+    Q: QuayRead,
+{
+    fn pred(&self, t: TimePoint<T>) -> Option<TimePoint<T>> {
+        self.berth_occupancy.slice_predecessor_timepoint(t)
+    }
+
+    fn next_key_after(&self, after: TimePoint<T>) -> Option<TimePoint<T>> {
+        next_key_after(
+            self.berth_occupancy,
+            &self.free_by_time,
+            &self.occupied_by_time,
+            after,
+        )
+    }
+
+    fn has_key_at(&self, t: TimePoint<T>) -> bool {
+        self.berth_occupancy
+            .slice_predecessor_timepoint(t)
+            .is_some_and(|tp| tp == t)
+            || self.free_by_time.contains_key(&t)
+            || self.occupied_by_time.contains_key(&t)
+    }
+
+    fn adjusted_free_runs_at(
+        &self,
+        t: TimePoint<T>,
+        bounds: SpaceInterval,
+        min_len: SpaceLength,
+        base: &mut SpaceIntervalSet,
+        buf: &mut SpaceIntervalSet,
+    ) -> SpaceIntervalSet {
+        BerthOccupancyOverlay::adjusted_free_runs_at(self, t, bounds, min_len, base, buf)
+    }
+}
+
 impl<'brand, 'a, T, Q> BerthOccupancyOverlay<'brand, 'a, T, Q>
 where
     T: PrimInt + Signed,
@@ -711,6 +680,8 @@ where
 
     pub fn occupy(&mut self, rect: &SpaceTimeRectangle<T>) {
         let time_window = rect.time();
+        let start_time = time_window.start();
+        let end_time = time_window.end();
         let space_interval = rect.space();
 
         if let Some(predecessor_timepoint) = self
@@ -719,7 +690,11 @@ where
         {
             self.add_occupy(predecessor_timepoint, space_interval);
         }
-        for timepoint in self.berth_occupancy.iter_timepoints(time_window) {
+        for timepoint in self
+            .berth_occupancy
+            .slices(start_time, end_time)
+            .interior_keys()
+        {
             self.add_occupy(timepoint, space_interval);
         }
     }
@@ -741,6 +716,8 @@ where
 
     pub fn undo_occupy(&mut self, rect: &SpaceTimeRectangle<T>) {
         let time_window = rect.time();
+        let start_time = time_window.start();
+        let end_time = time_window.end();
         let space_interval = rect.space();
 
         if let Some(pred) = self
@@ -749,7 +726,11 @@ where
         {
             self.remove_occupy(pred, space_interval);
         }
-        for tp in self.berth_occupancy.iter_timepoints(time_window) {
+        for tp in self
+            .berth_occupancy
+            .slices(start_time, end_time)
+            .interior_keys()
+        {
             self.remove_occupy(tp, space_interval);
         }
     }
@@ -767,6 +748,8 @@ where
 
     pub fn free(&mut self, rect: &SpaceTimeRectangle<T>) {
         let time_window = rect.time();
+        let start_time = time_window.start();
+        let end_time = time_window.end();
         let space_interval = rect.space();
 
         if let Some(predecessor_timepoint) = self
@@ -775,7 +758,11 @@ where
         {
             self.add_free(predecessor_timepoint, space_interval);
         }
-        for timepoint in self.berth_occupancy.iter_timepoints(time_window) {
+        for timepoint in self
+            .berth_occupancy
+            .slices(start_time, end_time)
+            .interior_keys()
+        {
             self.add_free(timepoint, space_interval);
         }
     }
@@ -798,6 +785,8 @@ where
 
     pub fn undo_free(&mut self, rect: &SpaceTimeRectangle<T>) {
         let time_window = rect.time();
+        let start_time = time_window.start();
+        let end_time = time_window.end();
         let space_interval = rect.space();
 
         if let Some(pred) = self
@@ -806,13 +795,18 @@ where
         {
             self.remove_free(pred, space_interval);
         }
-        for tp in self.berth_occupancy.iter_timepoints(time_window) {
+        for tp in self
+            .berth_occupancy
+            .slices(start_time, end_time)
+            .interior_keys()
+        {
             self.remove_free(tp, space_interval);
         }
     }
 
     pub fn is_free(&self, rect: &SpaceTimeRectangle<T>) -> bool {
         let time_window = rect.time();
+
         let space_interval = rect.space();
 
         self.iter_slice_timepoints_for(time_window).all(|tp| {
@@ -880,8 +874,8 @@ where
         duration: TimeDelta<T>,
         required_space: SpaceLength,
         space_window: SpaceInterval,
-    ) -> OverlayFreeIter<'brand, 'a, T, Q> {
-        OverlayFreeIter::new(self, time_window, duration, required_space, space_window)
+    ) -> impl Iterator<Item = FreeSlot<T>> + 'a {
+        FreeIter::new(self, time_window, duration, required_space, space_window)
     }
 
     #[inline]
@@ -901,8 +895,11 @@ where
         let pred = self
             .berth_occupancy
             .slice_predecessor_timepoint(time_window.start());
-        pred.into_iter()
-            .chain(self.berth_occupancy.iter_timepoints(time_window))
+        pred.into_iter().chain(
+            self.berth_occupancy
+                .slices(time_window.start(), time_window.end())
+                .interior_keys(),
+        )
     }
 
     #[inline]
@@ -971,94 +968,112 @@ where
     }
 }
 
-pub struct OverlayFreeIter<'brand, 'a, T, Q>
+struct CandidateStarts<'a, V, T>
+where
+    V: SliceView<T>,
+    T: PrimInt + Signed + Copy,
+{
+    view: &'a V,
+    time_window: TimeInterval<T>,
+    duration: TimeDelta<T>,
+    yielded_start: bool,
+    last: Option<TimePoint<T>>,
+}
+
+impl<'a, V, T> CandidateStarts<'a, V, T>
+where
+    V: SliceView<T>,
+    T: PrimInt + Signed + Copy,
+{
+    fn new(view: &'a V, time_window: TimeInterval<T>, duration: TimeDelta<T>) -> Self {
+        Self {
+            view,
+            time_window,
+            duration,
+            yielded_start: false,
+            last: None,
+        }
+    }
+}
+
+impl<'a, V, T> Iterator for CandidateStarts<'a, V, T>
+where
+    V: SliceView<T>,
+    T: PrimInt + Signed + Copy,
+{
+    type Item = TimePoint<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let start = self.time_window.start();
+        let end = self.time_window.end();
+        if start + self.duration > end {
+            return None;
+        }
+
+        if !self.yielded_start {
+            self.yielded_start = true;
+            self.last = Some(start);
+            return Some(start);
+        }
+
+        let last = self.last?;
+        if let Some(tp) = self.view.next_key_after(last) {
+            if tp + self.duration <= end {
+                self.last = Some(tp);
+                return Some(tp);
+            }
+        }
+
+        if self.duration.value() == T::zero() && last < end && self.view.has_key_at(end) {
+            self.last = Some(end);
+            return Some(end);
+        }
+
+        None
+    }
+}
+
+/// Generic free-space iterator usable by both base berth and overlay via `SliceView`.
+pub struct FreeIter<'a, T, V>
 where
     T: PrimInt + Signed + Copy,
-    Q: QuayRead,
+    V: SliceView<T>,
 {
-    overlay: &'a BerthOccupancyOverlay<'brand, 'a, T, Q>,
+    view: &'a V,
     time_window: TimeInterval<T>,
     duration: TimeDelta<T>,
     required: SpaceLength,
     bounds: SpaceInterval,
 
-    yielded_window_start: bool,
-    last_start: Option<TimePoint<T>>,
-    current_start: Option<TimePoint<T>>,
-
+    starts: CandidateStarts<'a, V, T>,
     runs: DoubleBuf<SpaceInterval>,
     emit_idx: usize,
+    current_start: Option<TimePoint<T>>,
 }
 
-impl<'brand, 'a, T, Q> OverlayFreeIter<'brand, 'a, T, Q>
+impl<'a, T, V> FreeIter<'a, T, V>
 where
     T: PrimInt + Signed + Copy,
-    Q: QuayRead,
+    V: SliceView<T>,
 {
-    #[inline]
     fn new(
-        overlay: &'a BerthOccupancyOverlay<'brand, 'a, T, Q>,
+        view: &'a V,
         time_window: TimeInterval<T>,
         duration: TimeDelta<T>,
         required: SpaceLength,
         bounds: SpaceInterval,
     ) -> Self {
         Self {
-            overlay,
+            view,
             time_window,
             duration,
             required,
             bounds,
-            yielded_window_start: false,
-            last_start: None,
-            current_start: None,
+            starts: CandidateStarts::new(view, time_window, duration),
             runs: DoubleBuf::new(),
             emit_idx: 0,
+            current_start: None,
         }
-    }
-
-    fn next_candidate_start(&mut self) -> Option<TimePoint<T>> {
-        if self.time_window.start() + self.duration > self.time_window.end() {
-            return None;
-        }
-        if !self.yielded_window_start {
-            self.yielded_window_start = true;
-            let t0 = self.time_window.start();
-            self.last_start = Some(t0);
-            return Some(t0);
-        }
-
-        let last = self.last_start?;
-        let wnd_end = self.time_window.end();
-        let next = next_key_after(
-            self.overlay.berth_occupancy,
-            &self.overlay.free_by_time,
-            &self.overlay.occupied_by_time,
-            last,
-        );
-
-        if let Some(tp) = next {
-            if tp + self.duration <= wnd_end {
-                self.last_start = Some(tp);
-                return Some(tp);
-            }
-        }
-
-        if self.duration.value() == T::zero() && last < wnd_end {
-            let berth_has_end = self
-                .overlay
-                .berth_occupancy
-                .slice_predecessor_timepoint(wnd_end)
-                .is_some_and(|tp| tp == wnd_end);
-            let overlay_has_end = self.overlay.free_by_time.contains_key(&wnd_end)
-                || self.overlay.occupied_by_time.contains_key(&wnd_end);
-            if berth_has_end || overlay_has_end {
-                self.last_start = Some(wnd_end);
-                return Some(wnd_end);
-            }
-        }
-
-        None
     }
 
     fn build_runs_for_start(&mut self, start: TimePoint<T>) {
@@ -1067,27 +1082,26 @@ where
         self.current_start = None;
 
         // Early guard: required length exceeds bounds capacity
-        let bounds_len = self.bounds.end().value() - self.bounds.start().value();
-        if self.required.value() > bounds_len {
+        let cap = self.bounds.end().value() - self.bounds.start().value();
+        if self.required.value() > cap {
             return;
         }
 
-        let berth = self.overlay.berth_occupancy;
-        let pred = berth
-            .slice_predecessor_timepoint(start)
-            .expect("timeline has origin snapshot");
+        // Choose seed snapshot: prefer `start` if this view has a key exactly there,
+        // otherwise seed from predecessor snapshot.
+        let pred = self.view.pred(start).expect("timeline has origin snapshot");
+        let seed_tp = if self.view.has_key_at(start) {
+            start
+        } else {
+            pred
+        };
 
-        // If overlay touches `start`, seed with `start`; otherwise with predecessor.
-        let have_start_overlay = self.overlay.free_by_time.contains_key(&start)
-            || self.overlay.occupied_by_time.contains_key(&start);
-        let seed_tp = if have_start_overlay { start } else { pred };
-
-        // Scratch sets reused across steps
+        // Scratch sets reused within this build
         let mut scratch_base = SpaceIntervalSet::new();
         let mut scratch_buf = SpaceIntervalSet::new();
 
-        // Seed runs
-        let seed = self.overlay.adjusted_free_runs_at(
+        // Seed with adjusted runs at `seed_tp`
+        let seed = self.view.adjusted_free_runs_at(
             seed_tp,
             self.bounds,
             self.required,
@@ -1100,7 +1114,7 @@ where
         }
 
         // Intersect with adjusted runs at `start`
-        let start_set = self.overlay.adjusted_free_runs_at(
+        let start_set = self.view.adjusted_free_runs_at(
             start,
             self.bounds,
             self.required,
@@ -1119,25 +1133,16 @@ where
         // Intersect with each subsequent slice key inside (start, start+duration)
         let end = start + self.duration;
         let mut cursor = start;
-
-        loop {
-            let next_tp = next_key_after(
-                berth,
-                &self.overlay.free_by_time,
-                &self.overlay.occupied_by_time,
-                cursor,
-            );
-            let Some(tp) = next_tp else { break };
+        while let Some(tp) = self.view.next_key_after(cursor) {
             if tp >= end {
                 break;
             }
             cursor = tp;
-
             if self.runs.current().is_empty() {
                 break;
             }
 
-            let adj_tp = self.overlay.adjusted_free_runs_at(
+            let adj_tp = self.view.adjusted_free_runs_at(
                 tp,
                 self.bounds,
                 self.required,
@@ -1156,16 +1161,15 @@ where
     }
 }
 
-impl<'brand, 'a, T, Q> Iterator for OverlayFreeIter<'brand, 'a, T, Q>
+impl<'a, T, V> Iterator for FreeIter<'a, T, V>
 where
     T: PrimInt + Signed + Copy,
-    Q: QuayRead,
+    V: SliceView<T>,
 {
     type Item = FreeSlot<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            // Emit pending runs for the current start time
             if let Some(t0) = self.current_start {
                 if self.emit_idx < self.runs.current().len() {
                     let iv = self.runs.current()[self.emit_idx];
@@ -1175,7 +1179,7 @@ where
                 self.current_start = None;
             }
 
-            let cand = self.next_candidate_start()?;
+            let cand = self.starts.next()?;
             if cand + self.duration > self.time_window.end() {
                 return None;
             }
@@ -1331,28 +1335,6 @@ mod tests {
         // Times outside [5,10) always free within [2,5)
         assert!(berth_occupancy.is_free(&rect(ti(0, 5), si(2, 5))));
         assert!(berth_occupancy.is_free(&rect(ti(10, 20), si(2, 5))));
-    }
-
-    #[test]
-    fn test_snapshot_at_mut_splits_on_demand() {
-        let quay_length = len(8);
-        let mut berth_occupancy = BO::new(quay_length);
-
-        assert_eq!(berth_occupancy.time_event_count(), 1);
-
-        {
-            // Split at t=7 by asking for a mutable snapshot
-            let quay_snapshot = berth_occupancy
-                .snapshot_at_mut(tp(7))
-                .expect("should exist");
-
-            // Verify the cloned state is still fully free
-            assert!(quay_snapshot.check_free(si(0, 8)));
-            // `quay_snapshot` is dropped at the end of this block, releasing the mutable borrow
-        }
-
-        // Now it's legal to immutably borrow `berth_occupancy` again
-        assert_eq!(berth_occupancy.time_event_count(), 2);
     }
 
     #[test]
@@ -1734,7 +1716,8 @@ mod tests {
         let mut berth = BO::new(len(10));
         berth.occupy(&rect(ti(5, 10), si(0, 1))); // keys 0,5,10
         let v: Vec<_> = berth
-            .iter_timepoints(ti(5, 10))
+            .slices(5.into(), 10.into())
+            .interior_keys()
             .map(|t| t.value())
             .collect();
         assert_eq!(v, Vec::<i64>::new());
