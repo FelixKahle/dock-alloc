@@ -939,7 +939,7 @@ mod tests {
     }
 
     #[test]
-    fn new_and_empty() {
+    fn test_new_and_empty() {
         let s = SetI::new();
         assert!(s.is_empty());
         assert_eq!(s.len(), 0);
@@ -947,21 +947,21 @@ mod tests {
     }
 
     #[test]
-    fn from_vec_coalesces_and_sorts() {
+    fn test_from_vec_coalesces_and_sorts() {
         let s = SetI::from_vec(vec![iv(5, 7), iv(1, 3), iv(3, 5), iv(10, 12), iv(11, 13)]);
         assert_eq!(s.as_slice(), &[iv(1, 7), iv(10, 13)]);
         assert_invariants(&s);
     }
 
     #[test]
-    fn from_iterator_coalesces() {
+    fn test_from_iterator_coalesces() {
         let s: SetI = vec![iv(8, 9), iv(1, 4), iv(3, 6)].into_iter().collect();
         assert_eq!(s.as_slice(), &[iv(1, 6), iv(8, 9)]);
         assert_invariants(&s);
     }
 
     #[test]
-    fn deref_and_iter() {
+    fn test_deref_and_iter() {
         let s = SetI::from_vec(vec![iv(1, 2), iv(4, 6)]);
         // Deref to slice
         let slice: &[Interval<i32>] = &s;
@@ -978,7 +978,7 @@ mod tests {
     }
 
     #[test]
-    fn push_coalesced_basic_and_adjacency() {
+    fn test_push_coalesced_basic_and_adjacency() {
         let mut s = SetI::new();
         s.insert_and_coalesce(iv(5, 7));
         s.insert_and_coalesce(iv(1, 3));
@@ -989,7 +989,7 @@ mod tests {
     }
 
     #[test]
-    fn push_coalesced_ignores_empty() {
+    fn test_push_coalesced_ignores_empty() {
         let mut s = SetI::new();
         s.insert_and_coalesce(iv(2, 2)); // empty
         assert!(s.is_empty());
@@ -1010,7 +1010,7 @@ mod tests {
     }
 
     #[test]
-    fn extend_from_sorted_disjoint() {
+    fn test_extend_from_sorted_disjoint() {
         let mut s = SetI::from_vec(vec![iv(1, 2)]);
         let tail = [iv(2, 3), iv(5, 7), iv(7, 8)];
         s.extend_from_sorted_disjoint(&tail);
@@ -1019,7 +1019,7 @@ mod tests {
     }
 
     #[test]
-    fn clear_and_fill_from_iter() {
+    fn test_clear_and_fill_from_iter() {
         let mut s = SetI::from_vec(vec![iv(1, 10)]);
         s.clear_and_fill_from_iter([iv(1, 3), iv(9, 10), iv(3, 5), iv(5, 7)]);
         assert_eq!(s.as_slice(), &[iv(1, 7), iv(9, 10)]);
@@ -1027,7 +1027,7 @@ mod tests {
     }
 
     #[test]
-    fn retain_and_filter_min_length() {
+    fn test_retain_and_filter_min_length() {
         let mut s = SetI::from_vec(vec![iv(1, 2), iv(4, 8), iv(9, 11)]);
         s.retain_min_length(2); // keep len >= 2
         assert_eq!(s.as_slice(), &[iv(4, 8), iv(9, 11)]);
@@ -1049,7 +1049,7 @@ mod tests {
     }
 
     #[test]
-    fn contains_point_query() {
+    fn test_contains_point_query() {
         let s = SetI::from_vec(vec![iv(1, 3), iv(5, 6), iv(8, 10)]);
         assert!(s.contains_point(1));
         assert!(s.contains_point(9));
@@ -1059,7 +1059,7 @@ mod tests {
     }
 
     #[test]
-    fn covers_query() {
+    fn test_covers_query() {
         let s = SetI::from_vec(vec![iv(1, 5), iv(7, 10)]);
         assert!(s.covers(iv(2, 4))); // inside first run
         assert!(s.covers(iv(7, 9))); // inside second run
@@ -1070,7 +1070,7 @@ mod tests {
     }
 
     #[test]
-    fn clamped_into_and_clamped() {
+    fn test_clamped_into_and_clamped() {
         let s = SetI::from_vec(vec![iv(1, 5), iv(8, 12)]);
         let bounds = iv(3, 10);
         let cl = s.clamped(bounds);
@@ -1083,13 +1083,13 @@ mod tests {
     }
 
     #[test]
-    fn clamped_with_no_overlap_yields_empty() {
+    fn test_clamped_with_no_overlap_yields_empty() {
         let s = SetI::from_vec(vec![iv(1, 2), iv(5, 6)]);
         assert!(s.clamped(iv(2, 5)).is_empty());
     }
 
     #[test]
-    fn union_basic_and_adjacency() {
+    fn test_union_basic_and_adjacency() {
         let a = SetI::from_vec(vec![iv(1, 3), iv(7, 9)]);
         let b = SetI::from_vec(vec![iv(2, 5), iv(9, 12)]);
         let u = a.union(&b);
@@ -1102,7 +1102,7 @@ mod tests {
     }
 
     #[test]
-    fn union_with_empty_identity() {
+    fn test_union_with_empty_identity() {
         let a = SetI::from_vec(vec![iv(1, 3)]);
         let e = SetI::new();
         assert_eq!(a.union(&e).as_slice(), a.as_slice());
@@ -1110,7 +1110,7 @@ mod tests {
     }
 
     #[test]
-    fn intersection_basic() {
+    fn test_intersection_basic() {
         let a = SetI::from_vec(vec![iv(1, 5), iv(7, 10)]);
         let b = SetI::from_vec(vec![iv(3, 8)]);
         let mut out = SetI::new();
@@ -1120,7 +1120,7 @@ mod tests {
     }
 
     #[test]
-    fn intersection_disjoint_or_touching_empty() {
+    fn test_intersection_disjoint_or_touching_empty() {
         let a = SetI::from_vec(vec![iv(1, 3), iv(5, 7)]);
         let b = SetI::from_vec(vec![iv(3, 5), iv(7, 9)]); // only touching
         let mut out = SetI::new();
@@ -1129,7 +1129,7 @@ mod tests {
     }
 
     #[test]
-    fn subtract_basic_cases() {
+    fn test_subtract_basic_cases() {
         let a = SetI::from_vec(vec![iv(1, 5), iv(8, 12)]);
         let b = SetI::from_vec(vec![iv(3, 10)]);
 
@@ -1144,21 +1144,21 @@ mod tests {
     }
 
     #[test]
-    fn subtract_disjoint_no_change() {
+    fn test_subtract_disjoint_no_change() {
         let a = SetI::from_vec(vec![iv(1, 3), iv(5, 7)]);
         let b = SetI::from_vec(vec![iv(8, 9)]);
         assert_eq!(a.subtract(&b).as_slice(), a.as_slice());
     }
 
     #[test]
-    fn subtract_full_cover_yields_empty() {
+    fn test_subtract_full_cover_yields_empty() {
         let a = SetI::from_vec(vec![iv(1, 3), iv(5, 7)]);
         let b = SetI::from_vec(vec![iv(0, 10)]);
         assert!(a.subtract(&b).is_empty());
     }
 
     #[test]
-    fn subtract_interval_variants() {
+    fn test_subtract_interval_variants() {
         let base = SetI::from_vec(vec![iv(2, 10)]);
 
         // Cut middle -> splits into two
@@ -1169,7 +1169,7 @@ mod tests {
     }
 
     #[test]
-    fn gaps_within_basic() {
+    fn test_gaps_within_basic() {
         let s = SetI::from_vec(vec![iv(2, 4), iv(6, 7), iv(9, 12)]);
         let gaps = s.gaps_within(iv(1, 13));
         assert_eq!(gaps.as_slice(), &[iv(1, 2), iv(4, 6), iv(7, 9), iv(12, 13)]);
@@ -1177,27 +1177,27 @@ mod tests {
     }
 
     #[test]
-    fn gaps_within_empty_set_returns_bounds() {
+    fn test_gaps_within_empty_set_returns_bounds() {
         let s = SetI::new();
         let g = s.gaps_within(iv(5, 9));
         assert_eq!(g.as_slice(), &[iv(5, 9)]);
     }
 
     #[test]
-    fn gaps_within_partial_cover() {
+    fn test_gaps_within_partial_cover() {
         let s = SetI::from_vec(vec![iv(0, 2), iv(4, 5), iv(8, 10)]);
         let g = s.gaps_within(iv(1, 9));
         assert_eq!(g.as_slice(), &[iv(2, 4), iv(5, 8)]);
     }
 
     #[test]
-    fn clamped_edge_touching_is_empty() {
+    fn test_clamped_edge_touching_is_empty() {
         let s = SetI::from_vec(vec![iv(1, 3), iv(5, 7)]);
         assert!(s.clamped(iv(3, 5)).is_empty());
     }
 
     #[test]
-    fn coalesce_in_place_merges_and_sorts() {
+    fn test_coalesce_in_place_merges_and_sorts() {
         let mut v = vec![
             iv(5, 7),
             iv(1, 2),
@@ -1214,7 +1214,7 @@ mod tests {
     }
 
     #[test]
-    fn invariants_after_ops() {
+    fn test_invariants_after_ops() {
         let s = SetI::from_vec(vec![iv(5, 9), iv(1, 3), iv(3, 5), iv(12, 15)]);
         assert_invariants(&s);
 

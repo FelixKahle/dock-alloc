@@ -1683,7 +1683,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn ledger_commit_and_uncommit_happy_path() {
+    fn test_ledger_commit_and_uncommit_happy_path() {
         let prob = problem_with_unassigned(&[1]);
         let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
 
@@ -1701,7 +1701,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn ledger_uncommit_errors_if_missing() {
+    fn test_ledger_uncommit_errors_if_missing() {
         let prob = problem_with_unassigned(&[]);
         let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
         let err = ledger.uncommit(mhandle::<'static>(42)).unwrap_err();
@@ -1709,7 +1709,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn ledger_commit_errors_if_already_present() {
+    fn test_ledger_commit_errors_if_already_present() {
         let prob = problem_with_unassigned(&[7]);
         let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
         let (_r, ma) = movable::<'static>(7, 1, 0);
@@ -1719,7 +1719,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn ledger_iter_assignments_includes_fixed_and_committed() {
+    fn test_ledger_iter_assignments_includes_fixed_and_committed() {
         // fixed: 100; unassigned: 1,2
         let prob = problem_with_unassigned_and_fixed(&[1, 2], &[(100, 20, 0)]);
         let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
@@ -1734,7 +1734,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn overlay_commit_idempotent_and_conflict_on_same_rid_different_assignment() {
+    fn test_overlay_commit_idempotent_and_conflict_on_same_rid_different_assignment() {
         let prob = problem_with_unassigned(&[1]);
         let ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
         let mut ov = AssignmentOverlay::new(&ledger);
@@ -1753,7 +1753,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn overlay_uncommit_removes_staged_commit_without_tombstone() {
+    fn test_overlay_uncommit_removes_staged_commit_without_tombstone() {
         let prob = problem_with_unassigned(&[2]);
         let ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
         let mut ov = AssignmentOverlay::new(&ledger);
@@ -1771,7 +1771,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn overlay_uncommit_on_base_creates_tombstone_and_prevents_double_uncommit() {
+    fn test_overlay_uncommit_on_base_creates_tombstone_and_prevents_double_uncommit() {
         // base has rid=3 committed
         let prob = problem_with_unassigned(&[3]);
         let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
@@ -1790,7 +1790,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn overlay_commit_fails_if_already_committed_in_base() {
+    fn test_overlay_commit_fails_if_already_committed_in_base() {
         let prob = problem_with_unassigned(&[4]);
         let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
         let (_r, ma) = movable::<'static>(4, 9, 0);
@@ -1802,7 +1802,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn overlay_iter_assignments_merges_fixed_plus_base_minus_tombstones_plus_staged() {
+    fn test_overlay_iter_assignments_merges_fixed_plus_base_minus_tombstones_plus_staged() {
         // fixed: 100; base committed: 10,11; overlay tombstones 10; overlay stages 12
         let prob = problem_with_unassigned_and_fixed(&[10, 11, 12], &[(100, 30, 0)]);
         let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
@@ -1833,7 +1833,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn overlay_iterators_expose_staged_sets() {
+    fn test_overlay_iterators_expose_staged_sets() {
         let prob = problem_with_unassigned(&[5, 6]);
         let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
 
@@ -1853,7 +1853,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn overlay_commit_after_tombstone_currently_disallowed() {
+    fn test_overlay_commit_after_tombstone_currently_disallowed() {
         let prob = problem_with_unassigned(&[9]);
         let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
 
@@ -1869,7 +1869,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn stage_error_messages_are_human_readable() {
+    fn test_stage_error_messages_are_human_readable() {
         let id = RequestId::new(77);
         assert_eq!(
             format!("{}", StageError::AlreadyCommittedInBase(id)),
@@ -1890,7 +1890,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn ledger_iter_fixed_handles_and_assignments_match_problem() {
+    fn test_ledger_iter_fixed_handles_and_assignments_match_problem() {
         // fixed: 100, 101
         let prob = problem_with_unassigned_and_fixed(&[], &[(100, 5, 0), (101, 10, 0)]);
         let ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
@@ -1907,7 +1907,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn ledger_iter_movable_handles_and_assignments_after_commits() {
+    fn test_ledger_iter_movable_handles_and_assignments_after_commits() {
         // unassigned: 1,2
         let prob = problem_with_unassigned(&[1, 2]);
         let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
@@ -1931,7 +1931,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn overlay_iter_fixed_handles_and_assignments_delegate_to_ledger() {
+    fn test_overlay_iter_fixed_handles_and_assignments_delegate_to_ledger() {
         // fixed: 100, 101
         let prob = problem_with_unassigned_and_fixed(&[], &[(100, 5, 0), (101, 10, 0)]);
         let ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
@@ -1953,7 +1953,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn overlay_iter_movable_handles_respect_overlay_view() {
+    fn test_overlay_iter_movable_handles_respect_overlay_view() {
         // base commits: 10; staged commit: 12; tombstone: 10
         let prob = problem_with_unassigned(&[10, 12]);
         let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
@@ -1971,7 +1971,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn overlay_iter_movable_assignments_respect_overlay_view() {
+    fn test_overlay_iter_movable_assignments_respect_overlay_view() {
         // base commits: 10; staged commit: 12; tombstone: 10
         let prob = problem_with_unassigned(&[10, 12]);
         let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
@@ -1989,7 +1989,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn overlay_iter_movable_handles_union_when_no_tombstone() {
+    fn test_overlay_iter_movable_handles_union_when_no_tombstone() {
         // base has 20 committed; overlay stages 21 (no tombstones) => {20, 21}
         let prob = problem_with_unassigned(&[20, 21]);
         let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
@@ -2008,7 +2008,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn ledger_into_solution_includes_fixed_and_committed() {
+    fn test_ledger_into_solution_includes_fixed_and_committed() {
         // fixed: 100; unassigned: 1,2 -> commit(1)
         let prob = problem_with_unassigned_and_fixed(&[1, 2], &[(100, 20, 0)]);
         let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
@@ -2026,7 +2026,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn ledger_iter_unassigned_requests_excludes_committed() {
+    fn test_ledger_iter_unassigned_requests_excludes_committed() {
         // unassigned: 1,2,3 -> commit(2)
         let prob = problem_with_unassigned(&[1, 2, 3]);
         let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
@@ -2053,7 +2053,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn ledger_iter_assigned_requests_includes_only_committed() {
+    fn test_ledger_iter_assigned_requests_includes_only_committed() {
         // unassigned: 1,2,3 -> commit(1)
         let prob = problem_with_unassigned(&[1, 2, 3]);
         let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
@@ -2078,7 +2078,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn overlay_iter_unassigned_requests_respects_staged_commits() {
+    fn test_overlay_iter_unassigned_requests_respects_staged_commits() {
         // unassigned: 5,6,7; base commits: 6; overlay stages: 7
         let prob = problem_with_unassigned(&[5, 6, 7]);
         let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
@@ -2103,7 +2103,7 @@ mod overlay_ledger_tests {
     }
 
     #[test]
-    fn overlay_iter_assigned_requests_includes_base_and_staged_commits() {
+    fn test_overlay_iter_assigned_requests_includes_base_and_staged_commits() {
         // unassigned: 10,11,12; base commits: 10; overlay stages: 12, uncommits: 10
         let prob = problem_with_unassigned(&[10, 11, 12]);
         let mut ledger: AssignmentLedger<'static, '_, T, C> = AssignmentLedger::new(&prob);
