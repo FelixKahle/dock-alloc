@@ -206,10 +206,10 @@ where
     #[inline]
     pub fn uncommit_assignment(
         &mut self,
-        mh: &'brand MovableAssignment<'brand, 'a, T, C>,
+        assignment: &'brand MovableAssignment<'brand, 'a, T, C>,
     ) -> Result<MovableAssignment<'brand, 'a, T, C>, LedgerError> {
         self.committed
-            .remove(&mh.id())
+            .remove(&assignment.id())
             .ok_or(LedgerError::NotCommitted)
     }
 

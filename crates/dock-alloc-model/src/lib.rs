@@ -403,24 +403,24 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Assignment<'a, T = i64, C = i64>
+pub struct Assignment<'r, T = i64, C = i64>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    request: Cow<'a, Request<T, C>>,
+    request: Cow<'r, Request<T, C>>,
     start_position: SpacePosition,
     start_time: TimePoint<T>,
 }
 
-impl<'a, T, C> Assignment<'a, T, C>
+impl<'r, T, C> Assignment<'r, T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
     #[inline]
     pub fn borrowed(
-        request: &'a Request<T, C>,
+        request: &'r Request<T, C>,
         start_position: SpacePosition,
         start_time: TimePoint<T>,
     ) -> Self {
@@ -472,7 +472,7 @@ where
     }
 }
 
-impl<'a, T, C> Display for Assignment<'a, T, C>
+impl<'r, T, C> Display for Assignment<'r, T, C>
 where
     T: PrimInt + Signed + Display,
     C: PrimInt + Signed + Display,
@@ -489,21 +489,21 @@ where
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct FixedRequest<'a, T = i64, C = i64>(&'a Request<T, C>)
+pub struct FixedRequest<'r, T = i64, C = i64>(&'r Request<T, C>)
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed;
 
-impl<'a, T, C> FixedRequest<'a, T, C>
+impl<'r, T, C> FixedRequest<'r, T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    fn new(r: &'a Request<T, C>) -> Self {
+    fn new(r: &'r Request<T, C>) -> Self {
         Self(r)
     }
 
-    pub fn request(&self) -> &'a Request<T, C> {
+    pub fn request(&self) -> &'r Request<T, C> {
         &self.0
     }
 }
@@ -549,17 +549,17 @@ where
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct FixedAssignment<'a, T = i64, C = i64>(Assignment<'a, T, C>)
+pub struct FixedAssignment<'r, T = i64, C = i64>(Assignment<'r, T, C>)
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed;
 
-impl<'a, T, C> FixedAssignment<'a, T, C>
+impl<'r, T, C> FixedAssignment<'r, T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    pub fn new(a: Assignment<'a, T, C>) -> Self {
+    pub fn new(a: Assignment<'r, T, C>) -> Self {
         Self(a)
     }
 
@@ -763,27 +763,27 @@ impl<T: PrimInt + Signed + Display + Debug> Display for ProblemBuildError<T> {
 impl<T: PrimInt + Signed + Display + Debug> std::error::Error for ProblemBuildError<T> {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Problem<'a, T = i64, C = i64>
+pub struct Problem<'p, T = i64, C = i64>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
     unassigned: HashMap<RequestId, MoveableRequest<T, C>>,
-    preassigned: HashMap<RequestId, FixedAssignment<'a, T, C>>,
+    preassigned: HashMap<RequestId, FixedAssignment<'p, T, C>>,
     quay_length: SpaceLength,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ProblemRequest<'a, T, C>
+pub enum ProblemRequest<'p, T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    Moveable(&'a MoveableRequest<T, C>),
-    Fixed(FixedRequest<'a, T, C>),
+    Moveable(&'p MoveableRequest<T, C>),
+    Fixed(FixedRequest<'p, T, C>),
 }
 
-impl<'a, T, C> Display for ProblemRequest<'a, T, C>
+impl<'p, T, C> Display for ProblemRequest<'p, T, C>
 where
     T: PrimInt + Signed + Display,
     C: PrimInt + Signed + Display,
@@ -796,7 +796,7 @@ where
     }
 }
 
-impl<'a, T, C> Problem<'a, T, C>
+impl<'p, T, C> Problem<'p, T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
@@ -804,7 +804,7 @@ where
     #[inline]
     fn new(
         unassigned: HashMap<RequestId, MoveableRequest<T, C>>,
-        preassigned: HashMap<RequestId, FixedAssignment<'a, T, C>>,
+        preassigned: HashMap<RequestId, FixedAssignment<'p, T, C>>,
         quay_length: SpaceLength,
     ) -> Self {
         Self {
@@ -862,13 +862,13 @@ where
 
 pub type BerthAllocationProblem<'a> = Problem<'a, i64, i64>;
 
-pub struct ProblemBuilder<'a, T = i64, C = i64>
+pub struct ProblemBuilder<'p, T = i64, C = i64>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
     unassigned: HashMap<RequestId, MoveableRequest<T, C>>,
-    preassigned: HashMap<RequestId, FixedAssignment<'a, T, C>>,
+    preassigned: HashMap<RequestId, FixedAssignment<'p, T, C>>,
     quay_length: SpaceLength,
 }
 
