@@ -71,7 +71,7 @@ where
         self.berth
     }
 
-    pub fn problem(&self) -> &'brand Problem<T, C> {
+    pub fn problem(&self) -> &'brand Problem<'_, T, C> {
         self.problem
     }
 
@@ -277,6 +277,7 @@ where
     C: PrimInt + Signed,
     Q: QuayRead,
 {
+    #[allow(dead_code)]
     fn new(ctx: &'brand ProposeCtx<'base, T, C, Q>) -> Self {
         let assignment_overlay = AssignmentOverlay::new(ctx.ledger());
         let berth_overlay = BerthOccupancyOverlay::new(ctx.berth());
@@ -286,6 +287,10 @@ where
             berth_overlay,
             operations: Vec::new(),
         }
+    }
+
+    pub fn problem(&self) -> &'brand Problem<'base, T, C> {
+        self.ctx.problem()
     }
 
     fn add_operation<O>(&mut self, op: O)

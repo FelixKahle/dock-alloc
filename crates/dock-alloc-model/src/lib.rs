@@ -563,7 +563,7 @@ where
         Self(a)
     }
 
-    pub fn assignment(&self) -> &Assignment<T, C> {
+    pub fn assignment(&self) -> &Assignment<'_, T, C> {
         &self.0
     }
 }
@@ -820,7 +820,7 @@ where
     }
 
     #[inline]
-    pub fn preassigned(&self) -> &HashMap<RequestId, FixedAssignment<T, C>> {
+    pub fn preassigned(&self) -> &HashMap<RequestId, FixedAssignment<'_, T, C>> {
         &self.preassigned
     }
 
@@ -855,7 +855,7 @@ where
             )
     }
 
-    pub fn iter_fixed_assignments(&self) -> impl Iterator<Item = &FixedAssignment<T, C>> {
+    pub fn iter_fixed_assignments(&self) -> impl Iterator<Item = &FixedAssignment<'_, T, C>> {
         self.preassigned.values()
     }
 }
@@ -958,7 +958,7 @@ where
         Ok(self)
     }
 
-    pub fn build(&self) -> Problem<T, C> {
+    pub fn build(&'_ self) -> Problem<'_, T, C> {
         Problem::new(
             self.unassigned.clone(),
             self.preassigned.clone(),
@@ -1061,7 +1061,7 @@ where
     }
 
     #[inline]
-    pub fn decisions(&self) -> &HashMap<RequestId, Assignment<T, C>> {
+    pub fn decisions(&'_ self) -> &HashMap<RequestId, Assignment<'_, T, C>> {
         &self.decisions
     }
 }
