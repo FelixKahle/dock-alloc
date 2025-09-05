@@ -19,7 +19,7 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use std::marker::PhantomData;
+use std::{fmt::Display, marker::PhantomData};
 
 use crate::{
     domain::{SpaceTimeRectangle, Version},
@@ -28,7 +28,7 @@ use crate::{
         BrandedMoveableRequest, FixedHandle, MovableHandle, StageError,
     },
     occupancy::{BerthOccupancy, BerthOccupancyOverlay},
-    quay::QuayRead,
+    quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError},
 };
 use dock_alloc_core::domain::{SpaceInterval, TimeInterval};
 use dock_alloc_model::{Assignment, FixedAssignment, Problem};
@@ -420,6 +420,37 @@ where
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProposeError {
+    Stage(StageError),
+    QuaySpaceIntervalOutOfBounds(QuaySpaceIntervalOutOfBoundsError),
+}
+
+impl From<StageError> for ProposeError {
+    fn from(e: StageError) -> Self {
+        ProposeError::Stage(e)
+    }
+}
+
+impl From<QuaySpaceIntervalOutOfBoundsError> for ProposeError {
+    fn from(e: QuaySpaceIntervalOutOfBoundsError) -> Self {
+        ProposeError::QuaySpaceIntervalOutOfBounds(e)
+    }
+}
+
+impl Display for ProposeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProposeError::Stage(e) => write!(f, "{}", e),
+            ProposeError::QuaySpaceIntervalOutOfBounds(e) => {
+                write!(f, "{}", e)
+            }
+        }
+    }
+}
+
+impl std::error::Error for ProposeError {}
+
 impl<'brand, 'p, 'ctx, T, C, Q> PlanBuilder<'brand, 'p, 'ctx, T, C, Q>
 where
     T: PrimInt + Signed,
@@ -460,11 +491,11 @@ where
     pub fn propose_unassign(
         &mut self,
         assignment: &'brand BrandedMoveableAssignment<'brand, 'p, T, C>,
-    ) -> Result<FreeSlot<'brand, T>, StageError> {
+    ) -> Result<FreeSlot<'brand, T>, ProposeError> {
         let free: FreeSlot<'brand, T> = assignment.into();
         let rect: SpaceTimeRectangle<T> = assignment.into();
         self.assignment_overlay.uncommit_assignment(assignment)?;
-        self.berth_overlay.free(&rect);
+        self.berth_overlay.free(&rect)?;
         self.add_operation(UnassignOperation::new(assignment));
         Ok(free)
     }
@@ -473,11 +504,11 @@ where
         &mut self,
         req: &BrandedMoveableRequest<'brand, 'p, T, C>,
         slot: FreeSlot<'brand, T>,
-    ) -> Result<BrandedMoveableAssignment<'brand, 'p, T, C>, StageError> {
+    ) -> Result<BrandedMoveableAssignment<'brand, 'p, T, C>, ProposeError> {
         let a = Assignment::borrowed(req.request(), slot.space().start(), slot.time().start());
         let ma = self.assignment_overlay.commit_assignment(&a)?;
         let rect: SpaceTimeRectangle<T> = (&a).into();
-        self.berth_overlay.occupy(&rect);
+        self.berth_overlay.occupy(&rect)?;
         self.operations
             .push(AssignOperation::new(ma.clone()).into());
         Ok(ma)
@@ -485,5 +516,241 @@ where
 
     pub fn build(self) -> Plan<'brand, 'p, T, C> {
         Plan::new(self.operations)
+    }
+}
+
+#[cfg(test)]
+mod propose_tests {
+    use crate::quay::BooleanVecQuay;
+
+    use super::*;
+    use dock_alloc_core::domain::{
+        Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
+    };
+    use dock_alloc_model::{ProblemBuilder, Request, RequestId};
+
+    fn req_ok(id: u64, len: usize, proc_t: i64, t0: i64, t1: i64, s0: usize, s1: usize) -> Request {
+        Request::new(
+            RequestId::new(id),
+            SpaceLength::new(len),
+            TimeDelta::new(proc_t),
+            SpacePosition::new(s0),
+            Cost::new(1),
+            Cost::new(1),
+            TimeInterval::new(TimePoint::new(t0), TimePoint::new(t1)),
+            SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
+        )
+        .expect("valid request")
+    }
+
+    fn asg<'r>(r: &'r Request, pos: usize, time: i64) -> Assignment<'r, i64, i64> {
+        Assignment::borrowed(r, SpacePosition::new(pos), TimePoint::new(time))
+    }
+
+    // Helper for creating a standard test request
+    fn test_request() -> Request {
+        req_ok(1, 10, 5, 0, 100, 0, 100)
+    }
+
+    #[test]
+    fn free_slot_from_branded_movable_assignment_is_correct() {
+        // Set up problem
+        let r = test_request();
+        let mut b = ProblemBuilder::<i64, i64>::new(SpaceLength::new(200));
+        b.add_unassigned_request(r.clone()).unwrap();
+        let p = b.build();
+        let mut ledger = AssignmentLedger::from(&p);
+
+        // commit once to get a branded assignment
+        let a = asg(&r, 30, 10); // space [30, 40), time [10, 15)
+        let ma = ledger.commit_assignment(&a).expect("commit");
+
+        let slot = FreeSlot::from(&ma);
+
+        assert_eq!(
+            slot.space(),
+            SpaceInterval::new(SpacePosition::new(30), SpacePosition::new(40))
+        );
+        assert_eq!(
+            slot.time(),
+            TimeInterval::new(TimePoint::new(10), TimePoint::new(15))
+        );
+    }
+
+    #[test]
+    fn spacetime_rectangle_matches_for_assignment_and_branded() {
+        // Set up problem
+        let r = test_request();
+        let mut b = ProblemBuilder::<i64, i64>::new(SpaceLength::new(200));
+        b.add_unassigned_request(r.clone()).unwrap();
+        let p = b.build();
+        let mut ledger = AssignmentLedger::from(&p);
+
+        let a = asg(&r, 7, 2);
+        let ma = ledger.commit_assignment(&a).expect("commit");
+
+        let rect_from_a: SpaceTimeRectangle<i64> = (&a).into();
+        let rect_from_ma: SpaceTimeRectangle<i64> = (&ma).into();
+
+        assert_eq!(rect_from_a.space(), rect_from_ma.space());
+        assert_eq!(rect_from_a.time(), rect_from_ma.time());
+
+        // sanity on exact coordinates: len=10, proc=5 from req_ok
+        assert_eq!(
+            rect_from_a.space(),
+            SpaceInterval::new(SpacePosition::new(7), SpacePosition::new(17))
+        );
+        assert_eq!(
+            rect_from_a.time(),
+            TimeInterval::new(TimePoint::new(2), TimePoint::new(7))
+        );
+    }
+
+    #[test]
+    fn plan_records_operations_in_order() {
+        // Set up problem
+        let r = test_request();
+        let mut b = ProblemBuilder::<i64, i64>::new(SpaceLength::new(200));
+        b.add_unassigned_request(r.clone()).unwrap();
+        let p = b.build();
+        let mut ledger = AssignmentLedger::from(&p);
+
+        let a = asg(&r, 0, 0);
+        let ma = ledger.commit_assignment(&a).expect("commit");
+
+        // record: unassign then assign (order matters)
+        let un = UnassignOperation::new(&ma);
+        let reassign = AssignOperation::new(ma.clone());
+
+        let plan = Plan::new(vec![un.into(), reassign.into()]);
+
+        // iterate and ensure order & kinds
+        let mut it = plan.iter_operations();
+        match it.next().unwrap() {
+            Operation::Unassign(op) => assert_eq!(op.moveable().id(), ma.id()),
+            other => panic!("expected Unassign first, got {:?}", other),
+        }
+        match it.next().unwrap() {
+            Operation::Assign(op) => assert_eq!(op.assignment().id(), ma.id()),
+            other => panic!("expected Assign second, got {:?}", other),
+        }
+        assert!(it.next().is_none());
+    }
+
+    #[test]
+    fn free_slot_constructor_is_opaque_but_round_trips() {
+        // Construct by hand and ensure getters are stable.
+        let s = SpaceInterval::new(SpacePosition::new(5), SpacePosition::new(12));
+        let t = TimeInterval::new(TimePoint::new(20), TimePoint::new(25));
+        let slot = FreeSlot::<'static, i64>::new(s, t);
+
+        assert_eq!(slot.space(), s);
+        assert_eq!(slot.time(), t);
+    }
+
+    #[test]
+    fn overlay_unassign_makes_request_discoverable_again() {
+        // Build problem with one movable request
+        let r = req_ok(1, 10, 5, 0, 100, 0, 100);
+        let mut b = ProblemBuilder::<i64, i64>::new(SpaceLength::new(200));
+        b.add_unassigned_request(r.clone()).unwrap();
+        let p = b.build();
+
+        // Base ledger + base commit
+        let mut ledger = AssignmentLedger::from(&p);
+        let a = asg(&r, 30, 10);
+        let ma = ledger.commit_assignment(&a).expect("commit");
+
+        // Create overlay and stage uncommit
+        let mut ov = AssignmentLedgerOverlay::new(&ledger);
+        let _ = ov.uncommit_assignment(&ma).expect("stage uncommit");
+
+        // After uncommit:
+        //  - request should be visible as *unassigned* in the overlay
+        //  - and should NOT be visible as assigned
+        let unassigned_ids: Vec<_> = ov.iter_unassigned_requests().map(|mr| mr.id()).collect();
+        assert!(unassigned_ids.contains(&r.id()));
+
+        let assigned_ids: Vec<_> = ov.iter_assigned_requests().map(|mr| mr.id()).collect();
+        assert!(!assigned_ids.contains(&r.id()));
+    }
+
+    #[test]
+    fn explorer_finds_freed_slot_after_unassign_within_tight_window() {
+        // --- Build problem + base ledger state ---
+        let r = req_ok(1, 10, 5, 0, 100, 0, 100);
+        let mut b = ProblemBuilder::<i64, i64>::new(SpaceLength::new(200));
+        b.add_unassigned_request(r.clone()).unwrap();
+        let p = b.build();
+
+        let mut ledger = AssignmentLedger::from(&p);
+        let a = asg(&r, 50, 20); // occupies [50,60) × [20,25)
+        let ma = ledger.commit_assignment(&a).expect("commit");
+        let mut berth: BerthOccupancy<_, _> =
+            BerthOccupancy::<i64, BooleanVecQuay>::new(500.into());
+
+        let base_rect: SpaceTimeRectangle<i64> = (&a).into();
+        berth.occupy(&base_rect).expect("seed base occupancy"); // adjust if signature differs
+
+        // --- Plan builder over overlays ---
+        let ctx = ProposeCtx::new(&ledger, &berth, &p, Version::new(0));
+        let mut pb = PlanBuilder::new(&ctx);
+
+        // Before unassign: explorer should NOT produce a slot in the exact tight window.
+        pb.with_explorer(|ex| {
+            // While it's assigned, the request is in 'assigned' view:
+            let req_assigned = ex
+                .iter_assigned_requests()
+                .find(|mr| mr.id() == r.id())
+                .expect("assigned req present");
+
+            let t_win = TimeInterval::new(a.start_time(), a.start_time() + r.processing_duration());
+            let s_win = SpaceInterval::new(a.start_position(), a.start_position() + r.length());
+            let any = ex
+                .iter_slots_for_request_within(&req_assigned, t_win, s_win)
+                .next();
+            assert!(
+                any.is_none(),
+                "slot should NOT be visible before unassign within tight window"
+            );
+        });
+
+        // Stage unassign (frees it in the overlay)
+        let freed_slot = pb.propose_unassign(&ma).expect("propose_unassign");
+
+        // After unassign: explorer should show a slot that starts at freed start-time and covers space.
+        pb.with_explorer(|ex| {
+            // Now it's unassigned:
+            let req_unassigned = ex
+                .iter_unassigned_requests()
+                .find(|mr| mr.id() == r.id())
+                .expect("unassigned req present");
+
+            let t_win = TimeInterval::new(freed_slot.time().start(), freed_slot.time().end());
+            let s_win = SpaceInterval::new(freed_slot.space().start(), freed_slot.space().end());
+
+            let proc = r.processing_duration();
+
+            let mut found_covering = false;
+            for slot in ex.iter_slots_for_request_within(&req_unassigned, t_win, s_win) {
+                // Iterator returns 'start time + space'; duration should match proc.
+                let starts_at_freed_time = slot.time().start() == freed_slot.time().start();
+                let duration_ok = slot.time().duration() == proc;
+
+                // Be lenient: slot may be equal or a superset in space.
+                let covers_space = slot.space().start() <= freed_slot.space().start()
+                    && slot.space().end() >= freed_slot.space().end();
+
+                if starts_at_freed_time && duration_ok && covers_space {
+                    found_covering = true;
+                    break;
+                }
+            }
+
+            assert!(
+                found_covering,
+                "expected to rediscover a slot covering the freed region at the same start time"
+            );
+        });
     }
 }

@@ -95,14 +95,11 @@ pub trait QuayRead: Eq + Clone {
         &self,
         interval: SpaceInterval,
     ) -> Result<(SpacePosition, SpacePosition), QuaySpaceIntervalOutOfBoundsError> {
-        let mut start = interval.start();
-        let mut end = interval.end();
-        if start > end {
-            std::mem::swap(&mut start, &mut end);
-        }
+        let start = interval.start();
+        let end = interval.end();
+
         let cap_end = SpacePosition::zero() + self.capacity();
-        let zero = SpacePosition::zero();
-        if start < zero || end > cap_end {
+        if end > cap_end {
             return Err(QuaySpaceIntervalOutOfBoundsError::new(
                 interval,
                 self.capacity(),

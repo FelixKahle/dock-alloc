@@ -732,18 +732,40 @@ where
     }
 
     #[inline]
-    pub fn add_occupy(&mut self, time: TimePoint<T>, space: SpaceInterval) {
-        if space.is_empty() {
-            return;
+    pub fn add_occupy(
+        &mut self,
+        time: TimePoint<T>,
+        space: SpaceInterval,
+    ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
+        if !self.berth().space_within_quay(space) {
+            return Err(QuaySpaceIntervalOutOfBoundsError::new(
+                space,
+                self.berth().quay_length(),
+            ));
         }
-        debug_assert!(self.berth().space_within_quay(space));
+
+        if space.is_empty() {
+            return Ok(());
+        }
         self.occupied_by_time
             .entry(time)
             .or_default()
             .insert_and_coalesce(space);
+
+        Ok(())
     }
 
-    pub fn occupy(&mut self, rect: &SpaceTimeRectangle<T>) {
+    pub fn occupy(
+        &mut self,
+        rect: &SpaceTimeRectangle<T>,
+    ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
+        if !self.berth().space_within_quay(rect.space()) {
+            return Err(QuaySpaceIntervalOutOfBoundsError::new(
+                rect.space(),
+                self.berth().quay_length(),
+            ));
+        }
+
         let time_window = rect.time();
         let space_interval = rect.space();
 
@@ -751,20 +773,33 @@ where
             .berth()
             .slice_predecessor_timepoint(time_window.start())
         {
-            self.add_occupy(pred, space_interval);
+            self.add_occupy(pred, space_interval)?;
         }
         for timepoint in self
             .berth()
             .slices(time_window.start(), time_window.end())
             .interior_keys()
         {
-            self.add_occupy(timepoint, space_interval);
+            self.add_occupy(timepoint, space_interval)?;
         }
+
+        Ok(())
     }
 
-    pub fn remove_occupy(&mut self, time: TimePoint<T>, space: SpaceInterval) {
+    pub fn remove_occupy(
+        &mut self,
+        time: TimePoint<T>,
+        space: SpaceInterval,
+    ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
+        if !self.berth().space_within_quay(space) {
+            return Err(QuaySpaceIntervalOutOfBoundsError::new(
+                space,
+                self.berth().quay_length(),
+            ));
+        }
+
         if space.is_empty() {
-            return;
+            return Ok(());
         }
         if let Some(set) = self.occupied_by_time.get_mut(&time) {
             set.subtract_interval(space);
@@ -772,9 +807,14 @@ where
                 self.occupied_by_time.remove(&time);
             }
         }
+
+        Ok(())
     }
 
-    pub fn undo_occupy(&mut self, rect: &SpaceTimeRectangle<T>) {
+    pub fn undo_occupy(
+        &mut self,
+        rect: &SpaceTimeRectangle<T>,
+    ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
         let time_window = rect.time();
         let space_interval = rect.space();
 
@@ -782,30 +822,55 @@ where
             .berth()
             .slice_predecessor_timepoint(time_window.start())
         {
-            self.remove_occupy(pred, space_interval);
+            self.remove_occupy(pred, space_interval)?;
         }
         for tp in self
             .berth()
             .slices(time_window.start(), time_window.end())
             .interior_keys()
         {
-            self.remove_occupy(tp, space_interval);
+            self.remove_occupy(tp, space_interval)?;
         }
+
+        Ok(())
     }
 
     #[inline]
-    pub fn add_free(&mut self, time: TimePoint<T>, space: SpaceInterval) {
-        if space.is_empty() {
-            return;
+    pub fn add_free(
+        &mut self,
+        time: TimePoint<T>,
+        space: SpaceInterval,
+    ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
+        if !self.berth().space_within_quay(space) {
+            return Err(QuaySpaceIntervalOutOfBoundsError::new(
+                space,
+                self.berth().quay_length(),
+            ));
         }
-        debug_assert!(self.berth().space_within_quay(space));
+
+        if space.is_empty() {
+            return Ok(());
+        }
+
         self.free_by_time
             .entry(time)
             .or_default()
             .insert_and_coalesce(space);
+
+        Ok(())
     }
 
-    pub fn free(&mut self, rect: &SpaceTimeRectangle<T>) {
+    pub fn free(
+        &mut self,
+        rect: &SpaceTimeRectangle<T>,
+    ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
+        if !self.berth().space_within_quay(rect.space()) {
+            return Err(QuaySpaceIntervalOutOfBoundsError::new(
+                rect.space(),
+                self.berth().quay_length(),
+            ));
+        }
+
         let time_window = rect.time();
         let space_interval = rect.space();
 
@@ -813,20 +878,33 @@ where
             .berth()
             .slice_predecessor_timepoint(time_window.start())
         {
-            self.add_free(pred, space_interval);
+            self.add_free(pred, space_interval)?;
         }
         for timepoint in self
             .berth()
             .slices(time_window.start(), time_window.end())
             .interior_keys()
         {
-            self.add_free(timepoint, space_interval);
+            self.add_free(timepoint, space_interval)?;
         }
+
+        Ok(())
     }
 
-    pub fn remove_free(&mut self, time: TimePoint<T>, space: SpaceInterval) {
+    pub fn remove_free(
+        &mut self,
+        time: TimePoint<T>,
+        space: SpaceInterval,
+    ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
+        if !self.berth().space_within_quay(space) {
+            return Err(QuaySpaceIntervalOutOfBoundsError::new(
+                space,
+                self.berth().quay_length(),
+            ));
+        }
+
         if space.is_empty() {
-            return;
+            return Ok(());
         }
         if let Some(set) = self.free_by_time.get_mut(&time) {
             set.subtract_interval(space);
@@ -834,9 +912,21 @@ where
                 self.free_by_time.remove(&time);
             }
         }
+
+        Ok(())
     }
 
-    pub fn undo_free(&mut self, rect: &SpaceTimeRectangle<T>) {
+    pub fn undo_free(
+        &mut self,
+        rect: &SpaceTimeRectangle<T>,
+    ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
+        if !self.berth().space_within_quay(rect.space()) {
+            return Err(QuaySpaceIntervalOutOfBoundsError::new(
+                rect.space(),
+                self.berth().quay_length(),
+            ));
+        }
+
         let time_window = rect.time();
         let space_interval = rect.space();
 
@@ -844,15 +934,17 @@ where
             .berth()
             .slice_predecessor_timepoint(time_window.start())
         {
-            self.remove_free(pred, space_interval);
+            self.remove_free(pred, space_interval)?;
         }
         for tp in self
             .berth()
             .slices(time_window.start(), time_window.end())
             .interior_keys()
         {
-            self.remove_free(tp, space_interval);
+            self.remove_free(tp, space_interval)?;
         }
+
+        Ok(())
     }
 
     fn covering_timepoints_union(
@@ -879,15 +971,35 @@ where
             .chain(overlay_union)
     }
 
-    pub fn is_free(&self, rect: &SpaceTimeRectangle<T>) -> bool {
+    pub fn is_free(
+        &self,
+        rect: &SpaceTimeRectangle<T>,
+    ) -> Result<bool, QuaySpaceIntervalOutOfBoundsError> {
         let tw = rect.time();
         let si = rect.space();
-        self.covering_timepoints_union(tw)
-            .all(|tp| runs_cover_interval(self.free_runs_at(tp), si))
+
+        if !self.berth().space_within_quay(si) {
+            return Err(QuaySpaceIntervalOutOfBoundsError::new(
+                si,
+                self.berth().quay_length(),
+            ));
+        }
+
+        if rect.is_empty() {
+            return Ok(true);
+        }
+
+        Ok(self
+            .covering_timepoints_union(tw)
+            .all(|tp| runs_cover_interval(self.free_runs_at(tp), si)))
     }
 
-    pub fn is_occupied(&self, rect: &SpaceTimeRectangle<T>) -> bool {
-        !self.is_free(rect)
+    #[inline]
+    pub fn is_occupied(
+        &self,
+        rect: &SpaceTimeRectangle<T>,
+    ) -> Result<bool, QuaySpaceIntervalOutOfBoundsError> {
+        Ok(!self.is_free(rect)?)
     }
 
     #[inline]
@@ -1736,14 +1848,14 @@ mod tests {
         let mut overlay = BerthOccupancyOverlay::new(&berth);
 
         // At t=5, override a subrange as free via overlay
-        overlay.add_free(tp(5), si(2, 4));
-        assert!(overlay.is_free(&rect(ti(5, 10), si(2, 4))));
-        assert!(overlay.is_occupied(&rect(ti(5, 10), si(4, 6)))); // still blocked remainder
+        overlay.add_free(tp(5), si(2, 4)).unwrap();
+        assert!(overlay.is_free(&rect(ti(5, 10), si(2, 4))).unwrap());
+        assert!(overlay.is_occupied(&rect(ti(5, 10), si(4, 6))).unwrap()); // still blocked remainder
 
         // Add an overlay-occupy on otherwise-free area at t=0
-        overlay.add_occupy(tp(0), si(0, 1));
-        assert!(overlay.is_occupied(&rect(ti(0, 5), si(0, 1))));
-        assert!(overlay.is_free(&rect(ti(0, 5), si(1, 10))));
+        overlay.add_occupy(tp(0), si(0, 1)).unwrap();
+        assert!(overlay.is_occupied(&rect(ti(0, 5), si(0, 1))).unwrap());
+        assert!(overlay.is_free(&rect(ti(0, 5), si(1, 10))).unwrap());
     }
 
     #[test]
@@ -1757,12 +1869,12 @@ mod tests {
         let mut overlay = BerthOccupancyOverlay::new(&berth);
 
         // Free [4,5) across [4,6): will place free at predecessor of 4 (t=0) and at timepoint 5
-        overlay.free(&rect(ti(4, 6), si(4, 5)));
-        assert!(overlay.is_free(&rect(ti(4, 6), si(4, 5))));
+        overlay.free(&rect(ti(4, 6), si(4, 5))).unwrap();
+        assert!(overlay.is_free(&rect(ti(4, 6), si(4, 5))).unwrap());
 
         // Undo the same free; should revert to base (occupied at t=5 in [2,6))
-        overlay.undo_free(&rect(ti(4, 6), si(4, 5)));
-        assert!(overlay.is_occupied(&rect(ti(5, 6), si(4, 5))));
+        overlay.undo_free(&rect(ti(4, 6), si(4, 5))).unwrap();
+        assert!(overlay.is_occupied(&rect(ti(5, 6), si(4, 5))).unwrap());
     }
 
     #[test]
@@ -1815,11 +1927,11 @@ mod tests {
         let berth = BO::new(quay_length);
         let mut overlay = BerthOccupancyOverlay::new(&berth);
 
-        overlay.occupy(&rect(ti(2, 6), si(3, 5)));
-        assert!(overlay.is_occupied(&rect(ti(3, 5), si(3, 5))));
+        overlay.occupy(&rect(ti(2, 6), si(3, 5))).unwrap();
+        assert!(overlay.is_occupied(&rect(ti(3, 5), si(3, 5))).unwrap());
 
-        overlay.undo_occupy(&rect(ti(2, 6), si(3, 5)));
-        assert!(overlay.is_free(&rect(ti(0, 10), si(0, 10))));
+        overlay.undo_occupy(&rect(ti(2, 6), si(3, 5))).unwrap();
+        assert!(overlay.is_free(&rect(ti(0, 10), si(0, 10))).unwrap());
     }
 
     #[test]
@@ -1830,8 +1942,8 @@ mod tests {
 
         // Overlay "free" is additive (union with base free). Since base is fully free,
         // the intersection across keys stays the full bounds.
-        overlay.add_free(tp(0), si(1, 8));
-        overlay.add_free(tp(5), si(3, 10));
+        overlay.add_free(tp(0), si(1, 8)).unwrap();
+        overlay.add_free(tp(5), si(3, 10)).unwrap();
 
         let runs: Vec<_> = overlay
             .iter_intersect_free_runs(len(1), si(0, 12))
@@ -1852,8 +1964,8 @@ mod tests {
 
         // We need overlay freeness at the predecessor of 5 (which is 0) AND at slice key 5,
         // so that the intersection over [5,8) includes [2,6).
-        overlay.add_free(tp(0), si(2, 6));
-        overlay.add_free(tp(5), si(2, 6));
+        overlay.add_free(tp(0), si(2, 6)).unwrap();
+        overlay.add_free(tp(5), si(2, 6)).unwrap();
 
         let items: Vec<_> = overlay
             .iter_free(ti(5, 9), TimeDelta::new(3), len(2), si(0, 10))
@@ -1880,12 +1992,12 @@ mod tests {
         let berth = BO::new(len(6));
         let mut overlay = BerthOccupancyOverlay::new(&berth);
 
-        overlay.add_free(tp(10), si(0, 1));
-        overlay.add_free(tp(0), si(0, 1));
-        overlay.add_free(tp(5), si(0, 1));
+        overlay.add_free(tp(10), si(0, 1)).unwrap();
+        overlay.add_free(tp(0), si(0, 1)).unwrap();
+        overlay.add_free(tp(5), si(0, 1)).unwrap();
 
-        overlay.add_occupy(tp(7), si(1, 2));
-        overlay.add_occupy(tp(3), si(1, 2));
+        overlay.add_occupy(tp(7), si(1, 2)).unwrap();
+        overlay.add_occupy(tp(3), si(1, 2)).unwrap();
 
         let free_keys: Vec<_> = overlay.iter_free_timepoints().map(|t| t.value()).collect();
         let occ_keys: Vec<_> = overlay
@@ -1904,10 +2016,10 @@ mod tests {
         let mut overlay = BerthOccupancyOverlay::new(&berth);
 
         // t=0: occupy [2,10) → free is [0,2)
-        overlay.add_occupy(tp(0), si(2, 10));
+        overlay.add_occupy(tp(0), si(2, 10)).unwrap();
         // t=5: occupy [0,1) and [2,10) → free is [1,2)
-        overlay.add_occupy(tp(5), si(0, 1));
-        overlay.add_occupy(tp(5), si(2, 10));
+        overlay.add_occupy(tp(5), si(0, 1)).unwrap();
+        overlay.add_occupy(tp(5), si(2, 10)).unwrap();
 
         let bounds = si(0, 10);
 
@@ -1946,12 +2058,12 @@ mod tests {
     fn test_overlay_remove_occupy_drops_key_when_empty() {
         let berth = BO::new(len(10));
         let mut ov = BerthOccupancyOverlay::new(&berth);
-        ov.add_occupy(tp(5), si(2, 4));
+        ov.add_occupy(tp(5), si(2, 4)).unwrap();
         assert_eq!(
             ov.iter_occupied_timepoints().collect::<Vec<_>>(),
             vec![tp(5)]
         );
-        ov.remove_occupy(tp(5), si(2, 4));
+        ov.remove_occupy(tp(5), si(2, 4)).unwrap();
         assert!(ov.iter_occupied_timepoints().next().is_none());
     }
 
@@ -1959,9 +2071,9 @@ mod tests {
     fn test_overlay_remove_free_drops_key_when_empty() {
         let berth = BO::new(len(10));
         let mut ov = BerthOccupancyOverlay::new(&berth);
-        ov.add_free(tp(5), si(1, 3));
+        ov.add_free(tp(5), si(1, 3)).unwrap();
         assert_eq!(ov.iter_free_timepoints().collect::<Vec<_>>(), vec![tp(5)]);
-        ov.remove_free(tp(5), si(1, 3));
+        ov.remove_free(tp(5), si(1, 3)).unwrap();
         assert!(ov.iter_free_timepoints().next().is_none());
     }
 
@@ -1970,7 +2082,7 @@ mod tests {
         let berth = BO::new(len(10)); // fully free; no extra keys
         let mut ov = BerthOccupancyOverlay::new(&berth);
         // Introduce an overlay key inside the window
-        ov.add_occupy(tp(7), si(0, 1));
+        ov.add_occupy(tp(7), si(0, 1)).unwrap();
         // Duration 2 forces candidate starts at 0 and 7 (overlay key)
         let items: Vec<_> = ov
             .iter_free(ti(0, 10), TimeDelta::new(2), len(1), si(0, 10))
@@ -2012,11 +2124,13 @@ mod tests {
         ov.add_occupy(
             TimePoint::new(0),
             SpaceInterval::new(SpacePosition::new(2), SpacePosition::new(6)),
-        );
+        )
+        .unwrap();
         ov.add_free(
             TimePoint::new(5),
             SpaceInterval::new(SpacePosition::new(2), SpacePosition::new(6)),
-        );
+        )
+        .unwrap();
 
         let items: Vec<_> = ov
             .iter_free(

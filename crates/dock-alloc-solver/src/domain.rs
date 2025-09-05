@@ -49,6 +49,9 @@ use num_traits::{PrimInt, Signed};
 pub struct Version(u64);
 
 impl Version {
+    pub fn new(value: u64) -> Self {
+        Version(value)
+    }
     /// Returns the next version by incrementing the current version number.
     ///
     /// This method creates a new `Version` instance with a value that is one
