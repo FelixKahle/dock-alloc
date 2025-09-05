@@ -272,24 +272,23 @@ where
     operations: Vec<Operation<'brand, 'p, T, C>>,
 }
 
-pub struct Explorer<'brand, 'p, 'ctx, T, C, Q>
+pub struct Explorer<'brand, 'p, 'ctx, 'pb, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
     Q: QuayRead,
 {
-    builder: PlanBuilder<'brand, 'p, 'ctx, T, C, Q>,
+    builder: &'pb PlanBuilder<'brand, 'p, 'ctx, T, C, Q>,
 }
 
-impl<'brand, 'p, 'ctx, T, C, Q> Explorer<'brand, 'p, 'ctx, T, C, Q>
+impl<'brand, 'p, 'ctx, 'pb, T, C, Q> Explorer<'brand, 'p, 'ctx, 'pb, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
     Q: QuayRead,
 {
     #[allow(dead_code)]
-    fn new(ctx: &'ctx ProposeCtx<'brand, 'p, T, C, Q>) -> Self {
-        let builder = PlanBuilder::new(ctx);
+    fn new(builder: &'pb PlanBuilder<'brand, 'p, 'ctx, T, C, Q>) -> Self {
         Self { builder }
     }
 
@@ -335,6 +334,57 @@ where
     pub fn iter_assignments(&self) -> impl Iterator<Item = &'_ Assignment<'_, T, C>> + '_ {
         self.builder.assignment_overlay.iter_assignments()
     }
+
+    pub fn iter_slots_for_request(
+        &self,
+        request: &BrandedMoveableRequest<'brand, 'p, T, C>,
+    ) -> impl Iterator<Item = FreeSlot<'brand, T>> + '_ {
+        let time_search_window = request.feasible_time_window();
+        let space_search_window = request.feasible_space_window();
+        let processing_duration = request.processing_duration();
+        let length = request.length();
+
+        self.builder
+            .berth_overlay
+            .iter_free(
+                time_search_window,
+                processing_duration,
+                length,
+                space_search_window,
+            )
+            .map(move |slot| {
+                let time_interval =
+                    TimeInterval::new(slot.start_time(), slot.start_time() + processing_duration);
+                FreeSlot::new(slot.space(), time_interval)
+            })
+    }
+
+    pub fn iter_slots_for_request_within(
+        &self,
+        request: &BrandedMoveableRequest<'brand, 'p, T, C>,
+        time_search_window: TimeInterval<T>,
+        space_search_window: SpaceInterval,
+    ) -> impl Iterator<Item = FreeSlot<'brand, T>> + '_ {
+        let proc = request.processing_duration();
+        let len = request.length();
+        let t_opt = time_search_window.intersection(&request.feasible_time_window());
+        let s_opt = space_search_window.intersection(&request.feasible_space_window());
+
+        t_opt
+            .and_then(|twin| s_opt.map(|swin| (twin, swin)))
+            .filter(|(twin, swin)| twin.duration() >= proc && swin.measure() >= len)
+            .map(move |(twin, swin)| {
+                self.builder
+                    .berth_overlay
+                    .iter_free(twin, proc, len, swin)
+                    .map(move |slot| {
+                        let time = TimeInterval::new(slot.start_time(), slot.start_time() + proc);
+                        FreeSlot::new(slot.space(), time)
+                    })
+            })
+            .into_iter()
+            .flatten()
+    }
 }
 
 impl<'brand, 'p, 'ctx, T, C, Q> PlanBuilder<'brand, 'p, 'ctx, T, C, Q>
@@ -359,6 +409,14 @@ where
         self.ctx.problem()
     }
 
+    pub fn with_explorer<'pb, F, R>(&'pb self, f: F) -> R
+    where
+        F: FnOnce(&Explorer<'brand, 'p, 'ctx, 'pb, T, C, Q>) -> R,
+    {
+        let explorer = Explorer { builder: self };
+        f(&explorer)
+    }
+
     fn add_operation<O>(&mut self, op: O)
     where
         O: Into<Operation<'brand, 'p, T, C>>,
@@ -376,5 +434,19 @@ where
         self.berth_overlay.free(&rect);
         self.add_operation(UnassignOperation::new(assignment));
         Ok(free)
+    }
+
+    pub fn propose_assign(
+        &mut self,
+        req: &BrandedMoveableRequest<'brand, 'p, T, C>,
+        slot: FreeSlot<'brand, T>,
+    ) -> Result<BrandedMoveableAssignment<'brand, 'p, T, C>, StageError> {
+        let a = Assignment::borrowed(req.request(), slot.space().start(), slot.time().start());
+        let ma = self.assignment_overlay.commit_assignment(&a)?;
+        let rect: SpaceTimeRectangle<T> = (&a).into();
+        self.berth_overlay.occupy(&rect);
+        self.operations
+            .push(AssignOperation::new(ma.clone()).into());
+        Ok(ma)
     }
 }

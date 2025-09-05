@@ -19,9 +19,11 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use dock_alloc_core::domain::{SpaceLength, SpacePosition, TimeDelta, TimePoint};
+use dock_alloc_core::domain::{
+    Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
+};
 use dock_alloc_model::{
-    Assignment, FixedAssignment, MoveableRequest, Problem, RequestId, Solution,
+    Assignment, FixedAssignment, MoveableRequest, Problem, Request, RequestId, Solution,
 };
 use num_traits::{PrimInt, Signed};
 use std::{
@@ -106,6 +108,51 @@ where
             handle: MovableHandle::new(inner.request().id()),
             _phantom: PhantomData,
         }
+    }
+
+    #[inline]
+    pub fn length(&self) -> SpaceLength {
+        self.inner.request().length()
+    }
+
+    #[inline]
+    pub fn arrival_time(&self) -> TimePoint<T> {
+        self.inner.request().arrival_time()
+    }
+
+    #[inline]
+    pub fn processing_duration(&self) -> TimeDelta<T> {
+        self.inner.request().processing_duration()
+    }
+
+    #[inline]
+    pub fn target_position(&self) -> SpacePosition {
+        self.inner.request().target_position()
+    }
+
+    #[inline]
+    pub fn cost_per_delay(&self) -> Cost<C> {
+        self.inner.request().cost_per_delay()
+    }
+
+    #[inline]
+    pub fn cost_per_position_deviation(&self) -> Cost<C> {
+        self.inner.request().cost_per_position_deviation()
+    }
+
+    #[inline]
+    pub fn feasible_time_window(&self) -> TimeInterval<T> {
+        self.inner.request().feasible_time_window()
+    }
+
+    #[inline]
+    pub fn feasible_space_window(&self) -> SpaceInterval {
+        self.inner.request().feasible_space_window()
+    }
+
+    #[inline]
+    pub fn request(&self) -> &'a Request<T, C> {
+        self.inner.request()
     }
 
     #[inline]
