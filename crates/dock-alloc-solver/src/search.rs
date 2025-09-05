@@ -178,6 +178,7 @@ where
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct UnassignOperation<'brand, 'p, T, C>
 where
     T: PrimInt + Signed,
@@ -204,6 +205,7 @@ where
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AssignOperation<'brand, 'p, T, C>
 where
     T: PrimInt + Signed,
@@ -231,6 +233,7 @@ where
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Operation<'brand, 'p, T, C>
 where
     T: PrimInt + Signed,
@@ -387,6 +390,36 @@ where
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Plan<'brand, 'p, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    operations: Vec<Operation<'brand, 'p, T, C>>,
+}
+
+impl<'brand, 'p, T, C> Plan<'brand, 'p, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    #[inline]
+    fn new(operations: Vec<Operation<'brand, 'p, T, C>>) -> Self {
+        Self { operations }
+    }
+
+    #[inline]
+    pub fn operations(&self) -> &Vec<Operation<'brand, 'p, T, C>> {
+        &self.operations
+    }
+
+    #[inline]
+    pub fn iter_operations(&self) -> impl DoubleEndedIterator<Item = &Operation<'brand, 'p, T, C>> {
+        self.operations.iter()
+    }
+}
+
 impl<'brand, 'p, 'ctx, T, C, Q> PlanBuilder<'brand, 'p, 'ctx, T, C, Q>
 where
     T: PrimInt + Signed,
@@ -448,5 +481,9 @@ where
         self.operations
             .push(AssignOperation::new(ma.clone()).into());
         Ok(ma)
+    }
+
+    pub fn build(self) -> Plan<'brand, 'p, T, C> {
+        Plan::new(self.operations)
     }
 }
