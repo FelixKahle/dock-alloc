@@ -23,12 +23,15 @@ use std::marker::PhantomData;
 
 use crate::{
     domain::{SpaceTimeRectangle, Version},
-    ledger::{AssignmentLedger, AssignmentOverlay, MovableAssignment, StageError},
+    ledger::{
+        AssignmentLedger, AssignmentLedgerOverlay, BrandedMoveableAssignment,
+        BrandedMoveableRequest, FixedHandle, MovableHandle, StageError,
+    },
     occupancy::{BerthOccupancy, BerthOccupancyOverlay},
     quay::QuayRead,
 };
 use dock_alloc_core::domain::{SpaceInterval, TimeInterval};
-use dock_alloc_model::{Assignment, Problem};
+use dock_alloc_model::{Assignment, FixedAssignment, Problem};
 use num_traits::{PrimInt, Signed};
 
 pub struct ProposeCtx<'brand, 'p, T, C, Q>
@@ -102,12 +105,12 @@ impl<'brand, T: PrimInt + Signed> FreeSlot<'brand, T> {
     }
 }
 
-impl<'brand, 'p, T, C> From<&MovableAssignment<'brand, 'p, T, C>> for FreeSlot<'brand, T>
+impl<'brand, 'p, T, C> From<&BrandedMoveableAssignment<'brand, 'p, T, C>> for FreeSlot<'brand, T>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    fn from(assignment: &MovableAssignment<'brand, 'p, T, C>) -> Self {
+    fn from(assignment: &BrandedMoveableAssignment<'brand, 'p, T, C>) -> Self {
         let assignment = assignment.assignment();
 
         // Time
@@ -127,12 +130,12 @@ where
     }
 }
 
-impl<'brand, 'p, T, C> From<&MovableAssignment<'brand, 'p, T, C>> for SpaceTimeRectangle<T>
+impl<'brand, 'p, T, C> From<&BrandedMoveableAssignment<'brand, 'p, T, C>> for SpaceTimeRectangle<T>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    fn from(m: &MovableAssignment<'brand, 'p, T, C>) -> Self {
+    fn from(m: &BrandedMoveableAssignment<'brand, 'p, T, C>) -> Self {
         let assignment = m.assignment();
 
         // Time
@@ -180,7 +183,7 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    moveable: &'brand MovableAssignment<'brand, 'p, T, C>,
+    moveable: &'brand BrandedMoveableAssignment<'brand, 'p, T, C>,
     _brand: PhantomData<&'brand ()>,
 }
 
@@ -189,14 +192,14 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    fn new(assignment: &'brand MovableAssignment<'brand, 'p, T, C>) -> Self {
+    fn new(assignment: &'brand BrandedMoveableAssignment<'brand, 'p, T, C>) -> Self {
         Self {
             moveable: assignment,
             _brand: PhantomData,
         }
     }
 
-    pub fn moveable(&self) -> &'brand MovableAssignment<'brand, 'p, T, C> {
+    pub fn moveable(&self) -> &'brand BrandedMoveableAssignment<'brand, 'p, T, C> {
         self.moveable
     }
 }
@@ -206,7 +209,7 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    assignment: MovableAssignment<'brand, 'p, T, C>,
+    assignment: BrandedMoveableAssignment<'brand, 'p, T, C>,
     _brand: PhantomData<&'brand ()>,
 }
 
@@ -215,14 +218,15 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    fn new(assignment: MovableAssignment<'brand, 'p, T, C>) -> Self {
+    #[allow(dead_code)]
+    fn new(assignment: BrandedMoveableAssignment<'brand, 'p, T, C>) -> Self {
         Self {
             assignment,
             _brand: PhantomData,
         }
     }
 
-    pub fn assignment(&self) -> &MovableAssignment<'brand, 'p, T, C> {
+    pub fn assignment(&self) -> &BrandedMoveableAssignment<'brand, 'p, T, C> {
         &self.assignment
     }
 }
@@ -263,9 +267,74 @@ where
     Q: QuayRead,
 {
     ctx: &'ctx ProposeCtx<'brand, 'p, T, C, Q>,
-    assignment_overlay: AssignmentOverlay<'brand, 'p, 'ctx, T, C>,
+    assignment_overlay: AssignmentLedgerOverlay<'brand, 'p, 'ctx, T, C>,
     berth_overlay: BerthOccupancyOverlay<'brand, 'p, T, Q>,
     operations: Vec<Operation<'brand, 'p, T, C>>,
+}
+
+pub struct Explorer<'brand, 'p, 'ctx, T, C, Q>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+    Q: QuayRead,
+{
+    builder: PlanBuilder<'brand, 'p, 'ctx, T, C, Q>,
+}
+
+impl<'brand, 'p, 'ctx, T, C, Q> Explorer<'brand, 'p, 'ctx, T, C, Q>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+    Q: QuayRead,
+{
+    #[allow(dead_code)]
+    fn new(ctx: &'ctx ProposeCtx<'brand, 'p, T, C, Q>) -> Self {
+        let builder = PlanBuilder::new(ctx);
+        Self { builder }
+    }
+
+    #[inline]
+    pub fn iter_fixed_handles(&self) -> impl Iterator<Item = FixedHandle<'brand>> + '_ {
+        self.builder.assignment_overlay.iter_fixed_handles()
+    }
+
+    #[inline]
+    pub fn iter_fixed_assignments(
+        &self,
+    ) -> impl Iterator<Item = &'_ FixedAssignment<'_, T, C>> + '_ {
+        self.builder.assignment_overlay.iter_fixed_assignments()
+    }
+
+    #[inline]
+    pub fn iter_movable_handles(&self) -> impl Iterator<Item = MovableHandle<'brand>> + '_ {
+        self.builder.assignment_overlay.iter_movable_handles()
+    }
+
+    #[inline]
+    pub fn iter_movable_assignments(
+        &self,
+    ) -> impl Iterator<Item = &BrandedMoveableAssignment<'brand, 'p, T, C>> + '_ {
+        self.builder.assignment_overlay.iter_movable_assignments()
+    }
+
+    #[inline]
+    pub fn iter_unassigned_requests(
+        &self,
+    ) -> impl Iterator<Item = BrandedMoveableRequest<'brand, 'p, T, C>> + '_ {
+        self.builder.assignment_overlay.iter_unassigned_requests()
+    }
+
+    #[inline]
+    pub fn iter_assigned_requests(
+        &self,
+    ) -> impl Iterator<Item = BrandedMoveableRequest<'brand, 'p, T, C>> + '_ {
+        self.builder.assignment_overlay.iter_assigned_requests()
+    }
+
+    #[inline]
+    pub fn iter_assignments(&self) -> impl Iterator<Item = &'_ Assignment<'_, T, C>> + '_ {
+        self.builder.assignment_overlay.iter_assignments()
+    }
 }
 
 impl<'brand, 'p, 'ctx, T, C, Q> PlanBuilder<'brand, 'p, 'ctx, T, C, Q>
@@ -276,7 +345,7 @@ where
 {
     #[allow(dead_code)]
     fn new(ctx: &'ctx ProposeCtx<'brand, 'p, T, C, Q>) -> Self {
-        let assignment_overlay = AssignmentOverlay::new(ctx.ledger());
+        let assignment_overlay = AssignmentLedgerOverlay::new(ctx.ledger());
         let berth_overlay = BerthOccupancyOverlay::new(ctx.berth());
         Self {
             ctx,
@@ -299,7 +368,7 @@ where
 
     pub fn propose_unassign(
         &mut self,
-        assignment: &'brand MovableAssignment<'brand, 'p, T, C>,
+        assignment: &'brand BrandedMoveableAssignment<'brand, 'p, T, C>,
     ) -> Result<FreeSlot<'brand, T>, StageError> {
         let free: FreeSlot<'brand, T> = assignment.into();
         let rect: SpaceTimeRectangle<T> = assignment.into();
@@ -307,13 +376,5 @@ where
         self.berth_overlay.free(&rect);
         self.add_operation(UnassignOperation::new(assignment));
         Ok(free)
-    }
-
-    pub fn propose_assign(&mut self, assignment: &Assignment<'p, T, C>) -> Result<(), StageError> {
-        let rect: SpaceTimeRectangle<T> = assignment.into();
-        let moveable_assignment = self.assignment_overlay.commit_assignment(assignment)?;
-        self.berth_overlay.occupy(&rect);
-        self.add_operation(AssignOperation::new(moveable_assignment));
-        Ok(())
     }
 }
