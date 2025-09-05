@@ -405,7 +405,7 @@ where
     }
 }
 
-impl<T, C, Q> From<&Problem<T, C>> for BerthOccupancy<T, Q>
+impl<'a, T, C, Q> From<&Problem<'a, T, C>> for BerthOccupancy<T, Q>
 where
     T: PrimInt + Signed + Zero + Copy,
     C: PrimInt + Signed + Zero + Copy,
@@ -1536,7 +1536,7 @@ mod tests {
     }
 
     #[test]
-    fn free_iter_multiple_candidates_from_timepoints() {
+    fn test_free_iter_multiple_candidates_from_timepoints() {
         // Create additional timeline keys at 5 and 6 without affecting the searched bounds.
         let quay_length = len(10);
         let mut berth = BO::new(quay_length);
@@ -1555,7 +1555,7 @@ mod tests {
     }
 
     #[test]
-    fn free_iter_intersects_across_multiple_slices() {
+    fn test_free_iter_intersects_across_multiple_slices() {
         // Make two slice keys inside the processing span so intersection actually happens.
         // At t=5 free space is [0,2) ∪ [6,10); at t=7 free space is [0,6) ∪ [9,10).
         // Intersection across [5,8) => runs [0,2) and [9,10).
@@ -1576,7 +1576,7 @@ mod tests {
     }
 
     #[test]
-    fn free_iter_filters_runs_shorter_than_required() {
+    fn test_free_iter_filters_runs_shorter_than_required() {
         // Only a short run available inside bounds; require more than its length.
         let quay_length = len(4);
         let berth = BO::new(quay_length);
@@ -1594,7 +1594,7 @@ mod tests {
     }
 
     #[test]
-    fn free_iter_empty_when_duration_exceeds_window() {
+    fn test_free_iter_empty_when_duration_exceeds_window() {
         // Guard: if tw.start + duration > tw.end, the iterator is empty.
         let quay_length = len(10);
         let berth = BO::new(quay_length);
@@ -1611,7 +1611,7 @@ mod tests {
     }
 
     #[test]
-    fn free_iter_zero_duration_uses_predecessor_snapshot_each_slice() {
+    fn test_free_iter_zero_duration_uses_predecessor_snapshot_each_slice() {
         let quay_length = len(10);
         let mut berth = BO::new(quay_length);
         // Occupied at t=5 only in [2,6)
@@ -1642,7 +1642,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_add_free_and_occupy_and_queries() {
+    fn test_overlay_add_free_and_occupy_and_queries() {
         let quay_length = len(10);
         let mut berth = BO::new(quay_length);
 
@@ -1682,14 +1682,14 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_at_none_before_origin() {
+    fn test_snapshot_at_none_before_origin() {
         let berth = BO::new(len(10));
         // Using negative timepoint to test before origin
         assert!(berth.snapshot_at(tp(-1)).is_none());
     }
 
     #[test]
-    fn slice_predecessor_equal_at_key() {
+    fn test_slice_predecessor_equal_at_key() {
         let mut berth = BO::new(len(10));
         berth.occupy(&rect(ti(5, 7), si(2, 3))); // keys: 0,5,7
         assert_eq!(berth.slice_predecessor_timepoint(tp(5)), Some(tp(5)));
@@ -1698,7 +1698,7 @@ mod tests {
     }
 
     #[test]
-    fn iter_timepoints_is_strictly_inside_half_open() {
+    fn test_iter_timepoints_is_strictly_inside_half_open() {
         let mut berth = BO::new(len(10));
         berth.occupy(&rect(ti(5, 10), si(0, 1))); // keys 0,5,10
         let v: Vec<_> = berth
@@ -1710,7 +1710,7 @@ mod tests {
     }
 
     #[test]
-    fn space_within_quay_edges_and_outside() {
+    fn test_space_within_quay_edges_and_outside() {
         let berth = BO::new(len(8));
         assert!(berth.space_within_quay(si(0, 8)));
         assert!(berth.space_within_quay(si(3, 5)));
@@ -1718,7 +1718,7 @@ mod tests {
     }
 
     #[test]
-    fn occupy_free_coalesce_chain_three_equal_states() {
+    fn test_occupy_free_coalesce_chain_three_equal_states() {
         let mut berth = BO::new(len(10));
         berth.occupy(&rect(ti(3, 7), si(1, 2))); // 0,3,7
         berth.free(&rect(ti(3, 7), si(1, 2))); // should coalesce back to 0 only
@@ -1726,7 +1726,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_remove_occupy_undo_occupy() {
+    fn test_overlay_remove_occupy_undo_occupy() {
         let quay_length = len(10);
         let berth = BO::new(quay_length);
         let mut overlay = BerthOccupancyOverlay::new(&berth);
@@ -1739,7 +1739,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_iter_intersect_free_runs_across_overlay_keys() {
+    fn test_overlay_iter_intersect_free_runs_across_overlay_keys() {
         // Base berth: fully free
         let berth = BO::new(len(12));
         let mut overlay = BerthOccupancyOverlay::new(&berth);
@@ -1759,7 +1759,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_iter_free_respects_overlay_through_duration() {
+    fn test_overlay_iter_free_respects_overlay_through_duration() {
         // Base: occupy [5,9):[2,6). We'll "free" that space via overlay for the slices we care about.
         let mut berth = BO::new(len(10));
         berth.occupy(&rect(ti(5, 9), si(2, 6)));
@@ -1792,7 +1792,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_timepoint_iters_sorted() {
+    fn test_overlay_timepoint_iters_sorted() {
         let berth = BO::new(len(6));
         let mut overlay = BerthOccupancyOverlay::new(&berth);
 
@@ -1814,7 +1814,7 @@ mod tests {
     }
 
     #[test]
-    fn intersect_iter_min_length_filtering() {
+    fn test_intersect_iter_min_length_filtering() {
         // Base: fully free; create a *narrow* intersection via overlay OCCUPY (subtractive).
         let berth = BO::new(len(10));
         let mut overlay = BerthOccupancyOverlay::new(&berth);
@@ -1840,7 +1840,7 @@ mod tests {
     }
 
     #[test]
-    fn free_iter_zero_duration_yields_window_end_only_if_key_exists() {
+    fn test_free_iter_zero_duration_yields_window_end_only_if_key_exists() {
         let mut berth = BO::new(len(10));
         // Ensure a key at end
         berth.occupy(&rect(ti(0, 5), si(0, 1))); // keys 0,5
@@ -1859,7 +1859,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_remove_occupy_drops_key_when_empty() {
+    fn test_overlay_remove_occupy_drops_key_when_empty() {
         let berth = BO::new(len(10));
         let mut ov = BerthOccupancyOverlay::new(&berth);
         ov.add_occupy(tp(5), si(2, 4));
@@ -1872,7 +1872,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_remove_free_drops_key_when_empty() {
+    fn test_overlay_remove_free_drops_key_when_empty() {
         let berth = BO::new(len(10));
         let mut ov = BerthOccupancyOverlay::new(&berth);
         ov.add_free(tp(5), si(1, 3));
@@ -1882,7 +1882,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_iter_free_uses_overlay_keys_as_candidates() {
+    fn test_overlay_iter_free_uses_overlay_keys_as_candidates() {
         let berth = BO::new(len(10)); // fully free; no extra keys
         let mut ov = BerthOccupancyOverlay::new(&berth);
         // Introduce an overlay key inside the window
@@ -1901,7 +1901,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_intersect_runs_no_overlay_keys_returns_bounds() {
+    fn test_overlay_intersect_runs_no_overlay_keys_returns_bounds() {
         let berth = BO::new(len(10)); // fully free
         let ov = BerthOccupancyOverlay::new(&berth);
         let runs: Vec<_> = ov
@@ -1912,7 +1912,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_changes_at_start_are_applied_when_pred_differs() {
+    fn test_overlay_changes_at_start_are_applied_when_pred_differs() {
         type BO = BerthOccupancy<i64, BooleanVecQuay>;
         let mut berth = BO::new(SpaceLength::new(10)); // fully free
         berth.occupy(&rect(
@@ -1950,7 +1950,7 @@ mod tests {
     }
 
     #[test]
-    fn runs_cover_interval_handles_touching() {
+    fn test_runs_cover_interval_handles_touching() {
         let runs = vec![si(0, 5), si(5, 8)].into_iter();
         assert!(runs_cover_interval(runs, si(0, 8)));
     }
