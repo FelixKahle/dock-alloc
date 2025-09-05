@@ -151,6 +151,19 @@ where
         self.coalesce_in(left..=right);
     }
 
+    #[inline]
+    fn coalesce_anchors(&self, lb: std::ops::Bound<K>, rb: std::ops::Bound<K>) -> (K, K) {
+        let left_anchor = match lb {
+            Included(s) | Excluded(s) => self.prev_strict_key(s).unwrap_or(s),
+            Unbounded => *self.map.keys().next().expect("timeline has origin"),
+        };
+        let right_anchor = match rb {
+            Included(e) | Excluded(e) => self.next_key(e).unwrap_or(e),
+            Unbounded => *self.map.keys().next_back().expect("timeline has origin"),
+        };
+        (left_anchor, right_anchor)
+    }
+
     /// Edits all keyframes within a range, ensuring clean boundaries and coalescing afterward.
     ///
     /// # Panics
@@ -163,19 +176,43 @@ where
         V: Clone + PartialEq,
     {
         let (lb, rb) = self.ensure_cuts(range);
+
         for (_, v) in self.map.range_mut((lb, rb)) {
             f(v);
         }
 
-        let left_anchor = match lb {
-            Included(s) | Excluded(s) => self.prev_strict_key(s).unwrap_or(s),
-            Unbounded => *self.map.keys().next().expect("timeline has origin"),
-        };
-        let right_anchor = match rb {
-            Included(e) | Excluded(e) => self.next_key(e).unwrap_or(e),
-            Unbounded => *self.map.keys().next_back().expect("timeline has origin"),
-        };
-        self.coalesce_in(left_anchor..=right_anchor);
+        let (la, ra) = self.coalesce_anchors(lb, rb);
+        self.coalesce_in(la..=ra);
+    }
+
+    /// Tries to edit all keyframes within a range, ensuring clean boundaries and coalescing afterward.
+    ///
+    /// If the closure returns an error for any keyframe, the editing stops and the error is returned.
+    /// Keyframes that were successfully edited before the error occurred will retain their changes.
+    pub fn try_edit_in<R, E, F>(&mut self, range: R, mut f: F) -> Result<(), E>
+    where
+        R: std::ops::RangeBounds<K>,
+        F: FnMut(&mut V) -> Result<(), E>,
+        V: Clone + PartialEq,
+    {
+        let (lb, rb) = self.ensure_cuts(range);
+        let mut err: Option<E> = None;
+        for (_, v) in self.map.range_mut((lb, rb)) {
+            if let Some(_) = err {
+                break;
+            }
+            if let Err(e) = f(v) {
+                err = Some(e);
+            }
+        }
+
+        let (la, ra) = self.coalesce_anchors(lb, rb);
+        self.coalesce_in(la..=ra);
+
+        match err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 
     /// Private helper to ensure keyframes exist at the bounded endpoints of a range.

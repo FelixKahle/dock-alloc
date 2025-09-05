@@ -21,7 +21,7 @@
 
 use crate::domain::SpaceTimeRectangle;
 use crate::intervalset::IntervalSet;
-use crate::quay::{Quay, QuayRead, QuayWrite};
+use crate::quay::{Quay, QuayRead, QuaySpaceIntervalOutOfBoundsError, QuayWrite};
 use crate::timeline::Timeline;
 use dock_alloc_core::domain::{
     SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
@@ -286,26 +286,32 @@ where
         self.timeline.at(t)
     }
 
-    pub fn is_free(&self, rect: &SpaceTimeRectangle<T>) -> bool {
+    pub fn is_free(
+        &self,
+        rect: &SpaceTimeRectangle<T>,
+    ) -> Result<bool, QuaySpaceIntervalOutOfBoundsError> {
         if rect.is_empty() {
-            return true;
+            return Ok(true);
         }
-        debug_assert!(self.space_within_quay(rect.space()));
+
         let ti = rect.time();
         let start_time = ti.start();
         let end_time = ti.end();
         let si = rect.space();
         for s in self.slices(start_time, end_time).covering_refs() {
-            if s.quay().check_occupied(si) {
-                return false;
+            if s.quay().check_occupied(si)? {
+                return Ok(false);
             }
         }
-        true
+        Ok(true)
     }
 
     #[inline]
-    pub fn is_occupied(&self, rect: &SpaceTimeRectangle<T>) -> bool {
-        !self.is_free(rect)
+    pub fn is_occupied(
+        &self,
+        rect: &SpaceTimeRectangle<T>,
+    ) -> Result<bool, QuaySpaceIntervalOutOfBoundsError> {
+        Ok(!self.is_free(rect)?)
     }
 
     #[inline]
@@ -344,35 +350,38 @@ where
     T: PrimInt + Signed,
     Q: QuayRead + QuayWrite + Clone + PartialEq,
 {
-    fn apply_in<F>(&mut self, rect: &SpaceTimeRectangle<T>, mut f: F)
+    fn apply_in<F>(
+        &mut self,
+        rect: &SpaceTimeRectangle<T>,
+        mut f: F,
+    ) -> Result<(), QuaySpaceIntervalOutOfBoundsError>
     where
-        F: FnMut(&mut Q, SpaceInterval),
+        F: FnMut(&mut Q, SpaceInterval) -> Result<(), QuaySpaceIntervalOutOfBoundsError>,
     {
         if rect.is_empty() {
-            return;
+            return Ok(());
         }
         let ti = rect.time();
         let si = rect.space();
-        debug_assert!(self.space_within_quay(si));
-        self.timeline.edit_in(ti.start()..ti.end(), |quay_state| {
-            f(quay_state, si);
-        });
+
+        self.timeline
+            .try_edit_in(ti.start()..ti.end(), |quay_state| f(quay_state, si))
     }
 
     #[inline]
-    pub fn occupy(&mut self, rect: &SpaceTimeRectangle<T>) {
-        if rect.is_empty() {
-            return;
-        }
-        self.apply_in(rect, |q, si| q.occupy(si));
+    pub fn occupy(
+        &mut self,
+        rect: &SpaceTimeRectangle<T>,
+    ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
+        self.apply_in(rect, |q, si| q.occupy(si))
     }
 
     #[inline]
-    pub fn free(&mut self, rect: &SpaceTimeRectangle<T>) {
-        if rect.is_empty() {
-            return;
-        }
-        self.apply_in(rect, |q, si| q.free(si));
+    pub fn free(
+        &mut self,
+        rect: &SpaceTimeRectangle<T>,
+    ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
+        self.apply_in(rect, |q, si| q.free(si))
     }
 }
 
@@ -405,13 +414,14 @@ where
     }
 }
 
-impl<'a, T, C, Q> From<&Problem<'a, T, C>> for BerthOccupancy<T, Q>
+impl<'a, T, C, Q> TryFrom<&Problem<'a, T, C>> for BerthOccupancy<T, Q>
 where
     T: PrimInt + Signed + Zero + Copy,
     C: PrimInt + Signed + Zero + Copy,
     Q: Quay,
 {
-    fn from(problem: &Problem<T, C>) -> Self {
+    type Error = QuaySpaceIntervalOutOfBoundsError;
+    fn try_from(problem: &Problem<T, C>) -> Result<Self, Self::Error> {
         let mut berth_occupancy = BerthOccupancy::<T, Q>::new(problem.quay_length());
         for fixed in problem.preassigned().values() {
             let assignment = fixed.assignment();
@@ -425,9 +435,9 @@ where
             let end_position = SpacePosition::new(start_position.value() + length.value());
             let space_interval = SpaceInterval::new(start_position, end_position);
             let rect = SpaceTimeRectangle::new(space_interval, time_interval);
-            berth_occupancy.occupy(&rect);
+            berth_occupancy.occupy(&rect)?;
         }
-        berth_occupancy
+        Ok(berth_occupancy)
     }
 }
 
@@ -1270,8 +1280,16 @@ mod tests {
         let berth_occupancy = BO::new(quay_length);
 
         assert_eq!(berth_occupancy.time_event_count(), 1);
-        assert!(berth_occupancy.is_free(&rect(ti(0, 100), si(0, 10))));
-        assert!(!berth_occupancy.is_occupied(&rect(ti(0, 100), si(0, 10))));
+        assert!(
+            berth_occupancy
+                .is_free(&rect(ti(0, 100), si(0, 10)))
+                .unwrap()
+        );
+        assert!(
+            !berth_occupancy
+                .is_occupied(&rect(ti(0, 100), si(0, 10)))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -1279,20 +1297,28 @@ mod tests {
         let quay_length = len(10);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5)));
+        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5))).unwrap();
 
         // boundaries at 0 (origin), 5, 10
         assert_eq!(berth_occupancy.time_event_count(), 3);
 
         // before 5 -> free
-        assert!(berth_occupancy.is_free(&rect(ti(0, 5), si(2, 5))));
+        assert!(berth_occupancy.is_free(&rect(ti(0, 5), si(2, 5))).unwrap());
 
         // [5,10) occupied in [2,5)
-        assert!(berth_occupancy.is_occupied(&rect(ti(5, 10), si(2, 5))));
-        assert!(!berth_occupancy.is_free(&rect(ti(5, 10), si(2, 5))));
+        assert!(
+            berth_occupancy
+                .is_occupied(&rect(ti(5, 10), si(2, 5)))
+                .unwrap()
+        );
+        assert!(!berth_occupancy.is_free(&rect(ti(5, 10), si(2, 5))).unwrap());
 
         // after 10 -> back to free
-        assert!(berth_occupancy.is_free(&rect(ti(10, 20), si(2, 5))));
+        assert!(
+            berth_occupancy
+                .is_free(&rect(ti(10, 20), si(2, 5)))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -1300,12 +1326,16 @@ mod tests {
         let quay_length = len(10);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5)));
-        berth_occupancy.free(&rect(ti(5, 10), si(2, 5)));
+        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5))).unwrap();
+        berth_occupancy.free(&rect(ti(5, 10), si(2, 5))).unwrap();
 
         // Should merge back to a single fully-free snapshot
         assert_eq!(berth_occupancy.time_event_count(), 1);
-        assert!(berth_occupancy.is_free(&rect(ti(0, 100), si(0, 10))));
+        assert!(
+            berth_occupancy
+                .is_free(&rect(ti(0, 100), si(0, 10)))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -1313,15 +1343,27 @@ mod tests {
         let quay_length = len(10);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5)));
+        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5))).unwrap();
 
         // Space outside [2,5) always free
-        assert!(berth_occupancy.is_free(&rect(ti(0, 100), si(0, 2))));
-        assert!(berth_occupancy.is_free(&rect(ti(0, 100), si(5, 10))));
+        assert!(
+            berth_occupancy
+                .is_free(&rect(ti(0, 100), si(0, 2)))
+                .unwrap()
+        );
+        assert!(
+            berth_occupancy
+                .is_free(&rect(ti(0, 100), si(5, 10)))
+                .unwrap()
+        );
 
         // Times outside [5,10) always free within [2,5)
-        assert!(berth_occupancy.is_free(&rect(ti(0, 5), si(2, 5))));
-        assert!(berth_occupancy.is_free(&rect(ti(10, 20), si(2, 5))));
+        assert!(berth_occupancy.is_free(&rect(ti(0, 5), si(2, 5))).unwrap());
+        assert!(
+            berth_occupancy
+                .is_free(&rect(ti(10, 20), si(2, 5)))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -1330,11 +1372,11 @@ mod tests {
         let mut berth_occupancy = BO::new(quay_length);
 
         // Empty time: [3,3)
-        berth_occupancy.occupy(&rect(ti(3, 3), si(2, 4)));
+        berth_occupancy.occupy(&rect(ti(3, 3), si(2, 4))).unwrap();
         assert_eq!(berth_occupancy.time_event_count(), 1);
 
         // Empty space: [6,6)
-        berth_occupancy.occupy(&rect(ti(0, 5), si(6, 6)));
+        berth_occupancy.occupy(&rect(ti(0, 5), si(6, 6))).unwrap();
         assert_eq!(
             berth_occupancy.time_event_count(),
             1,
@@ -1342,7 +1384,7 @@ mod tests {
         );
 
         // But no mutation in the snapshot at t=0
-        assert!(berth_occupancy.is_free(&rect(ti(0, 5), si(0, 10))));
+        assert!(berth_occupancy.is_free(&rect(ti(0, 5), si(0, 10))).unwrap());
     }
 
     #[test]
@@ -1350,16 +1392,28 @@ mod tests {
         let quay_length = len(10);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(&rect(ti(5, 12), si(2, 4)));
-        berth_occupancy.occupy(&rect(ti(8, 15), si(1, 3)));
+        berth_occupancy.occupy(&rect(ti(5, 12), si(2, 4))).unwrap();
+        berth_occupancy.occupy(&rect(ti(8, 15), si(1, 3))).unwrap();
 
         // boundaries: 0,5,8,12,15
         assert_eq!(berth_occupancy.time_event_count(), 5);
 
         // Check a few windows
-        assert!(berth_occupancy.is_occupied(&rect(ti(6, 7), si(2, 4)))); // first occupy
-        assert!(berth_occupancy.is_occupied(&rect(ti(9, 11), si(1, 3)))); // overlap of both
-        assert!(berth_occupancy.is_free(&rect(ti(12, 15), si(3, 10)))); // free region in space
+        assert!(
+            berth_occupancy
+                .is_occupied(&rect(ti(6, 7), si(2, 4)))
+                .unwrap()
+        ); // first occupy
+        assert!(
+            berth_occupancy
+                .is_occupied(&rect(ti(9, 11), si(1, 3)))
+                .unwrap()
+        ); // overlap of both
+        assert!(
+            berth_occupancy
+                .is_free(&rect(ti(12, 15), si(3, 10)))
+                .unwrap()
+        ); // free region in space
     }
 
     #[test]
@@ -1367,13 +1421,21 @@ mod tests {
         let quay_length = len(10);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5)));
-        berth_occupancy.free(&rect(ti(7, 9), si(3, 4)));
+        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5))).unwrap();
+        berth_occupancy.free(&rect(ti(7, 9), si(3, 4))).unwrap();
 
         // [7,9) now has [3,4) free but [2,3) and [4,5) still occupied
-        assert!(berth_occupancy.is_occupied(&rect(ti(7, 9), si(2, 3))));
-        assert!(berth_occupancy.is_free(&rect(ti(7, 9), si(3, 4))));
-        assert!(berth_occupancy.is_occupied(&rect(ti(7, 9), si(4, 5))));
+        assert!(
+            berth_occupancy
+                .is_occupied(&rect(ti(7, 9), si(2, 3)))
+                .unwrap()
+        );
+        assert!(berth_occupancy.is_free(&rect(ti(7, 9), si(3, 4))).unwrap());
+        assert!(
+            berth_occupancy
+                .is_occupied(&rect(ti(7, 9), si(4, 5)))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -1381,12 +1443,16 @@ mod tests {
         let quay_length = len(10);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5)));
+        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5))).unwrap();
 
         // Query [4,6): must consider predecessor of 4 (t=0) and key 5 in (4,6)
         // Since at t=5 it becomes occupied, overall "is_free" must be false.
-        assert!(!berth_occupancy.is_free(&rect(ti(4, 6), si(2, 5))));
-        assert!(berth_occupancy.is_occupied(&rect(ti(4, 6), si(2, 5))));
+        assert!(!berth_occupancy.is_free(&rect(ti(4, 6), si(2, 5))).unwrap());
+        assert!(
+            berth_occupancy
+                .is_occupied(&rect(ti(4, 6), si(2, 5)))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -1395,7 +1461,7 @@ mod tests {
         let mut berth_occupancy = BO::new(quay_length);
 
         // Occupy [5,10):[2,5)
-        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5)));
+        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5))).unwrap();
 
         // For search_space [0,10), required >= 2
         let required_length = len(2);
@@ -1431,17 +1497,25 @@ mod tests {
         let quay_length = len(16);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(&rect(ti(10, 20), si(4, 12)));
+        berth_occupancy
+            .occupy(&rect(ti(10, 20), si(4, 12)))
+            .unwrap();
         let events_after_first = berth_occupancy.time_event_count();
 
-        berth_occupancy.occupy(&rect(ti(10, 20), si(4, 12)));
+        berth_occupancy
+            .occupy(&rect(ti(10, 20), si(4, 12)))
+            .unwrap();
         assert_eq!(
             berth_occupancy.time_event_count(),
             events_after_first,
             "idempotent occupy should not add events"
         );
 
-        assert!(berth_occupancy.is_occupied(&rect(ti(10, 20), si(4, 12))));
+        assert!(
+            berth_occupancy
+                .is_occupied(&rect(ti(10, 20), si(4, 12)))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -1449,17 +1523,23 @@ mod tests {
         let quay_length = len(16);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(&rect(ti(10, 20), si(4, 12)));
-        berth_occupancy.free(&rect(ti(10, 20), si(4, 12)));
+        berth_occupancy
+            .occupy(&rect(ti(10, 20), si(4, 12)))
+            .unwrap();
+        berth_occupancy.free(&rect(ti(10, 20), si(4, 12))).unwrap();
         let events_after_first = berth_occupancy.time_event_count();
 
-        berth_occupancy.free(&rect(ti(10, 20), si(4, 12)));
+        berth_occupancy.free(&rect(ti(10, 20), si(4, 12))).unwrap();
         assert_eq!(
             berth_occupancy.time_event_count(),
             events_after_first,
             "idempotent free should not add events"
         );
-        assert!(berth_occupancy.is_free(&rect(ti(0, 100), si(0, 16))));
+        assert!(
+            berth_occupancy
+                .is_free(&rect(ti(0, 100), si(0, 16)))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -1468,12 +1548,16 @@ mod tests {
         let mut berth_occupancy = BO::new(quay_length);
 
         // Occupy [2,5) left, then [5,7) right, on same space
-        berth_occupancy.occupy(&rect(ti(2, 5), si(3, 6)));
-        berth_occupancy.occupy(&rect(ti(5, 7), si(3, 6)));
+        berth_occupancy.occupy(&rect(ti(2, 5), si(3, 6))).unwrap();
+        berth_occupancy.occupy(&rect(ti(5, 7), si(3, 6))).unwrap();
 
         // At t=5 they just touch; the occupancy is continuous across [2,7).
         // With redundancy coalescing, the boundary at 5 is removed.
-        assert!(berth_occupancy.is_occupied(&rect(ti(2, 7), si(3, 6))));
+        assert!(
+            berth_occupancy
+                .is_occupied(&rect(ti(2, 7), si(3, 6)))
+                .unwrap()
+        );
         assert_eq!(berth_occupancy.time_event_count(), 3); // keys: 0, 2, 7
     }
 
@@ -1482,14 +1566,14 @@ mod tests {
         let quay_length = len(8);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(&rect(ti(3, 6), si(2, 4)));
+        berth_occupancy.occupy(&rect(ti(3, 6), si(2, 4))).unwrap();
         // Now revert with two frees that exactly cancel
-        berth_occupancy.free(&rect(ti(3, 4), si(2, 4)));
-        berth_occupancy.free(&rect(ti(4, 6), si(2, 4)));
+        berth_occupancy.free(&rect(ti(3, 4), si(2, 4))).unwrap();
+        berth_occupancy.free(&rect(ti(4, 6), si(2, 4))).unwrap();
 
         // Should fully coalesce back to one event
         assert_eq!(berth_occupancy.time_event_count(), 1);
-        assert!(berth_occupancy.is_free(&rect(ti(0, 10), si(0, 8))));
+        assert!(berth_occupancy.is_free(&rect(ti(0, 10), si(0, 8))).unwrap());
     }
 
     #[test]
@@ -1497,24 +1581,24 @@ mod tests {
         let quay_length = len(6);
         let mut berth_occupancy = BO::new(quay_length);
 
-        berth_occupancy.occupy(&rect(ti(2, 4), si(1, 3)));
+        berth_occupancy.occupy(&rect(ti(2, 4), si(1, 3))).unwrap();
 
         // snapshot before 2: free
         {
             let quay_state = berth_occupancy.snapshot_at(tp(1)).unwrap();
-            assert!(quay_state.check_free(si(0, 6)));
+            assert!(quay_state.check_free(si(0, 6)).unwrap());
         }
         // snapshot at 2..4: occupied 1..3
         {
             let quay_state = berth_occupancy.snapshot_at(tp(2)).unwrap();
-            assert!(quay_state.check_occupied(si(1, 3)));
-            assert!(quay_state.check_free(si(0, 1)));
-            assert!(quay_state.check_free(si(3, 6)));
+            assert!(quay_state.check_occupied(si(1, 3)).unwrap());
+            assert!(quay_state.check_free(si(0, 1)).unwrap());
+            assert!(quay_state.check_free(si(3, 6)).unwrap());
         }
         // snapshot after 4: free
         {
             let quay_state = berth_occupancy.snapshot_at(tp(5)).unwrap();
-            assert!(quay_state.check_free(si(0, 6)));
+            assert!(quay_state.check_free(si(0, 6)).unwrap());
         }
     }
 
@@ -1540,7 +1624,7 @@ mod tests {
         // Create additional timeline keys at 5 and 6 without affecting the searched bounds.
         let quay_length = len(10);
         let mut berth = BO::new(quay_length);
-        berth.occupy(&rect(ti(5, 6), si(9, 10))); // creates keys 5 and 6
+        berth.occupy(&rect(ti(5, 6), si(9, 10))).unwrap(); // creates keys 5 and 6
 
         let items = collect_free_iter(
             &berth,
@@ -1561,8 +1645,8 @@ mod tests {
         // Intersection across [5,8) => runs [0,2) and [9,10).
         let quay_length = len(10);
         let mut berth = BO::new(quay_length);
-        berth.occupy(&rect(ti(5, 9), si(2, 6))); // key at 5
-        berth.occupy(&rect(ti(7, 12), si(6, 9))); // key at 7
+        berth.occupy(&rect(ti(5, 9), si(2, 6))).unwrap(); // key at 5
+        berth.occupy(&rect(ti(7, 12), si(6, 9))).unwrap(); // key at 7
 
         let items = collect_free_iter(
             &berth,
@@ -1615,7 +1699,7 @@ mod tests {
         let quay_length = len(10);
         let mut berth = BO::new(quay_length);
         // Occupied at t=5 only in [2,6)
-        berth.occupy(&rect(ti(5, 6), si(2, 6)));
+        berth.occupy(&rect(ti(5, 6), si(2, 6))).unwrap();
 
         // Keys: 0 (origin), 5, 6
         // With dur=0, we’ll check predecessor snapshot for each candidate start:
@@ -1647,7 +1731,7 @@ mod tests {
         let mut berth = BO::new(quay_length);
 
         // Base: occupy [5,10):[2,6)
-        berth.occupy(&rect(ti(5, 10), si(2, 6)));
+        berth.occupy(&rect(ti(5, 10), si(2, 6))).unwrap();
 
         let mut overlay = BerthOccupancyOverlay::new(&berth);
 
@@ -1668,7 +1752,7 @@ mod tests {
         let mut berth = BO::new(quay_length);
 
         // Create a base boundary at t=5 by occupying [2,6)
-        berth.occupy(&rect(ti(5, 7), si(2, 6)));
+        berth.occupy(&rect(ti(5, 7), si(2, 6))).unwrap();
 
         let mut overlay = BerthOccupancyOverlay::new(&berth);
 
@@ -1691,7 +1775,7 @@ mod tests {
     #[test]
     fn test_slice_predecessor_equal_at_key() {
         let mut berth = BO::new(len(10));
-        berth.occupy(&rect(ti(5, 7), si(2, 3))); // keys: 0,5,7
+        berth.occupy(&rect(ti(5, 7), si(2, 3))).unwrap(); // keys: 0,5,7
         assert_eq!(berth.slice_predecessor_timepoint(tp(5)), Some(tp(5)));
         assert_eq!(berth.slice_predecessor_timepoint(tp(6)), Some(tp(5)));
         assert_eq!(berth.slice_predecessor_timepoint(tp(7)), Some(tp(7)));
@@ -1700,7 +1784,7 @@ mod tests {
     #[test]
     fn test_iter_timepoints_is_strictly_inside_half_open() {
         let mut berth = BO::new(len(10));
-        berth.occupy(&rect(ti(5, 10), si(0, 1))); // keys 0,5,10
+        berth.occupy(&rect(ti(5, 10), si(0, 1))).unwrap(); // keys 0,5,10
         let v: Vec<_> = berth
             .slices(5.into(), 10.into())
             .interior_keys()
@@ -1720,8 +1804,8 @@ mod tests {
     #[test]
     fn test_occupy_free_coalesce_chain_three_equal_states() {
         let mut berth = BO::new(len(10));
-        berth.occupy(&rect(ti(3, 7), si(1, 2))); // 0,3,7
-        berth.free(&rect(ti(3, 7), si(1, 2))); // should coalesce back to 0 only
+        berth.occupy(&rect(ti(3, 7), si(1, 2))).unwrap(); // 0,3,7
+        berth.free(&rect(ti(3, 7), si(1, 2))).unwrap(); // should coalesce back to 0 only
         assert_eq!(berth.time_event_count(), 1);
     }
 
@@ -1762,7 +1846,7 @@ mod tests {
     fn test_overlay_iter_free_respects_overlay_through_duration() {
         // Base: occupy [5,9):[2,6). We'll "free" that space via overlay for the slices we care about.
         let mut berth = BO::new(len(10));
-        berth.occupy(&rect(ti(5, 9), si(2, 6)));
+        berth.occupy(&rect(ti(5, 9), si(2, 6))).unwrap();
 
         let mut overlay = BerthOccupancyOverlay::new(&berth);
 
@@ -1843,7 +1927,7 @@ mod tests {
     fn test_free_iter_zero_duration_yields_window_end_only_if_key_exists() {
         let mut berth = BO::new(len(10));
         // Ensure a key at end
-        berth.occupy(&rect(ti(0, 5), si(0, 1))); // keys 0,5
+        berth.occupy(&rect(ti(0, 5), si(0, 1))).unwrap(); // keys 0,5
         let items: Vec<_> = berth
             .iter_free(ti(0, 5), TimeDelta::new(0), len(1), si(0, 10))
             .map(|f| {
@@ -1915,10 +1999,12 @@ mod tests {
     fn test_overlay_changes_at_start_are_applied_when_pred_differs() {
         type BO = BerthOccupancy<i64, BooleanVecQuay>;
         let mut berth = BO::new(SpaceLength::new(10)); // fully free
-        berth.occupy(&rect(
-            TimeInterval::new(TimePoint::new(7), TimePoint::new(9)),
-            SpaceInterval::new(SpacePosition::new(2), SpacePosition::new(6)),
-        ));
+        berth
+            .occupy(&rect(
+                TimeInterval::new(TimePoint::new(7), TimePoint::new(9)),
+                SpaceInterval::new(SpacePosition::new(2), SpacePosition::new(6)),
+            ))
+            .unwrap();
         // keys now: 0,7,9
 
         let mut ov = BerthOccupancyOverlay::new(&berth);
