@@ -644,13 +644,13 @@ where
     }
 }
 
-impl<'brand, 'a, T, C> Into<Solution<T, C>> for &AssignmentLedger<'brand, 'a, T, C>
+impl<'brand, 'a, T, C> From<&AssignmentLedger<'brand, 'a, T, C>> for Solution<T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
 {
-    fn into(self) -> Solution<T, C> {
-        let decisions: HashMap<RequestId, Assignment<'static, T, C>> = self
+    fn from(val: &AssignmentLedger<'brand, 'a, T, C>) -> Self {
+        let decisions: HashMap<RequestId, Assignment<'static, T, C>> = val
             .iter_assignments()
             .map(|a| (a.request().id(), a.clone().into_owned()))
             .collect();
@@ -658,13 +658,13 @@ where
     }
 }
 
-impl<'brand, 'p, T, C> Into<Solution<T, C>> for &AssignmentLedgerOverlay<'brand, 'p, '_, T, C>
+impl<'brand, 'p, T, C> From<&AssignmentLedgerOverlay<'brand, 'p, '_, T, C>> for Solution<T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
 {
-    fn into(self) -> Solution<T, C> {
-        let decisions: HashMap<RequestId, Assignment<'static, T, C>> = self
+    fn from(val: &AssignmentLedgerOverlay<'brand, 'p, '_, T, C>) -> Self {
+        let decisions: HashMap<RequestId, Assignment<'static, T, C>> = val
             .iter_assignments()
             .map(|a| (a.request().id(), a.clone().into_owned()))
             .collect();

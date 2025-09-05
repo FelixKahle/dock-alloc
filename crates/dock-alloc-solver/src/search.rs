@@ -155,7 +155,7 @@ where
     }
 }
 
-impl<'brand, 'p, T, C> From<&Assignment<'p, T, C>> for SpaceTimeRectangle<T>
+impl<'p, T, C> From<&Assignment<'p, T, C>> for SpaceTimeRectangle<T>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
@@ -520,7 +520,7 @@ where
 }
 
 #[cfg(test)]
-mod propose_tests {
+mod tests {
     use crate::quay::BooleanVecQuay;
 
     use super::*;
@@ -677,7 +677,6 @@ mod propose_tests {
 
     #[test]
     fn explorer_finds_freed_slot_after_unassign_within_tight_window() {
-        // --- Build problem + base ledger state ---
         let r = req_ok(1, 10, 5, 0, 100, 0, 100);
         let mut b = ProblemBuilder::<i64, i64>::new(SpaceLength::new(200));
         b.add_unassigned_request(r.clone()).unwrap();
@@ -692,7 +691,6 @@ mod propose_tests {
         let base_rect: SpaceTimeRectangle<i64> = (&a).into();
         berth.occupy(&base_rect).expect("seed base occupancy"); // adjust if signature differs
 
-        // --- Plan builder over overlays ---
         let ctx = ProposeCtx::new(&ledger, &berth, &p, Version::new(0));
         let mut pb = PlanBuilder::new(&ctx);
 
@@ -751,6 +749,205 @@ mod propose_tests {
                 found_covering,
                 "expected to rediscover a slot covering the freed region at the same start time"
             );
+        });
+    }
+
+    #[test]
+    fn iter_slots_for_request_within_respects_clamping_and_invariants() {
+        let r = req_ok(1, 10, 5, 0, 100, 0, 100);
+        let mut b = ProblemBuilder::<i64, i64>::new(SpaceLength::new(200));
+        b.add_unassigned_request(r.clone()).unwrap();
+        let p = b.build();
+
+        let ledger = AssignmentLedger::from(&p);
+        let berth: BerthOccupancy<_, _> =
+            BerthOccupancy::<i64, BooleanVecQuay>::new(SpaceLength::new(200));
+
+        let ctx = ProposeCtx::new(&ledger, &berth, &p, Version::new(0));
+        let pb = PlanBuilder::new(&ctx);
+
+        pb.with_explorer(|ex| {
+            let req = ex
+                .iter_unassigned_requests()
+                .next()
+                .expect("one unassigned request");
+
+            // Too-short time window (duration < proc): no slots
+            let too_short_time = TimeInterval::new(TimePoint::new(0), TimePoint::new(3)); // proc=5
+            let big_space = SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100));
+            assert!(
+                ex.iter_slots_for_request_within(&req, too_short_time, big_space)
+                    .next()
+                    .is_none(),
+                "should yield no slots when time window < proc"
+            );
+
+            // Too-narrow space window (measure < len): no slots
+            let ok_time = TimeInterval::new(TimePoint::new(0), TimePoint::new(100));
+            let too_narrow_space = SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(8)); // len=10
+            assert!(
+                ex.iter_slots_for_request_within(&req, ok_time, too_narrow_space)
+                    .next()
+                    .is_none(),
+                "should yield no slots when space width < len"
+            );
+
+            // Valid wide windows: all yielded slots satisfy invariants
+            let mut it = ex
+                .iter_slots_for_request_within(&req, ok_time, big_space)
+                .take(8); // sample a few
+            let mut saw_any = false;
+            while let Some(slot) = it.next() {
+                saw_any = true;
+                // duration equals processing time
+                assert_eq!(slot.time().duration(), req.processing_duration());
+                // space width is >= required len (can be equal or larger)
+                assert!(slot.space().measure() >= req.length());
+                // slot fully inside the clamped search windows
+                assert!(ok_time.contains_interval(&slot.time()));
+                assert!(big_space.contains_interval(&slot.space()));
+                // slot also inside the request's feasible windows by construction
+                assert!(req.feasible_time_window().contains_interval(&slot.time()));
+                assert!(req.feasible_space_window().contains_interval(&slot.space()));
+            }
+            assert!(saw_any, "expected at least one feasible slot");
+        });
+    }
+
+    #[test]
+    fn assign_hides_slot_then_unassign_restores_covering_slot() {
+        let r = req_ok(1, 10, 5, 0, 100, 0, 100);
+        let mut b = ProblemBuilder::<i64, i64>::new(SpaceLength::new(200));
+        b.add_unassigned_request(r.clone()).unwrap();
+        let p = b.build();
+
+        let ledger = AssignmentLedger::from(&p);
+        let berth: BerthOccupancy<_, _> =
+            BerthOccupancy::<i64, BooleanVecQuay>::new(SpaceLength::new(200));
+
+        let ctx = ProposeCtx::new(&ledger, &berth, &p, Version::new(0));
+        let mut pb = PlanBuilder::new(&ctx);
+
+        // Pick request + slot while unassigned
+        let (req, slot) = pb.with_explorer(|ex| {
+            let req = ex.iter_unassigned_requests().next().unwrap();
+            let slot = ex.iter_slots_for_request(&req).next().unwrap();
+            (req, slot)
+        });
+
+        assert!(req.id() == r.id(), "request id must match");
+
+        let asg_rect = SpaceTimeRectangle::new(
+            SpaceInterval::new(slot.space().start(), slot.space().start() + req.length()),
+            slot.time(),
+        );
+
+        let ma = pb.propose_assign(&req, slot).expect("assign");
+        assert!(pb.berth_overlay.is_occupied(&asg_rect).unwrap());
+        let freed = pb.propose_unassign(&ma).expect("unassign");
+        assert!(pb.berth_overlay.is_free(&asg_rect).unwrap());
+
+        pb.with_explorer(|ex| {
+            // refresh request from overlay
+            let req_unassigned = ex
+                .iter_unassigned_requests()
+                .find(|mr| mr.id() == req.id())
+                .expect("request back in unassigned view");
+
+            let proc = req_unassigned.processing_duration();
+
+            // Let the iterator pick its canonical start in time and space
+            let t_search = slot.time();
+            let s_search = slot.space();
+            let reappears = ex
+                .iter_slots_for_request_within(&req_unassigned, t_search, s_search)
+                .any(|cand| {
+                    cand.time().duration() == proc
+                        && cand.time().start() <= freed.time().start()
+                        && cand.space().start() <= freed.space().start()
+                        && cand.space().end() >= freed.space().end()
+                });
+
+            assert!(
+                reappears,
+                "expected a slot in the feasible window that covers the freed space to reappear"
+            );
+        });
+    }
+
+    #[test]
+    fn plan_builder_records_operations_in_sequence_assign_then_unassign() {
+        let r = req_ok(1, 10, 5, 0, 100, 0, 100);
+        let mut b = ProblemBuilder::<i64, i64>::new(SpaceLength::new(200));
+        b.add_unassigned_request(r.clone()).unwrap();
+        let p = b.build();
+
+        let ledger = AssignmentLedger::from(&p);
+        let berth: BerthOccupancy<_, _> =
+            BerthOccupancy::<i64, BooleanVecQuay>::new(SpaceLength::new(200));
+
+        let ctx = ProposeCtx::new(&ledger, &berth, &p, Version::new(0));
+        let mut pb = PlanBuilder::new(&ctx);
+
+        // choose req + initial slot
+        let (req, slot) = pb.with_explorer(|ex| {
+            let req = ex
+                .iter_unassigned_requests()
+                .next()
+                .expect("one unassigned request");
+            let slot = ex
+                .iter_slots_for_request(&req)
+                .next()
+                .expect("at least one slot");
+            (req, slot)
+        });
+
+        let ma = pb.propose_assign(&req, slot).expect("assign ok");
+
+        // immediately unassign
+        let _freed = pb.propose_unassign(&ma).expect("unassign ok");
+
+        let plan = pb.build();
+        let mut it = plan.iter_operations();
+
+        match it.next().unwrap() {
+            Operation::Assign(op) => {
+                assert_eq!(op.assignment().id(), ma.id());
+            }
+            other => panic!("expected Assign first, got {:?}", other),
+        }
+        match it.next().unwrap() {
+            Operation::Unassign(op) => {
+                assert_eq!(op.moveable().id(), ma.id());
+            }
+            other => panic!("expected Unassign second, got {:?}", other),
+        }
+        assert!(it.next().is_none());
+    }
+
+    #[test]
+    fn iter_slots_for_request_produces_duration_equal_to_processing_time() {
+        let r = req_ok(1, 10, 5, 0, 100, 0, 100);
+        let mut b = ProblemBuilder::<i64, i64>::new(SpaceLength::new(200));
+        b.add_unassigned_request(r.clone()).unwrap();
+        let p = b.build();
+
+        let ledger = AssignmentLedger::from(&p);
+        let berth: BerthOccupancy<_, _> =
+            BerthOccupancy::<i64, BooleanVecQuay>::new(SpaceLength::new(200));
+
+        let ctx = ProposeCtx::new(&ledger, &berth, &p, Version::new(0));
+        let pb = PlanBuilder::new(&ctx);
+
+        pb.with_explorer(|ex| {
+            let req = ex
+                .iter_unassigned_requests()
+                .next()
+                .expect("one unassigned request");
+            for slot in ex.iter_slots_for_request(&req).take(5) {
+                assert_eq!(slot.time().duration(), req.processing_duration());
+                assert!(slot.space().measure() >= req.length());
+            }
         });
     }
 }

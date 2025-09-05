@@ -504,7 +504,7 @@ where
     }
 
     pub fn request(&self) -> &'r Request<T, C> {
-        &self.0
+        self.0
     }
 }
 

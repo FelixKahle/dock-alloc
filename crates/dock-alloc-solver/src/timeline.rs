@@ -198,7 +198,7 @@ where
         let (lb, rb) = self.ensure_cuts(range);
         let mut err: Option<E> = None;
         for (_, v) in self.map.range_mut((lb, rb)) {
-            if let Some(_) = err {
+            if err.is_some() {
                 break;
             }
             if let Err(e) = f(v) {
@@ -281,9 +281,9 @@ fn boundary_key<K: Copy>(bound: Bound<&K>) -> Option<K> {
 
 /// Normalizes range bounds to handle a `BTreeMap::range` edge case.
 #[inline]
-fn normalize_bounds<K: Copy>(start: Bound<&K>, end: Bound<&K>) -> (Bound<K>, Bound<K>)
+fn normalize_bounds<K>(start: Bound<&K>, end: Bound<&K>) -> (Bound<K>, Bound<K>)
 where
-    K: PartialEq,
+    K: PartialEq + Copy,
 {
     match (start, end) {
         (Excluded(a), Excluded(b)) if a == b => (Included(*a), Excluded(*b)),
