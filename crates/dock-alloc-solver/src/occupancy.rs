@@ -1009,10 +1009,11 @@ where
 
         let last = self.last_candidate?;
         if let Some(tp) = self.view.next_key_after(last)
-            && tp + self.duration <= end {
-                self.last_candidate = Some(tp);
-                return Some(tp);
-            }
+            && tp + self.duration <= end
+        {
+            self.last_candidate = Some(tp);
+            return Some(tp);
+        }
 
         // For zero-duration requests, also check the very end of the window if it's a key.
         if self.duration.is_zero() && last < end && self.view.has_key_at(end) {
@@ -1233,9 +1234,10 @@ where
             }
 
             if let Some(iv) = out
-                && iv.length() >= self.required {
-                    return Some(iv);
-                }
+                && iv.length() >= self.required
+            {
+                return Some(iv);
+            }
         }
     }
 }
@@ -2059,5 +2061,23 @@ mod tests {
         assert!(overlay.is_occupied(&rect).unwrap());
         overlay.free(&rect).unwrap();
         assert!(overlay.is_free(&rect).unwrap());
+    }
+
+    #[test]
+    fn test_overlay_partial_overlap_last_wins_only_on_overlap() {
+        let berth = BO::new(len(10));
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+        // occupy [3,7)×[3,6)
+        let a = rect(ti(3, 7), si(3, 6));
+        ov.occupy(&a).unwrap();
+        // free partially [4,6)×[4,5)
+        let b = rect(ti(4, 6), si(4, 5));
+        ov.free(&b).unwrap();
+
+        // overlap is free now
+        assert!(ov.is_free(&b).unwrap());
+        // non-overlapped rims remain occupied
+        assert!(ov.is_occupied(&rect(ti(4, 6), si(3, 4))).unwrap());
+        assert!(ov.is_occupied(&rect(ti(4, 6), si(5, 6))).unwrap());
     }
 }
