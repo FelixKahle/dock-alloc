@@ -28,33 +28,20 @@ use dock_alloc_core::domain::{
 };
 use dock_alloc_core::mem::DoubleBuf;
 use dock_alloc_model::Problem;
-use num_traits::{PrimInt, Signed, Zero};
+use num_traits::{One, PrimInt, Signed, Zero};
 use std::collections::BTreeMap;
 use std::iter::{Copied, FusedIterator, Peekable};
 use std::marker::PhantomData;
 use std::ops::Bound::{Excluded, Unbounded};
 
-/// A trait providing a view into a timeline of spatial availability.
-///
-/// This abstracts over `BerthOccupancy` and `BerthOccupancyOverlay`, allowing
-/// generic algorithms like `FreeIter` to query for available space over time.
 pub trait SliceView<T: PrimInt + Signed> {
-    /// The specific iterator type returned by `free_runs_at`.
     type FreeRunsIter<'s>: Iterator<Item = SpaceInterval> + 's
     where
         Self: 's;
 
-    /// Finds the timepoint of the slice active at `t` (inclusive).
     fn pred(&self, t: TimePoint<T>) -> Option<TimePoint<T>>;
-
-    /// Finds the first key strictly after a given timepoint.
     fn next_key_after(&self, after: TimePoint<T>) -> Option<TimePoint<T>>;
-
-    /// Checks if a key exists at the exact timepoint `t`.
     fn has_key_at(&self, t: TimePoint<T>) -> bool;
-
-    /// Returns an iterator over all free space intervals at a given timepoint `t`.
-    /// The caller is responsible for filtering these runs by required length and bounds.
     fn free_runs_at(&self, t: TimePoint<T>) -> Self::FreeRunsIter<'_>;
 }
 
@@ -84,6 +71,35 @@ where
     #[inline]
     pub fn quay(&self) -> &'a Q {
         self.quay
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FreeSlot<T>
+where
+    T: PrimInt + Signed,
+{
+    start_time: TimePoint<T>,
+    space: SpaceInterval,
+}
+
+impl<T> FreeSlot<T>
+where
+    T: PrimInt + Signed,
+{
+    #[inline]
+    fn new(space: SpaceInterval, start_time: TimePoint<T>) -> Self {
+        Self { start_time, space }
+    }
+
+    #[inline]
+    pub fn start_time(&self) -> TimePoint<T> {
+        self.start_time
+    }
+
+    #[inline]
+    pub fn space(&self) -> SpaceInterval {
+        self.space
     }
 }
 
@@ -286,6 +302,7 @@ where
         self.timeline.at(t)
     }
 
+    #[inline]
     pub fn is_free(
         &self,
         rect: &SpaceTimeRectangle<T>,
@@ -315,33 +332,25 @@ where
     }
 
     #[inline]
-    pub fn iter_free(
+    pub fn iter_free_slots(
         &self,
         time_window: TimeInterval<T>,
         duration: TimeDelta<T>,
         required_space: SpaceLength,
         space_window: SpaceInterval,
     ) -> impl Iterator<Item = FreeSlot<T>> + '_ {
-        FreeIter::new(self, time_window, duration, required_space, space_window)
+        FreeSlotIter::new(self, time_window, duration, required_space, space_window)
     }
 
-    pub fn iter_slice_free_runs<'a>(
-        &'a self,
-        ti: TimeInterval<T>,
+    #[inline]
+    pub fn iter_free_regions(
+        &self,
+        window: TimeInterval<T>,
+        duration: TimeDelta<T>,
         required_space: SpaceLength,
-        search_space: SpaceInterval,
-    ) -> impl Iterator<Item = (TimePoint<T>, <Q as QuayRead>::FreeIter<'a>)> + 'a {
-        debug_assert!(self.space_within_quay(search_space));
-        let start_time = ti.start();
-        let end_time = ti.end();
-        self.slices(start_time, end_time)
-            .covering_refs()
-            .map(move |s| {
-                (
-                    s.time(),
-                    s.quay().iter_free_intervals(required_space, search_space),
-                )
-            })
+        space_window: SpaceInterval,
+    ) -> impl Iterator<Item = SpaceTimeRectangle<T>> + '_ {
+        FeasibleRegionIter::new(self, window, duration, required_space, space_window)
     }
 }
 
@@ -385,35 +394,6 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct FreeSlot<T>
-where
-    T: PrimInt + Signed,
-{
-    start_time: TimePoint<T>,
-    space: SpaceInterval,
-}
-
-impl<T> FreeSlot<T>
-where
-    T: PrimInt + Signed,
-{
-    #[inline]
-    fn new(space: SpaceInterval, start_time: TimePoint<T>) -> Self {
-        Self { start_time, space }
-    }
-
-    #[inline]
-    pub fn start_time(&self) -> TimePoint<T> {
-        self.start_time
-    }
-
-    #[inline]
-    pub fn space(&self) -> SpaceInterval {
-        self.space
-    }
-}
-
 impl<'a, T, C, Q> TryFrom<&Problem<'a, T, C>> for BerthOccupancy<T, Q>
 where
     T: PrimInt + Signed + Zero + Copy,
@@ -441,166 +421,6 @@ where
     }
 }
 
-type SpaceIntervalSet = IntervalSet<SpacePosition>;
-
-#[inline]
-fn next_key_after<T: PrimInt + Signed, Q: Clone + QuayRead>(
-    berth: &BerthOccupancy<T, Q>,
-    overlay_free: &BTreeMap<TimePoint<T>, SpaceIntervalSet>,
-    overlay_occ: &BTreeMap<TimePoint<T>, SpaceIntervalSet>,
-    after: TimePoint<T>,
-) -> Option<TimePoint<T>> {
-    let nb = berth.next_time_key_after(after);
-    let nf = overlay_free
-        .range((Excluded(after), Unbounded))
-        .next()
-        .map(|(t, _)| *t);
-    let no = overlay_occ
-        .range((Excluded(after), Unbounded))
-        .next()
-        .map(|(t, _)| *t);
-    [nb, nf, no].into_iter().flatten().min()
-}
-
-#[derive(Clone, Debug)]
-struct KeysUnion<'a, T: PrimInt + Signed> {
-    a: Peekable<Copied<std::collections::btree_map::Keys<'a, TimePoint<T>, SpaceIntervalSet>>>,
-    b: Peekable<Copied<std::collections::btree_map::Keys<'a, TimePoint<T>, SpaceIntervalSet>>>,
-}
-
-impl<'a, T: PrimInt + Signed> KeysUnion<'a, T> {
-    #[inline]
-    fn new(
-        free: &'a BTreeMap<TimePoint<T>, SpaceIntervalSet>,
-        occ: &'a BTreeMap<TimePoint<T>, SpaceIntervalSet>,
-    ) -> Self {
-        Self {
-            a: free.keys().copied().peekable(),
-            b: occ.keys().copied().peekable(),
-        }
-    }
-}
-
-impl<'a, T: PrimInt + Signed> Iterator for KeysUnion<'a, T> {
-    type Item = TimePoint<T>;
-    fn next(&mut self) -> Option<Self::Item> {
-        let peek_a = self.a.peek().copied();
-        let peek_b = self.b.peek().copied();
-
-        match (peek_a, peek_b) {
-            (None, None) => None,
-            (Some(_), None) => self.a.next(),
-            (None, Some(_)) => self.b.next(),
-            (Some(x), Some(y)) => match x.cmp(&y) {
-                std::cmp::Ordering::Less => self.a.next(),
-                std::cmp::Ordering::Greater => self.b.next(),
-                std::cmp::Ordering::Equal => {
-                    self.a.next();
-                    self.b.next();
-                    Some(x)
-                }
-            },
-        }
-    }
-}
-
-/// An iterator that computes the intersection of all free space runs across
-/// every time slice defined by an overlay.
-pub struct IntersectIter<'brand, 'a, T, Q>
-where
-    T: PrimInt + Signed,
-    Q: QuayRead,
-{
-    overlay: &'a BerthOccupancyOverlay<'brand, 'a, T, Q>,
-    required: SpaceLength,
-    bounds: SpaceInterval,
-    computed: bool,
-    emit_idx: usize,
-    acc: SpaceIntervalSet,
-    tmp: SpaceIntervalSet,
-}
-
-impl<'brand, 'a, T, Q> IntersectIter<'brand, 'a, T, Q>
-where
-    T: PrimInt + Signed,
-    Q: QuayRead,
-{
-    fn new(
-        overlay: &'a BerthOccupancyOverlay<'brand, 'a, T, Q>,
-        required: SpaceLength,
-        bounds: SpaceInterval,
-    ) -> Self {
-        Self {
-            overlay,
-            required,
-            bounds,
-            computed: false,
-            emit_idx: 0,
-            acc: SpaceIntervalSet::new(),
-            tmp: SpaceIntervalSet::new(),
-        }
-    }
-
-    fn compute(&mut self) {
-        if self.computed {
-            return;
-        }
-        self.computed = true;
-
-        let keys =
-            KeysUnion::<'a, T>::new(&self.overlay.free_by_time, &self.overlay.occupied_by_time);
-        let mut acc_opt: Option<SpaceIntervalSet> = None;
-        let mut current_runs = SpaceIntervalSet::new();
-
-        for tp in keys {
-            current_runs.clear_and_fill_from_iter(
-                self.overlay
-                    .free_runs_at(tp)
-                    .filter(|iv| self.bounds.intersects(iv))
-                    .map(|iv| self.bounds.intersection(&iv).unwrap())
-                    .filter(|iv| iv.length() >= self.required),
-            );
-
-            match acc_opt.as_mut() {
-                None => {
-                    acc_opt = Some(core::mem::take(&mut current_runs));
-                }
-                Some(acc) => {
-                    self.tmp.clear();
-                    acc.intersection_into(&current_runs, &mut self.tmp);
-                    core::mem::swap(acc, &mut self.tmp);
-                    if acc.is_empty() {
-                        break;
-                    }
-                }
-            }
-        }
-
-        self.acc = acc_opt.unwrap_or_else(|| SpaceIntervalSet::from_vec(vec![self.bounds]));
-        self.acc.retain_min_length(self.required);
-    }
-}
-
-impl<'brand, 'a, T, Q> Iterator for IntersectIter<'brand, 'a, T, Q>
-where
-    T: PrimInt + Signed,
-    Q: QuayRead,
-{
-    type Item = SpaceInterval;
-    fn next(&mut self) -> Option<Self::Item> {
-        self.compute();
-        if self.emit_idx >= self.acc.len() {
-            return None;
-        }
-        let iv = self.acc.as_slice()[self.emit_idx];
-        self.emit_idx += 1;
-        Some(iv)
-    }
-}
-
-/// A view that combines a base `BerthOccupancy` with temporary changes.
-/// This allows for hypothetical queries ("what if I place a ship here?")
-/// without modifying the underlying base timeline.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BerthOccupancyOverlay<'brand, 'a, T, Q>
 where
@@ -860,21 +680,55 @@ where
         let start = tw.start();
         let end = tw.end();
 
-        let base_pred = self.berth().slice_predecessor_timepoint(start);
-        let base_interior = self.berth().slices(start, end).interior_keys();
+        // Base: predecessor at `start` (if any) + interior keys (Excluded bounds)
+        let base = self.berth().slices(start, end).covering_keys().peekable();
 
-        let overlay_start = (self.free_by_time.contains_key(&start)
-            || self.occupied_by_time.contains_key(&start))
-        .then_some(start);
+        // Overlay keys inside [start, end)
+        let overlay = KeysUnion::new(&self.free_by_time, &self.occupied_by_time)
+            .filter(move |&t| t >= start && t < end)
+            .peekable();
 
-        let overlay_union = KeysUnion::new(&self.free_by_time, &self.occupied_by_time)
-            .filter(move |&t| t > start && t < end);
+        // Merge two sorted, strictly ascending streams with de-dupe.
+        std::iter::from_fn({
+            let mut a = base;
+            let mut b = overlay;
+            let mut last: Option<TimePoint<T>> = None;
 
-        overlay_start
-            .into_iter()
-            .chain(base_pred)
-            .chain(base_interior)
-            .chain(overlay_union)
+            move || loop {
+                let na = a.peek().copied();
+                let nb = b.peek().copied();
+                let next = match (na, nb) {
+                    (None, None) => return None,
+                    (Some(x), None) => {
+                        a.next();
+                        Some(x)
+                    }
+                    (None, Some(y)) => {
+                        b.next();
+                        Some(y)
+                    }
+                    (Some(x), Some(y)) => match x.cmp(&y) {
+                        std::cmp::Ordering::Less => {
+                            a.next();
+                            Some(x)
+                        }
+                        std::cmp::Ordering::Greater => {
+                            b.next();
+                            Some(y)
+                        }
+                        std::cmp::Ordering::Equal => {
+                            a.next();
+                            b.next();
+                            Some(x)
+                        }
+                    },
+                };
+                if next != last {
+                    last = next;
+                    return last;
+                }
+            }
+        })
     }
 
     pub fn is_free(
@@ -909,43 +763,29 @@ where
     }
 
     #[inline]
-    pub fn iter_free_timepoints(&self) -> impl Iterator<Item = TimePoint<T>> + '_ {
-        self.free_by_time.keys().copied()
-    }
-
-    #[inline]
-    pub fn iter_occupied_timepoints(&self) -> impl Iterator<Item = TimePoint<T>> + '_ {
-        self.occupied_by_time.keys().copied()
-    }
-
-    #[inline]
-    pub fn iter_free(
+    pub fn iter_free_slots(
         &'a self,
         time_window: TimeInterval<T>,
         duration: TimeDelta<T>,
         required_space: SpaceLength,
         space_window: SpaceInterval,
     ) -> impl Iterator<Item = FreeSlot<T>> + 'a {
-        FreeIter::new(self, time_window, duration, required_space, space_window)
+        FreeSlotIter::new(self, time_window, duration, required_space, space_window)
     }
 
     #[inline]
-    pub fn iter_intersect_free_runs(
-        &self,
-        required_length: SpaceLength,
-        search_space: SpaceInterval,
-    ) -> IntersectIter<'brand, '_, T, Q> {
-        IntersectIter::new(self, required_length, search_space)
+    pub fn iter_free_regions(
+        &'a self,
+        window: TimeInterval<T>,
+        duration: TimeDelta<T>,
+        required_space: SpaceLength,
+        space_window: SpaceInterval,
+    ) -> impl Iterator<Item = SpaceTimeRectangle<T>> + 'a {
+        FeasibleRegionIter::new(self, window, duration, required_space, space_window)
     }
 }
 
-/// Generic iterator over free spatio-temporal slots.
-///
-/// This iterator is driven by a `SliceView` trait object, allowing it to operate
-/// on either a base `BerthOccupancy` or a temporary `BerthOccupancyOverlay`.
-/// It works by finding candidate start times and, for each, intersecting the
-/// free space available across all relevant time slices over the required duration.
-pub struct FreeIter<'a, T, V>
+pub struct FreeSlotIter<'a, T, V>
 where
     T: PrimInt + Signed + Copy,
     V: SliceView<T> + 'a,
@@ -955,6 +795,7 @@ where
     duration: TimeDelta<T>,
     required: SpaceLength,
     bounds: SpaceInterval,
+    first_cand: TimePoint<T>,
     last_candidate: Option<TimePoint<T>>,
     yielded_window_start: bool,
     current_start: Option<TimePoint<T>>,
@@ -963,7 +804,7 @@ where
     is_empty: bool,
 }
 
-impl<'a, T, V> FreeIter<'a, T, V>
+impl<'a, T, V> FreeSlotIter<'a, T, V>
 where
     T: PrimInt + Signed + Copy,
     V: SliceView<T> + 'a,
@@ -976,12 +817,16 @@ where
         required: SpaceLength,
         bounds: SpaceInterval,
     ) -> Self {
+        let duration = clamp_nonnegative(duration);
+        let first_cand = time_window.start();
+
         Self {
             view,
             time_window,
             duration,
             required,
             bounds,
+            first_cand,
             last_candidate: None,
             yielded_window_start: false,
             current_start: None,
@@ -991,22 +836,18 @@ where
         }
     }
 
-    /// Finds the next valid timepoint that could begin a free slot.
-    /// Candidates are the start of the window and any timepoint key within it.
     fn next_candidate_start(&mut self) -> Option<TimePoint<T>> {
-        let start = self.time_window.start();
+        let start = self.first_cand;
         let end = self.time_window.end();
 
         if start + self.duration > end {
             return None;
         }
-
         if !self.yielded_window_start {
             self.yielded_window_start = true;
             self.last_candidate = Some(start);
             return Some(start);
         }
-
         let last = self.last_candidate?;
         if let Some(tp) = self.view.next_key_after(last)
             && tp + self.duration <= end
@@ -1014,8 +855,6 @@ where
             self.last_candidate = Some(tp);
             return Some(tp);
         }
-
-        // For zero-duration requests, also check the very end of the window if it's a key.
         if self.duration.is_zero() && last < end && self.view.has_key_at(end) {
             self.last_candidate = Some(end);
             return Some(end);
@@ -1023,60 +862,24 @@ where
         None
     }
 
-    /// For a given start time, computes the intersection of all free runs
-    /// over the interval `[start, start + duration)`.
     fn build_runs_for_start(&mut self, start: TimePoint<T>) {
         self.runs.clear();
         self.emit_idx = 0;
         self.current_start = None;
 
-        let pred = match self.view.pred(start) {
-            Some(p) => p,
-            None => return,
-        };
-        let seed_tp = if self.view.has_key_at(start) {
-            start
-        } else {
-            pred
-        };
-        let seed = runs_at(self.view, seed_tp, self.bounds, self.required);
-        self.runs.seed_from_iter(seed);
-        if seed_tp != start {
-            let right = runs_at(self.view, start, self.bounds, self.required);
-            let req = self.required;
-            self.runs.step(|cur, next| {
-                next.extend(IntersectRuns::new(cur.iter().copied(), right, req));
-            });
-        }
+        let end = start + self.duration;
+        let final_runs = eroded_runs(self.view, start, end, self.bounds, self.required);
 
-        if self.runs.current().is_empty() {
+        if final_runs.is_empty() {
             return;
         }
 
-        let end = start + self.duration;
-        let mut cursor = start;
-        while let Some(tp) = self.view.next_key_after(cursor) {
-            if tp >= end {
-                break;
-            }
-            cursor = tp;
-
-            let right = runs_at(self.view, tp, self.bounds, self.required);
-            let req = self.required;
-            self.runs.step(|cur, next| {
-                next.extend(IntersectRuns::new(cur.iter().copied(), right, req));
-            });
-
-            if self.runs.current().is_empty() {
-                return;
-            }
-        }
-
+        self.runs.seed_from_iter(final_runs.into_iter());
         self.current_start = Some(start);
     }
 }
 
-impl<'a, T, V> Iterator for FreeIter<'a, T, V>
+impl<'a, T, V> Iterator for FreeSlotIter<'a, T, V>
 where
     T: PrimInt + Signed + Copy,
     V: SliceView<T> + 'a,
@@ -1109,6 +912,218 @@ where
     }
 }
 
+fn collect_keys_left_inclusive<T, V>(
+    view: &V,
+    from: TimePoint<T>,
+    to: TimePoint<T>,
+) -> Vec<TimePoint<T>>
+where
+    T: PrimInt + Signed + Copy,
+    V: SliceView<T>,
+{
+    let mut out = Vec::new();
+    if view.has_key_at(from) {
+        out.push(from);
+    }
+    let mut cursor = from;
+    while let Some(tp) = view.next_key_after(cursor) {
+        if tp >= to {
+            break;
+        }
+        out.push(tp);
+        cursor = tp;
+    }
+    out
+}
+
+pub struct FeasibleRegionIter<'a, T, V>
+where
+    T: PrimInt + Signed + Copy,
+    V: SliceView<T> + 'a,
+{
+    view: &'a V,
+    duration: TimeDelta<T>,
+    required: SpaceLength,
+    bounds: SpaceInterval,
+
+    // Sorted, deduped start-time breakpoints inside [tw_start, latest_start]
+    // where the feasibility set can change (keys or keys - duration).
+    bps: Vec<TimePoint<T>>,
+    bp_idx: usize,
+
+    // per-segment emission
+    cur_runs: Vec<SpaceInterval>,
+    run_idx: usize,
+
+    // segment time window
+    seg_start: TimePoint<T>,
+    seg_end: TimePoint<T>,
+}
+
+impl<'a, T, V> FeasibleRegionIter<'a, T, V>
+where
+    T: PrimInt + Signed + Copy,
+    V: SliceView<T> + 'a,
+{
+    #[inline]
+    pub fn new(
+        view: &'a V,
+        time_window: TimeInterval<T>,
+        duration: TimeDelta<T>,
+        required: SpaceLength,
+        bounds: SpaceInterval,
+    ) -> Self {
+        // No starts possible if required > bounds
+        let mut bps: Vec<TimePoint<T>> = Vec::new();
+
+        // latest start time allowed by the window:
+        // any start s must satisfy s + duration <= time_window.end()
+        let tw_start = time_window.start();
+        let tw_end = time_window.end();
+
+        // If duration is negative, treat like zero (no-op duration).
+        let duration = if duration.value() < T::zero() {
+            TimeDelta::new(T::zero())
+        } else {
+            duration
+        };
+
+        // If even the window start can't fit the duration, we will yield nothing.
+        let latest_start = tw_end - duration;
+        if tw_start > latest_start {
+            return Self {
+                view,
+                duration,
+                required,
+                bounds,
+                bps,
+                bp_idx: 0,
+                cur_runs: Vec::new(),
+                run_idx: 0,
+                seg_start: tw_start,
+                seg_end: tw_start,
+            };
+        }
+
+        // Collect interior keys in (tw_start, latest_start)
+        fn collect_keys<T, V>(view: &V, from: TimePoint<T>, to: TimePoint<T>) -> Vec<TimePoint<T>>
+        where
+            T: PrimInt + Signed + Copy,
+            V: SliceView<T>,
+        {
+            let mut out = Vec::new();
+            let mut cursor = from;
+            while let Some(tp) = view.next_key_after(cursor) {
+                if tp >= to {
+                    break;
+                }
+                out.push(tp);
+                cursor = tp;
+            }
+            out
+        }
+
+        // Keys where feasibility can change:
+        //  - when the left edge of the duration window crosses a key   → keys in (start, latest_start)
+        //  - when the right edge crosses a key                         → (keys in (start+dur, latest_start+dur)) shifted by -dur
+        let mut keys_left = collect_keys(view, tw_start, latest_start);
+
+        let shifted_left = tw_start + duration;
+        let shifted_right = latest_start + duration;
+        let one = TimeDelta::new(T::one());
+        let mut keys_right_shifted_back: Vec<_> =
+            collect_keys_left_inclusive(view, shifted_left, shifted_right)
+                .into_iter()
+                .map(|t| t - duration + one)
+                .filter(|&t| t > tw_start && t <= latest_start)
+                .collect();
+
+        bps.reserve(2 + keys_left.len() + keys_right_shifted_back.len());
+        bps.push(tw_start);
+        bps.append(&mut keys_left);
+        bps.append(&mut keys_right_shifted_back);
+        bps.push(latest_start);
+
+        // sort + dedup
+        bps.sort_unstable_by_key(|t| t.value());
+        bps.dedup_by_key(|t| t.value());
+
+        Self {
+            view,
+            duration,
+            required,
+            bounds,
+            bps,
+            bp_idx: 0,
+            cur_runs: Vec::new(),
+            run_idx: 0,
+            seg_start: tw_start,
+            seg_end: tw_start,
+        }
+    }
+
+    fn runs_for_start(&self, s: TimePoint<T>) -> Vec<SpaceInterval> {
+        eroded_runs(self.view, s, s + self.duration, self.bounds, self.required)
+    }
+}
+
+#[inline]
+fn rep_start<T: PrimInt + Signed + Copy + One>(a: TimePoint<T>, b: TimePoint<T>) -> TimePoint<T> {
+    // Prefer an interior point if it exists; otherwise stick with `a`.
+    let one = TimeDelta::new(T::one());
+    if a + one < b { a + one } else { a }
+}
+
+impl<'a, T, V> Iterator for FeasibleRegionIter<'a, T, V>
+where
+    T: PrimInt + Signed + Copy,
+    V: SliceView<T> + 'a,
+{
+    type Item = SpaceTimeRectangle<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            // If we have runs to emit for this segment, emit them one by one.
+            if self.run_idx < self.cur_runs.len() {
+                let iv = self.cur_runs[self.run_idx];
+                self.run_idx += 1;
+                return Some(SpaceTimeRectangle::new(
+                    iv,
+                    TimeInterval::new(self.seg_start, self.seg_end),
+                ));
+            }
+
+            // Move to next start-time segment
+            if self.bp_idx + 1 >= self.bps.len() {
+                return None;
+            }
+            self.seg_start = self.bps[self.bp_idx];
+            self.seg_end = self.bps[self.bp_idx + 1];
+            self.bp_idx += 1;
+
+            // Guard (zero-length segment)
+            if self.seg_start >= self.seg_end {
+                continue;
+            }
+
+            // Compute eroded runs for *this* start point. These runs are constant
+            // for all starts in [seg_start, seg_end), by construction of breakpoints.
+            // self.cur_runs = self.runs_for_start(self.seg_start);
+
+            let s_rep = rep_start(self.seg_start, self.seg_end);
+            self.cur_runs = self.runs_for_start(s_rep);
+            self.run_idx = 0;
+
+            if self.cur_runs.is_empty() {
+                // Nothing feasible in this segment; advance again.
+                continue;
+            }
+
+            // Loop back to emit runs
+        }
+    }
+}
+
 #[inline]
 fn runs_cover_interval<I>(runs: I, target: SpaceInterval) -> bool
 where
@@ -1123,36 +1138,26 @@ where
     let need_end = target.end();
 
     while let Some(iv) = runs.next() {
-        // Skip any runs that end before our current needed start
         if iv.end() <= need_start {
             continue;
         }
-
-        // If there's a gap before the needed start, not covered
         if iv.start() > need_start {
             return false;
         }
-
-        // iv.start <= need_start < iv.end ; extend coverage as far as possible
         let mut covered_end = iv.end();
-
-        // Coalesce adjacency/overlap from subsequent runs without allocating
         while let Some(next) = runs.peek().copied() {
-            // half-open semantics: touching is continuous if next.start() <= covered_end
             if next.start() > covered_end {
                 break;
             }
             if next.end() > covered_end {
                 covered_end = next.end();
             }
-            runs.next(); // consume it
+            runs.next();
         }
 
         if covered_end >= need_end {
             return true;
         }
-
-        // Continue needing coverage starting at the end of what we just covered
         need_start = covered_end;
     }
 
@@ -1181,8 +1186,8 @@ where
 {
     left: L,
     right: std::iter::Peekable<R>,
-    cur_l: Option<SpaceInterval>,
-    cur_r: Option<SpaceInterval>,
+    cur_left: Option<SpaceInterval>,
+    cur_right: Option<SpaceInterval>,
     required: SpaceLength,
 }
 
@@ -1196,8 +1201,8 @@ where
         Self {
             left,
             right: right.peekable(),
-            cur_l: None,
-            cur_r: None,
+            cur_left: None,
+            cur_right: None,
             required,
         }
     }
@@ -1213,24 +1218,21 @@ where
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if self.cur_l.is_none() {
-                self.cur_l = self.left.next();
+            if self.cur_left.is_none() {
+                self.cur_left = self.left.next();
             }
-            if self.cur_r.is_none() {
-                self.cur_r = self.right.next();
+            if self.cur_right.is_none() {
+                self.cur_right = self.right.next();
             }
-            let (a, b) = match (self.cur_l, self.cur_r) {
+            let (a, b) = match (self.cur_left, self.cur_right) {
                 (Some(a), Some(b)) => (a, b),
                 _ => return None,
             };
-
-            // Compute intersection (half-open semantics assumed by your types).
             let out = a.intersection(&b);
-            // Advance the side that ends first; on tie advance right (matches your slice version).
             if a.end() < b.end() {
-                self.cur_l = None;
+                self.cur_left = None;
             } else {
-                self.cur_r = None;
+                self.cur_right = None;
             }
 
             if let Some(iv) = out
@@ -1242,8 +1244,136 @@ where
     }
 }
 
+type SpaceIntervalSet = IntervalSet<SpacePosition>;
+
+#[derive(Clone, Debug)]
+struct KeysUnion<'a, T: PrimInt + Signed> {
+    free_keys:
+        Peekable<Copied<std::collections::btree_map::Keys<'a, TimePoint<T>, SpaceIntervalSet>>>,
+    occupied_keys:
+        Peekable<Copied<std::collections::btree_map::Keys<'a, TimePoint<T>, SpaceIntervalSet>>>,
+}
+
+impl<'a, T: PrimInt + Signed> KeysUnion<'a, T> {
+    #[inline]
+    fn new(
+        free: &'a BTreeMap<TimePoint<T>, SpaceIntervalSet>,
+        occ: &'a BTreeMap<TimePoint<T>, SpaceIntervalSet>,
+    ) -> Self {
+        Self {
+            free_keys: free.keys().copied().peekable(),
+            occupied_keys: occ.keys().copied().peekable(),
+        }
+    }
+}
+
+impl<'a, T: PrimInt + Signed> Iterator for KeysUnion<'a, T> {
+    type Item = TimePoint<T>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let peek_a = self.free_keys.peek().copied();
+        let peek_b = self.occupied_keys.peek().copied();
+
+        match (peek_a, peek_b) {
+            (None, None) => None,
+            (Some(_), None) => self.free_keys.next(),
+            (None, Some(_)) => self.occupied_keys.next(),
+            (Some(x), Some(y)) => match x.cmp(&y) {
+                std::cmp::Ordering::Less => self.free_keys.next(),
+                std::cmp::Ordering::Greater => self.occupied_keys.next(),
+                std::cmp::Ordering::Equal => {
+                    self.free_keys.next();
+                    self.occupied_keys.next();
+                    Some(x)
+                }
+            },
+        }
+    }
+}
+
+impl<'a, T: PrimInt + Signed> FusedIterator for KeysUnion<'a, T> {}
+
+#[inline]
+fn next_key_after<T: PrimInt + Signed, Q: Clone + QuayRead>(
+    berth: &BerthOccupancy<T, Q>,
+    overlay_free: &BTreeMap<TimePoint<T>, SpaceIntervalSet>,
+    overlay_occ: &BTreeMap<TimePoint<T>, SpaceIntervalSet>,
+    after: TimePoint<T>,
+) -> Option<TimePoint<T>> {
+    let nb = berth.next_time_key_after(after);
+    let nf = overlay_free
+        .range((Excluded(after), Unbounded))
+        .next()
+        .map(|(t, _)| *t);
+    let no = overlay_occ
+        .range((Excluded(after), Unbounded))
+        .next()
+        .map(|(t, _)| *t);
+    [nb, nf, no].into_iter().flatten().min()
+}
+
+#[inline]
+fn eroded_runs<'v, T, V>(
+    view: &'v V,
+    start: TimePoint<T>,
+    end: TimePoint<T>,
+    bounds: SpaceInterval,
+    min_len: SpaceLength,
+) -> Vec<SpaceInterval>
+where
+    T: PrimInt + Signed + Copy,
+    V: SliceView<T> + ?Sized + 'v,
+{
+    use dock_alloc_core::mem::DoubleBuf;
+
+    let pred = match view.pred(start) {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+    let seed_tp = if view.has_key_at(start) { start } else { pred };
+
+    let mut db: DoubleBuf<SpaceInterval> = DoubleBuf::new();
+    db.seed_from_iter(runs_at(view, seed_tp, bounds, min_len));
+
+    if db.current().is_empty() {
+        return Vec::new();
+    }
+
+    let mut cursor = start;
+    while let Some(tp) = view.next_key_after(cursor) {
+        if tp >= end {
+            break;
+        }
+        cursor = tp;
+        db.step(|cur, next| {
+            next.extend(IntersectRuns::new(
+                cur.iter().copied(),
+                runs_at(view, tp, bounds, min_len),
+                min_len,
+            ));
+        });
+        if db.current().is_empty() {
+            return Vec::new();
+        }
+    }
+
+    db.current().to_vec()
+}
+
+#[inline]
+fn clamp_nonnegative<T: PrimInt + Signed + Copy>(d: TimeDelta<T>) -> TimeDelta<T> {
+    if d.value() < T::zero() {
+        TimeDelta::new(T::zero())
+    } else {
+        d
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::{collections::BTreeSet, fmt::Display};
+
+    use num_traits::One;
+
     use super::*;
     use crate::quay::BooleanVecQuay;
 
@@ -1282,7 +1412,7 @@ mod tests {
         bounds: SpaceInterval,
     ) -> Vec<(T, (usize, usize))> {
         berth
-            .iter_free(tw, dur, need, bounds)
+            .iter_free_slots(tw, dur, need, bounds)
             .map(|f| {
                 (
                     f.start_time().value(),
@@ -1471,43 +1601,6 @@ mod tests {
                 .is_occupied(&rect(ti(4, 6), si(2, 5)))
                 .unwrap()
         );
-    }
-
-    #[test]
-    fn test_iter_free_per_slice_reports_per_snapshot_gaps() {
-        let quay_length = len(10);
-        let mut berth_occupancy = BO::new(quay_length);
-
-        // Occupy [5,10):[2,5)
-        berth_occupancy.occupy(&rect(ti(5, 10), si(2, 5))).unwrap();
-
-        // For search_space [0,10), required >= 2
-        let required_length = len(2);
-        let search_interval = si(0, 10);
-
-        let mut collected_slices: Vec<(T, Vec<(usize, usize)>)> = Vec::new();
-        for (start_time, free_intervals_iterator) in
-            berth_occupancy.iter_slice_free_runs(ti(0, 10), required_length, search_interval)
-        {
-            let mut intervals: Vec<(usize, usize)> = free_intervals_iterator
-                .map(|interval| (interval.start().value(), interval.end().value()))
-                .collect();
-            intervals.sort_unstable();
-            collected_slices.push((start_time.value(), intervals));
-        }
-
-        collected_slices.sort_by_key(|x| x.0);
-
-        // Expect two slices: at t=0 (before 5) fully free; at t=5 (occupied [2,5))
-        assert_eq!(collected_slices.len(), 2);
-
-        // Slice starting at 0: entire [0,10) is free, length 10 >= 2
-        assert_eq!(collected_slices[0].0, 0);
-        assert_eq!(collected_slices[0].1, vec![(0, 10)]);
-
-        // Slice starting at 5: free intervals are [0,2) and [5,10)
-        assert_eq!(collected_slices[1].0, 5);
-        assert_eq!(collected_slices[1].1, vec![(0, 2), (5, 10)]);
     }
 
     #[test]
@@ -1723,7 +1816,7 @@ mod tests {
         // With dur=0, we’ll check predecessor snapshot for each candidate start:
         // start=0 → free everywhere; start=5 → [2,6) blocked; start=6 → free everywhere again.
         let items: Vec<_> = berth
-            .iter_free(ti(0, 6), TimeDelta::new(0), len(2), si(0, 10))
+            .iter_free_slots(ti(0, 6), TimeDelta::new(0), len(2), si(0, 10))
             .map(|f| {
                 (
                     f.start_time().value(),
@@ -1834,26 +1927,6 @@ mod tests {
     }
 
     #[test]
-    fn test_overlay_iter_intersect_free_runs_across_overlay_keys() {
-        // Base berth: fully free
-        let berth = BO::new(len(12));
-        let mut overlay = BerthOccupancyOverlay::new(&berth);
-
-        // Overlay "free" is additive (union with base free). Since base is fully free,
-        // the intersection across keys stays the full bounds.
-        overlay.add_free(tp(0), si(1, 8)).unwrap();
-        overlay.add_free(tp(5), si(3, 10)).unwrap();
-
-        let runs: Vec<_> = overlay
-            .iter_intersect_free_runs(len(1), si(0, 12))
-            .map(|iv| (iv.start().value(), iv.end().value()))
-            .collect();
-
-        // Expect the entire bounds because base is already free everywhere.
-        assert_eq!(runs, vec![(0, 12)]);
-    }
-
-    #[test]
     fn test_overlay_iter_free_respects_overlay_through_duration() {
         // Base: occupy [5,9):[2,6). We'll "free" that space via overlay for the slices we care about.
         let mut berth = BO::new(len(10));
@@ -1867,7 +1940,7 @@ mod tests {
         overlay.add_free(tp(5), si(2, 6)).unwrap();
 
         let items: Vec<_> = overlay
-            .iter_free(ti(5, 9), TimeDelta::new(3), len(2), si(0, 10))
+            .iter_free_slots(ti(5, 9), TimeDelta::new(3), len(2), si(0, 10))
             .map(|f| {
                 (
                     f.start_time().value(),
@@ -1887,60 +1960,12 @@ mod tests {
     }
 
     #[test]
-    fn test_overlay_timepoint_iters_sorted() {
-        let berth = BO::new(len(6));
-        let mut overlay = BerthOccupancyOverlay::new(&berth);
-
-        overlay.add_free(tp(10), si(0, 1)).unwrap();
-        overlay.add_free(tp(0), si(0, 1)).unwrap();
-        overlay.add_free(tp(5), si(0, 1)).unwrap();
-
-        overlay.add_occupy(tp(7), si(1, 2)).unwrap();
-        overlay.add_occupy(tp(3), si(1, 2)).unwrap();
-
-        let free_keys: Vec<_> = overlay.iter_free_timepoints().map(|t| t.value()).collect();
-        let occ_keys: Vec<_> = overlay
-            .iter_occupied_timepoints()
-            .map(|t| t.value())
-            .collect();
-
-        assert_eq!(free_keys, vec![0, 5, 10]);
-        assert_eq!(occ_keys, vec![3, 7]);
-    }
-
-    #[test]
-    fn test_intersect_iter_min_length_filtering() {
-        // Base: fully free; create a *narrow* intersection via overlay OCCUPY (subtractive).
-        let berth = BO::new(len(10));
-        let mut overlay = BerthOccupancyOverlay::new(&berth);
-
-        // t=0: occupy [2,10) → free is [0,2)
-        overlay.add_occupy(tp(0), si(2, 10)).unwrap();
-        // t=5: occupy [0,1) and [2,10) → free is [1,2)
-        overlay.add_occupy(tp(5), si(0, 1)).unwrap();
-        overlay.add_occupy(tp(5), si(2, 10)).unwrap();
-
-        let bounds = si(0, 10);
-
-        // Requiring length 2 should filter out [1,2)
-        let none: Vec<_> = overlay.iter_intersect_free_runs(len(2), bounds).collect();
-        assert!(none.is_empty());
-
-        // Requiring length 1 should produce [1,2)
-        let some: Vec<_> = overlay
-            .iter_intersect_free_runs(len(1), bounds)
-            .map(|iv| (iv.start().value(), iv.end().value()))
-            .collect();
-        assert_eq!(some, vec![(1, 2)]);
-    }
-
-    #[test]
     fn test_free_iter_zero_duration_yields_window_end_only_if_key_exists() {
         let mut berth = BO::new(len(10));
         // Ensure a key at end
         berth.occupy(&rect(ti(0, 5), si(0, 1))).unwrap(); // keys 0,5
         let items: Vec<_> = berth
-            .iter_free(ti(0, 5), TimeDelta::new(0), len(1), si(0, 10))
+            .iter_free_slots(ti(0, 5), TimeDelta::new(0), len(1), si(0, 10))
             .map(|f| {
                 (
                     f.start_time().value(),
@@ -1954,25 +1979,6 @@ mod tests {
     }
 
     #[test]
-    fn test_overlay_remove_occupy_drops_key_when_empty() {
-        let berth = BO::new(len(10));
-        let mut ov = BerthOccupancyOverlay::new(&berth);
-        ov.add_occupy(tp(5), si(2, 4)).unwrap();
-        assert_eq!(
-            ov.iter_occupied_timepoints().collect::<Vec<_>>(),
-            vec![tp(5)]
-        );
-    }
-
-    #[test]
-    fn test_overlay_remove_free_drops_key_when_empty() {
-        let berth = BO::new(len(10));
-        let mut ov = BerthOccupancyOverlay::new(&berth);
-        ov.add_free(tp(5), si(1, 3)).unwrap();
-        assert_eq!(ov.iter_free_timepoints().collect::<Vec<_>>(), vec![tp(5)]);
-    }
-
-    #[test]
     fn test_overlay_iter_free_uses_overlay_keys_as_candidates() {
         let berth = BO::new(len(10)); // fully free; no extra keys
         let mut ov = BerthOccupancyOverlay::new(&berth);
@@ -1980,7 +1986,7 @@ mod tests {
         ov.add_occupy(tp(7), si(0, 1)).unwrap();
         // Duration 2 forces candidate starts at 0 and 7 (overlay key)
         let items: Vec<_> = ov
-            .iter_free(ti(0, 10), TimeDelta::new(2), len(1), si(0, 10))
+            .iter_free_slots(ti(0, 10), TimeDelta::new(2), len(1), si(0, 10))
             .map(|f| f.start_time().value())
             .collect();
         let mut unique_items: Vec<_> = items;
@@ -1989,17 +1995,6 @@ mod tests {
 
         assert!(unique_items.contains(&0));
         assert!(unique_items.contains(&7));
-    }
-
-    #[test]
-    fn test_overlay_intersect_runs_no_overlay_keys_returns_bounds() {
-        let berth = BO::new(len(10)); // fully free
-        let ov = BerthOccupancyOverlay::new(&berth);
-        let runs: Vec<_> = ov
-            .iter_intersect_free_runs(len(1), si(2, 8))
-            .map(|iv| (iv.start().value(), iv.end().value()))
-            .collect();
-        assert_eq!(runs, vec![(2, 8)]);
     }
 
     #[test]
@@ -2028,7 +2023,7 @@ mod tests {
         .unwrap();
 
         let items: Vec<_> = ov
-            .iter_free(
+            .iter_free_slots(
                 TimeInterval::new(TimePoint::new(5), TimePoint::new(8)),
                 TimeDelta::new(2),
                 SpaceLength::new(3),
@@ -2079,5 +2074,284 @@ mod tests {
         // non-overlapped rims remain occupied
         assert!(ov.is_occupied(&rect(ti(4, 6), si(3, 4))).unwrap());
         assert!(ov.is_occupied(&rect(ti(4, 6), si(5, 6))).unwrap());
+    }
+
+    fn iv_to_tuple(iv: SpaceInterval) -> (usize, usize) {
+        (iv.start().value(), iv.end().value())
+    }
+
+    fn set_from_intervals(v: impl IntoIterator<Item = SpaceInterval>) -> BTreeSet<(usize, usize)> {
+        v.into_iter().map(iv_to_tuple).collect()
+    }
+
+    /// Collect start-feasible bands as: time-band -> set of space runs
+    fn collect_bands_base<T: PrimInt + Signed + Copy, Q: QuayRead + Clone + PartialEq>(
+        berth: &BerthOccupancy<T, Q>,
+        window: TimeInterval<T>,
+        duration: TimeDelta<T>,
+        required: SpaceLength,
+        bounds: SpaceInterval,
+    ) -> BTreeMap<(T, T), BTreeSet<(usize, usize)>> {
+        let mut out: BTreeMap<(T, T), Vec<SpaceInterval>> = BTreeMap::new();
+        for r in berth.iter_free_regions(window, duration, required, bounds) {
+            out.entry((r.time().start().value(), r.time().end().value()))
+                .or_default()
+                .push(r.space());
+        }
+        out.into_iter()
+            .map(|(k, v)| (k, set_from_intervals(v)))
+            .collect()
+    }
+
+    fn collect_bands_overlay<'brand, 'a, T: PrimInt + Signed + Copy, Q: QuayRead>(
+        ov: &BerthOccupancyOverlay<'brand, 'a, T, Q>,
+        window: TimeInterval<T>,
+        duration: TimeDelta<T>,
+        required: SpaceLength,
+        bounds: SpaceInterval,
+    ) -> BTreeMap<(T, T), BTreeSet<(usize, usize)>> {
+        let mut out: BTreeMap<(T, T), Vec<SpaceInterval>> = BTreeMap::new();
+        for r in ov.iter_free_regions(window, duration, required, bounds) {
+            out.entry((r.time().start().value(), r.time().end().value()))
+                .or_default()
+                .push(r.space());
+        }
+        out.into_iter()
+            .map(|(k, v)| (k, set_from_intervals(v)))
+            .collect()
+    }
+
+    fn slot_set_for_start_base<T, Q>(
+        berth: &BerthOccupancy<T, Q>,
+        s: TimePoint<T>,
+        mut duration: TimeDelta<T>,
+        required: SpaceLength,
+        bounds: SpaceInterval,
+    ) -> BTreeSet<(usize, usize)>
+    where
+        T: PrimInt + Signed + Copy,
+        Q: QuayRead + Clone + PartialEq,
+    {
+        if duration.value() < T::zero() {
+            duration = TimeDelta::new(T::zero());
+        }
+        let tw = TimeInterval::new(s, s + duration);
+        berth
+            .iter_free_slots(tw, duration, required, bounds)
+            .filter(|fs| fs.start_time() == s)
+            .map(|fs| iv_to_tuple(fs.space()))
+            .collect()
+    }
+
+    fn slot_set_for_start_overlay<'brand, 'a, T, Q>(
+        ov: &BerthOccupancyOverlay<'brand, 'a, T, Q>,
+        s: TimePoint<T>,
+        mut duration: TimeDelta<T>,
+        required: SpaceLength,
+        bounds: SpaceInterval,
+    ) -> BTreeSet<(usize, usize)>
+    where
+        T: PrimInt + Signed + Copy,
+        Q: QuayRead,
+    {
+        if duration.value() < T::zero() {
+            duration = TimeDelta::new(T::zero());
+        }
+        let tw = TimeInterval::new(s, s + duration);
+        ov.iter_free_slots(tw, duration, required, bounds)
+            .filter(|fs| fs.start_time() == s)
+            .map(|fs| iv_to_tuple(fs.space()))
+            .collect()
+    }
+
+    /// Pick representative sample starts inside a half-open band [a,b)
+    fn sample_starts_in_band<T: PrimInt + Signed + Copy + One>(a: T, b: T) -> Vec<T> {
+        if a >= b {
+            return vec![];
+        }
+        let one = T::one();
+        let mut v = vec![a];
+        let span = b - a;
+        if span > one {
+            // a middle point
+            v.push(a + (span / (one + one))); // roughly midpoint
+            // last valid discrete start (b-1)
+            v.push(b - one);
+            v.sort_unstable();
+            v.dedup();
+        }
+        v
+    }
+
+    /// Assert that regions (bands) agree with slots for several starts within each band (BASE)
+    fn assert_regions_match_slots_base<T, Q>(
+        berth: &BerthOccupancy<T, Q>,
+        window: TimeInterval<T>,
+        duration: TimeDelta<T>,
+        required: SpaceLength,
+        bounds: SpaceInterval,
+    ) where
+        T: PrimInt + Signed + Copy + One + Display,
+        Q: QuayRead + Clone + PartialEq,
+    {
+        let bands = collect_bands_base(berth, window, duration, required, bounds);
+        for ((ts, te), spaces) in bands {
+            for s in sample_starts_in_band(ts, te) {
+                let got =
+                    slot_set_for_start_base(berth, TimePoint::new(s), duration, required, bounds);
+                assert_eq!(
+                    got, spaces,
+                    "slot set at start={} must equal region runs for band [{}, {})",
+                    s, ts, te
+                );
+            }
+        }
+    }
+
+    /// Assert that regions (bands) agree with slots for several starts within each band (OVERLAY)
+    fn assert_regions_match_slots_overlay<'brand, 'a, T, Q>(
+        ov: &BerthOccupancyOverlay<'brand, 'a, T, Q>,
+        window: TimeInterval<T>,
+        duration: TimeDelta<T>,
+        required: SpaceLength,
+        bounds: SpaceInterval,
+    ) where
+        T: PrimInt + Signed + Copy + One + Display,
+        Q: QuayRead,
+    {
+        let bands = collect_bands_overlay(ov, window, duration, required, bounds);
+        for ((ts, te), spaces) in bands {
+            for s in sample_starts_in_band(ts, te) {
+                let got =
+                    slot_set_for_start_overlay(ov, TimePoint::new(s), duration, required, bounds);
+                assert_eq!(
+                    got, spaces,
+                    "overlay slot set at start={} must equal region runs for band [{}, {})",
+                    s, ts, te
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn regions_vs_slots_fully_free_base() {
+        let berth = BO::new(len(10));
+        // window [0,10), dur=3 -> latest start = 7
+        assert_regions_match_slots_base(&berth, ti(0, 10), TimeDelta::new(3), len(2), si(0, 10));
+    }
+
+    #[test]
+    fn regions_vs_slots_single_occupy_base() {
+        // Base occupy [5,10)×[2,5)
+        let mut berth = BO::new(len(10));
+        berth.occupy(&rect(ti(5, 10), si(2, 5))).unwrap();
+
+        // Probe several durations & bounds
+        assert_regions_match_slots_base(&berth, ti(0, 12), TimeDelta::new(3), len(1), si(0, 10));
+        assert_regions_match_slots_base(&berth, ti(0, 12), TimeDelta::new(3), len(2), si(0, 10));
+        assert_regions_match_slots_base(&berth, ti(0, 12), TimeDelta::new(4), len(3), si(0, 10));
+    }
+
+    #[test]
+    fn regions_vs_slots_multiple_keys_intersections_base() {
+        // Two overlapping occupies to force intersections inside the moving window
+        let mut berth = BO::new(len(12));
+        berth.occupy(&rect(ti(4, 9), si(3, 7))).unwrap(); // key 4
+        berth.occupy(&rect(ti(7, 11), si(6, 10))).unwrap(); // key 7,11
+
+        // The bands should match what slots say for starts throughout the window
+        assert_regions_match_slots_base(&berth, ti(4, 11), TimeDelta::new(3), len(1), si(0, 12));
+        assert_regions_match_slots_base(&berth, ti(0, 12), TimeDelta::new(2), len(2), si(0, 12));
+    }
+
+    #[test]
+    fn regions_vs_slots_min_len_and_bounds_base() {
+        let berth = BO::new(len(10)); // fully free
+        // Require more than the bounds → no bands
+        assert!(
+            collect_bands_base(&berth, ti(0, 10), TimeDelta::new(2), len(6), si(1, 6)).is_empty()
+        );
+
+        // Feasible with exact bounds and min length
+        assert_regions_match_slots_base(&berth, ti(0, 10), TimeDelta::new(2), len(5), si(1, 6));
+    }
+
+    #[test]
+    fn regions_vs_slots_zero_and_negative_duration_base() {
+        let mut berth = BO::new(len(10));
+        berth.occupy(&rect(ti(5, 6), si(2, 6))).unwrap(); // keys 5,6
+
+        // dur=0 behaves like per-slice feasibility, but returned as bands of starts.
+        assert_regions_match_slots_base(&berth, ti(0, 6), TimeDelta::new(0), len(2), si(0, 10));
+
+        // negative dur is treated as 0 inside FeasibleRegionIter
+        assert_regions_match_slots_base(&berth, ti(0, 6), TimeDelta::new(-3), len(2), si(0, 10));
+    }
+
+    #[test]
+    fn regions_empty_when_duration_exceeds_window_base() {
+        let berth = BO::new(len(10));
+        // tw [0,4), dur=5 → no starts fit
+        let bands = collect_bands_base(&berth, ti(0, 4), TimeDelta::new(5), len(1), si(0, 10));
+        assert!(bands.is_empty());
+    }
+
+    #[test]
+    fn regions_vs_slots_overlay_free_override() {
+        // Base: occupy [5,10)×[2,6)
+        let mut berth = BO::new(len(10));
+        berth.occupy(&rect(ti(5, 10), si(2, 6))).unwrap();
+
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+        // At t=5 free the blocked band via overlay
+        ov.add_free(tp(5), si(2, 6)).unwrap();
+
+        // Starts in [5, 10-d) should see full space (within bounds) for dur in [1..4]
+        assert_regions_match_slots_overlay(&ov, ti(5, 10), TimeDelta::new(3), len(1), si(0, 10));
+        assert_regions_match_slots_overlay(&ov, ti(5, 10), TimeDelta::new(4), len(2), si(0, 10));
+    }
+
+    #[test]
+    fn regions_vs_slots_overlay_union_of_keys() {
+        // Base fully free
+        let berth = BO::new(len(10));
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+
+        // Introduce overlay key at 7 by occupying [1,3)
+        ov.add_occupy(tp(7), si(1, 3)).unwrap();
+
+        // Bands should split at 7 for durations that straddle it
+        assert_regions_match_slots_overlay(&ov, ti(5, 10), TimeDelta::new(2), len(1), si(0, 10));
+        assert_regions_match_slots_overlay(&ov, ti(5, 10), TimeDelta::new(3), len(1), si(0, 10));
+    }
+
+    #[test]
+    fn regions_vs_slots_overlay_start_edge_changes() {
+        // Base boundary at 7 with occupation [2,6)
+        let mut berth = BO::new(len(10));
+        berth.occupy(&rect(ti(7, 9), si(2, 6))).unwrap(); // keys 0,7,9
+
+        // Overlay: default occupy pred=0, but free exactly at window start=5
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+        ov.add_occupy(tp(0), si(2, 6)).unwrap();
+        ov.add_free(tp(5), si(2, 6)).unwrap();
+
+        assert_regions_match_slots_overlay(&ov, ti(5, 8), TimeDelta::new(2), len(3), si(0, 10));
+    }
+
+    #[test]
+    fn regions_vs_slots_bounds_empty_and_required_too_large_overlay() {
+        let berth = BO::new(len(10));
+        let ov = BerthOccupancyOverlay::new(&berth);
+
+        // Empty bounds → no regions
+        assert!(
+            collect_bands_overlay(&ov, ti(0, 10), TimeDelta::new(2), len(1), si(3, 3)).is_empty()
+        );
+
+        // Required > bounds length → no regions
+        assert!(
+            collect_bands_overlay(&ov, ti(0, 10), TimeDelta::new(2), len(6), si(1, 6)).is_empty()
+        );
     }
 }

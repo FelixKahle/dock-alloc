@@ -349,7 +349,7 @@ where
 
         self.builder
             .berth_overlay
-            .iter_free(
+            .iter_free_slots(
                 time_search_window,
                 processing_duration,
                 length,
@@ -379,7 +379,7 @@ where
             .map(move |(twin, swin)| {
                 self.builder
                     .berth_overlay
-                    .iter_free(twin, proc, len, swin)
+                    .iter_free_slots(twin, proc, len, swin)
                     .map(move |slot| {
                         let time = TimeInterval::new(slot.start_time(), slot.start_time() + proc);
                         FreeSlot::new(slot.space(), time)

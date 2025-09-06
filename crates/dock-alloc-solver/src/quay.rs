@@ -90,41 +90,6 @@ pub trait QuayRead: Eq + Clone {
         )
     }
 
-    #[inline]
-    fn normalize_in_range(
-        &self,
-        interval: SpaceInterval,
-    ) -> Result<(SpacePosition, SpacePosition), QuaySpaceIntervalOutOfBoundsError> {
-        let start = interval.start();
-        let end = interval.end();
-
-        let cap_end = SpacePosition::zero() + self.capacity();
-        if end > cap_end {
-            return Err(QuaySpaceIntervalOutOfBoundsError::new(
-                interval,
-                self.capacity(),
-            ));
-        }
-        Ok((start, end))
-    }
-
-    #[inline]
-    fn clamp(&self, interval: SpaceInterval) -> (SpacePosition, SpacePosition) {
-        let (mut start, mut end) = (interval.start(), interval.end());
-
-        if start > end {
-            std::mem::swap(&mut start, &mut end);
-        }
-
-        let min = SpacePosition::zero();
-        let max = min + self.capacity();
-
-        start = start.max(min).min(max);
-        end = end.max(min).min(max);
-
-        (start, end)
-    }
-
     fn iter_free_intervals(
         &self,
         required_space: SpaceLength,
@@ -139,6 +104,38 @@ pub trait QuayWrite {
 
 pub trait Quay: QuayRead + QuayWrite {}
 impl<T: QuayRead + QuayWrite> Quay for T {}
+
+#[inline]
+fn normalize_in_range(
+    capacity: SpaceLength,
+    interval: SpaceInterval,
+) -> Result<(SpacePosition, SpacePosition), QuaySpaceIntervalOutOfBoundsError> {
+    let start = interval.start();
+    let end = interval.end();
+
+    let cap_end = SpacePosition::zero() + capacity;
+    if end > cap_end {
+        return Err(QuaySpaceIntervalOutOfBoundsError::new(interval, capacity));
+    }
+    Ok((start, end))
+}
+
+#[inline]
+fn clamp(capacity: SpaceLength, interval: SpaceInterval) -> (SpacePosition, SpacePosition) {
+    let (mut start, mut end) = (interval.start(), interval.end());
+
+    if start > end {
+        std::mem::swap(&mut start, &mut end);
+    }
+
+    let min = SpacePosition::zero();
+    let max = min + capacity;
+
+    start = start.max(min).min(max);
+    end = end.max(min).min(max);
+
+    (start, end)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BTreeMapQuay {
@@ -306,7 +303,7 @@ impl QuayRead for BTreeMapQuay {
         &self,
         interval: SpaceInterval,
     ) -> Result<bool, QuaySpaceIntervalOutOfBoundsError> {
-        let (start, end) = self.normalize_in_range(interval)?;
+        let (start, end) = normalize_in_range(self.capacity(), interval)?;
         if start >= end {
             return Ok(true);
         }
@@ -337,7 +334,7 @@ impl QuayRead for BTreeMapQuay {
         &self,
         interval: SpaceInterval,
     ) -> Result<bool, QuaySpaceIntervalOutOfBoundsError> {
-        let (start, end) = self.normalize_in_range(interval)?;
+        let (start, end) = normalize_in_range(self.capacity(), interval)?;
         if start >= end {
             return Ok(false);
         }
@@ -359,7 +356,7 @@ impl QuayRead for BTreeMapQuay {
         required_space: SpaceLength,
         search_range: SpaceInterval,
     ) -> Self::FreeIter<'_> {
-        let (search_start, search_end) = self.clamp(search_range);
+        let (search_start, search_end) = clamp(self.capacity(), search_range);
 
         let pending =
             self.free
@@ -384,7 +381,7 @@ impl QuayRead for BTreeMapQuay {
 impl QuayWrite for BTreeMapQuay {
     #[inline]
     fn free(&mut self, interval: SpaceInterval) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
-        let (start, end) = self.normalize_in_range(interval)?;
+        let (start, end) = normalize_in_range(self.capacity(), interval)?;
         if start >= end {
             return Ok(());
         }
@@ -394,7 +391,7 @@ impl QuayWrite for BTreeMapQuay {
 
     #[inline]
     fn occupy(&mut self, interval: SpaceInterval) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
-        let (start, end) = self.normalize_in_range(interval)?;
+        let (start, end) = normalize_in_range(self.capacity(), interval)?;
         if start >= end {
             return Ok(());
         }
@@ -491,7 +488,7 @@ impl QuayRead for BooleanVecQuay {
         &self,
         interval: SpaceInterval,
     ) -> Result<bool, QuaySpaceIntervalOutOfBoundsError> {
-        let (start_pos, end_pos) = self.normalize_in_range(interval)?;
+        let (start_pos, end_pos) = normalize_in_range(self.capacity(), interval)?;
         if start_pos >= end_pos {
             return Ok(true);
         }
@@ -504,7 +501,7 @@ impl QuayRead for BooleanVecQuay {
         &self,
         interval: SpaceInterval,
     ) -> Result<bool, QuaySpaceIntervalOutOfBoundsError> {
-        let (start_pos, end_pos) = self.normalize_in_range(interval)?;
+        let (start_pos, end_pos) = normalize_in_range(self.capacity(), interval)?;
         if start_pos >= end_pos {
             return Ok(false);
         }
@@ -518,7 +515,7 @@ impl QuayRead for BooleanVecQuay {
         required_space: SpaceLength,
         search_range: SpaceInterval,
     ) -> Self::FreeIter<'_> {
-        let (search_start, search_end) = self.clamp(search_range);
+        let (search_start, search_end) = clamp(self.capacity(), search_range);
         let (s, e) = Self::to_indices((search_start, search_end));
 
         BooleanVecFreeIter {
@@ -533,7 +530,7 @@ impl QuayRead for BooleanVecQuay {
 impl QuayWrite for BooleanVecQuay {
     #[inline]
     fn free(&mut self, space: SpaceInterval) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
-        let (start_pos, end_pos) = self.normalize_in_range(space)?;
+        let (start_pos, end_pos) = normalize_in_range(self.capacity(), space)?;
         if start_pos >= end_pos {
             return Ok(());
         }
@@ -544,7 +541,7 @@ impl QuayWrite for BooleanVecQuay {
 
     #[inline]
     fn occupy(&mut self, space: SpaceInterval) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
-        let (start_pos, end_pos) = self.normalize_in_range(space)?;
+        let (start_pos, end_pos) = normalize_in_range(self.capacity(), space)?;
         if start_pos >= end_pos {
             return Ok(());
         }
@@ -619,7 +616,7 @@ impl BitPackedQuay {
 
     #[inline]
     fn set_range(&mut self, interval: SpaceInterval, make_free: bool) {
-        let (start, end) = self.clamp(interval);
+        let (start, end) = clamp(self.capacity(), interval);
         if start >= end {
             return;
         }
@@ -774,7 +771,7 @@ impl QuayRead for BitPackedQuay {
         &self,
         interval: SpaceInterval,
     ) -> Result<bool, QuaySpaceIntervalOutOfBoundsError> {
-        let (start, end) = self.normalize_in_range(interval)?;
+        let (start, end) = normalize_in_range(self.capacity(), interval)?;
         if start >= end {
             return Ok(true);
         }
@@ -810,7 +807,7 @@ impl QuayRead for BitPackedQuay {
         &self,
         interval: SpaceInterval,
     ) -> Result<bool, QuaySpaceIntervalOutOfBoundsError> {
-        let (start, end) = self.normalize_in_range(interval)?;
+        let (start, end) = normalize_in_range(self.capacity(), interval)?;
         if start >= end {
             return Ok(false);
         }
@@ -847,7 +844,7 @@ impl QuayRead for BitPackedQuay {
         required_space: SpaceLength,
         search_range: SpaceInterval,
     ) -> Self::FreeIter<'_> {
-        let (start, end) = self.clamp(search_range);
+        let (start, end) = clamp(self.capacity(), search_range);
         BitPackedFreeIter {
             quay: self,
             cur: start,
@@ -860,7 +857,7 @@ impl QuayRead for BitPackedQuay {
 impl QuayWrite for BitPackedQuay {
     #[inline]
     fn free(&mut self, space: SpaceInterval) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
-        let (start, end) = self.normalize_in_range(space)?;
+        let (start, end) = normalize_in_range(self.capacity(), space)?;
         if start >= end {
             return Ok(());
         }
@@ -870,7 +867,7 @@ impl QuayWrite for BitPackedQuay {
 
     #[inline]
     fn occupy(&mut self, space: SpaceInterval) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
-        let (start, end) = self.normalize_in_range(space)?;
+        let (start, end) = normalize_in_range(self.capacity(), space)?;
         if start >= end {
             return Ok(());
         }
