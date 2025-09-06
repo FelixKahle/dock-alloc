@@ -592,35 +592,44 @@ where
             || self.berth_occupancy.has_key_at(time_point)
     }
 
-    #[inline]
     fn free_runs_at(&self, time_point: TimePoint<T>) -> Self::FreeRunsIter<'_> {
         let free_overlay_set = self.free_by_time.get(&time_point);
         let occupied_overlay_set = self.occupied_by_time.get(&time_point);
+
         if free_overlay_set.is_none() && occupied_overlay_set.is_none() {
             return OverlayRunsIter::Base(self.berth_occupancy.free_runs_at(time_point));
         }
 
         let base_iter = self.berth_occupancy.free_runs_at(time_point);
-        let (base_lo, base_hi) = base_iter.size_hint();
-        let base_cap = base_hi.unwrap_or(base_lo);
+        let (lo, hi) = base_iter.size_hint();
+        let est_base = hi.unwrap_or(lo);
 
         let free_len = free_overlay_set.map(|s| s.len()).unwrap_or(0);
-        let occupied_len = occupied_overlay_set.map(|s| s.len()).unwrap_or(0);
+        let occ_len = occupied_overlay_set.map(|s| s.len()).unwrap_or(0);
 
-        // This logic calculates `(base U free) - occupied` efficiently by reusing buffers.
-        let mut runs = SpaceIntervalSet::with_capacity(base_cap);
+        let mut runs = SpaceIntervalSet::with_capacity(est_base.max(free_len).max(occ_len));
         runs.clear_and_fill_from_iter(base_iter);
-        let mut buffer =
-            SpaceIntervalSet::with_capacity(runs.len().saturating_add(free_len.max(occupied_len)));
 
-        if let Some(free_set) = free_overlay_set {
-            runs.union_into(free_set, &mut buffer);
-            core::mem::swap(&mut runs, &mut buffer);
-        }
-
-        if let Some(occupied_set) = occupied_overlay_set {
-            runs.subtract_into(occupied_set, &mut buffer);
-            core::mem::swap(&mut runs, &mut buffer);
+        match (free_overlay_set, occupied_overlay_set) {
+            (Some(free_set), None) => {
+                let mut tmp = SpaceIntervalSet::with_capacity(runs.len() + free_set.len());
+                runs.union_into(free_set, &mut tmp);
+                core::mem::swap(&mut runs, &mut tmp);
+            }
+            (None, Some(occ_set)) => {
+                let mut tmp = SpaceIntervalSet::with_capacity(runs.len());
+                runs.subtract_into(occ_set, &mut tmp);
+                core::mem::swap(&mut runs, &mut tmp);
+            }
+            (Some(free_set), Some(occ_set)) => {
+                let mut tmp = SpaceIntervalSet::with_capacity(runs.len() + free_set.len());
+                runs.union_into(free_set, &mut tmp);
+                core::mem::swap(&mut runs, &mut tmp);
+                tmp.clear();
+                runs.subtract_into(occ_set, &mut tmp);
+                core::mem::swap(&mut runs, &mut tmp);
+            }
+            _ => {}
         }
 
         OverlayRunsIter::Owned(runs.into_intervals().into_iter())
@@ -979,7 +988,7 @@ mod iterators {
         FreeSlot, SliceView, SpaceInterval, SpaceLength, TimeDelta, TimeInterval, TimePoint,
     };
     use crate::domain::SpaceTimeRectangle;
-    use dock_alloc_core::mem::DoubleBuf;
+    use dock_alloc_core::{iter::MaybeIter, mem::DoubleBuf};
     use num_traits::{One, PrimInt, Signed};
 
     /// An iterator that yields candidate start times for finding free slots.
@@ -1024,34 +1033,29 @@ mod iterators {
         type Item = TimePoint<T>;
 
         fn next(&mut self) -> Option<Self::Item> {
-            let next_candidate = if let Some(last) = self.last_candidate {
-                // After the first, find the next timeline key after the last candidate.
-                if let Some(tp) = self.view.next_key_after(last) {
-                    if tp + self.duration <= self.time_window_end {
-                        Some(tp)
-                    } else {
-                        None
-                    }
-                } else if self.duration.is_zero()
-                    && last < self.time_window_end
-                    && self.view.has_key_at(self.time_window_end)
-                {
-                    // Special case for zero-duration check at the very end of the window.
-                    Some(self.time_window_end)
-                } else {
-                    None
-                }
-            } else {
-                // First candidate is the start of the window, if it fits.
-                if self.first_candidate + self.duration <= self.time_window_end {
-                    Some(self.first_candidate)
-                } else {
-                    None
-                }
-            };
+            let end = self.time_window_end;
 
-            self.last_candidate = next_candidate;
-            next_candidate
+            if self.last_candidate.is_none() {
+                let first = self.first_candidate;
+                if first + self.duration <= end {
+                    self.last_candidate = Some(first);
+                    return self.last_candidate;
+                }
+                return None;
+            }
+
+            let last = self.last_candidate.unwrap();
+            if let Some(tp) = self.view.next_key_after(last) {
+                if tp + self.duration <= end {
+                    self.last_candidate = Some(tp);
+                    return self.last_candidate;
+                }
+            } else if self.duration.is_zero() && last < end && self.view.has_key_at(end) {
+                self.last_candidate = Some(end);
+                return self.last_candidate;
+            }
+
+            None
         }
     }
 
@@ -1086,6 +1090,8 @@ mod iterators {
             bounds: SpaceInterval,
         ) -> Self {
             let duration = duration.max(TimeDelta::zero());
+            let invalid =
+                required > bounds.length() || time_window.start() + duration > time_window.end();
             Self {
                 view,
                 duration,
@@ -1095,7 +1101,7 @@ mod iterators {
                 runs: DoubleBuf::new(),
                 current_start: None,
                 emit_idx: 0,
-                is_empty: required > bounds.length(),
+                is_empty: invalid,
             }
         }
 
@@ -1174,32 +1180,72 @@ mod iterators {
         let tw_start = time_window.start();
         let latest_start = time_window.end() - duration;
 
-        // Breakpoints from the left edge of the window crossing a key.
-        let mut bps_left = collect_keys(view, tw_start, latest_start);
+        if tw_start > latest_start {
+            return Vec::new();
+        }
 
-        // Breakpoints from the right edge of the window crossing a key.
-        // This happens at `t = key - duration`. We add `one` to handle the
-        // discrete nature of time and half-open intervals correctly, ensuring
-        // that the state change is captured in the correct segment.
+        // Left-edge crossings: (tw_start, latest_start)
+        let bps_left = collect_keys(view, tw_start, latest_start);
+
+        // Right-edge crossings: keys in [tw_start+dur, latest_start+dur], shifted back by dur (+1 tick)
         let shifted_left = tw_start + duration;
         let shifted_right = latest_start + duration;
         let one = TimeDelta::new(T::one());
-        let mut bps_right_shifted: Vec<_> =
-            collect_keys_left_inclusive(view, shifted_left, shifted_right)
-                .into_iter()
-                .map(|t| t - duration + one)
-                .filter(|&t| t > tw_start && t <= latest_start)
-                .collect();
 
-        let mut breakpoints = Vec::with_capacity(2 + bps_left.len() + bps_right_shifted.len());
-        breakpoints.push(tw_start);
-        breakpoints.append(&mut bps_left);
-        breakpoints.append(&mut bps_right_shifted);
-        breakpoints.push(latest_start);
+        let bps_right: Vec<_> = collect_keys_left_inclusive(view, shifted_left, shifted_right)
+            .into_iter()
+            .map(|t| t - duration + one)
+            .filter(|&t| t > tw_start && t <= latest_start)
+            .collect();
 
-        breakpoints.sort_unstable_by_key(|t| t.value());
-        breakpoints.dedup_by_key(|t| t.value());
-        breakpoints
+        // Merge-dedup two sorted sequences.
+        let mut out = Vec::with_capacity(2 + bps_left.len() + bps_right.len());
+        out.push(tw_start);
+
+        let mut i = 0usize;
+        let mut j = 0usize;
+        let mut last: Option<TimePoint<T>> = out.last().copied(); // or None if you prefer
+
+        #[inline]
+        fn push_if_new<Tp: Copy>(out: &mut Vec<Tp>, last: &mut Option<Tp>, x: Tp)
+        where
+            Tp: PartialEq,
+        {
+            if Some(x) != *last {
+                out.push(x);
+                *last = Some(x);
+            }
+        }
+
+        // Merge while both have items
+        while i < bps_left.len() && j < bps_right.len() {
+            let a = bps_left[i];
+            let b = bps_right[j];
+            if a <= b {
+                i += 1;
+                push_if_new(&mut out, &mut last, a);
+            } else {
+                j += 1;
+                push_if_new(&mut out, &mut last, b);
+            }
+        }
+
+        // Drain leftovers
+        while i < bps_left.len() {
+            let a = bps_left[i];
+            i += 1;
+            push_if_new(&mut out, &mut last, a);
+        }
+        while j < bps_right.len() {
+            let b = bps_right[j];
+            j += 1;
+            push_if_new(&mut out, &mut last, b);
+        }
+
+        if Some(latest_start) != last {
+            out.push(latest_start);
+        }
+        out
     }
 
     /// Collects timeline keys in the half-open interval `[from, to)`.
@@ -1417,9 +1463,13 @@ mod iterators {
         T: PrimInt + Signed,
         V: SliceView<T> + ?Sized + 'v,
     {
-        view.free_runs_at(time_point)
-            .filter_map(move |iv| bounds.intersection(&iv))
-            .filter(move |iv| iv.length() >= min_len)
+        let inner = (bounds.length() >= min_len).then(|| {
+            view.free_runs_at(time_point)
+                .filter_map(move |iv| bounds.intersection(&iv))
+                .filter(move |iv| iv.length() >= min_len)
+        });
+
+        MaybeIter::new(inner)
     }
 
     /// An iterator that intersects two sorted, non-overlapping iterators of `SpaceInterval`.
@@ -1467,20 +1517,23 @@ mod iterators {
                 if self.cur_right.is_none() {
                     self.cur_right = self.right.next();
                 }
-                let (left_interval, right_interval) = match (self.cur_left, self.cur_right) {
+                let (a, b) = match (self.cur_left, self.cur_right) {
                     (Some(a), Some(b)) => (a, b),
                     _ => return None,
                 };
-                let intersection = left_interval.intersection(&right_interval);
-                if left_interval.end() < right_interval.end() {
+
+                let inter = a.intersection(&b);
+
+                // Use <= so equal-end intervals advance left, avoiding an extra cycle.
+                if a.end() <= b.end() {
                     self.cur_left = None;
                 } else {
                     self.cur_right = None;
                 }
 
-                if let Some(interval) = intersection {
-                    if interval.length() >= self.required {
-                        return Some(interval);
+                if let Some(iv) = inter {
+                    if iv.length() >= self.required {
+                        return Some(iv);
                     }
                 }
             }

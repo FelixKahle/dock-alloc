@@ -19,7 +19,35 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-pub mod domain;
-pub mod iter;
-pub mod mem;
-pub mod primitives;
+#[derive(Debug, Clone)]
+pub struct MaybeIter<T> {
+    inner: Option<T>,
+}
+
+impl<T> MaybeIter<T> {
+    #[inline]
+    pub fn new(inner: Option<T>) -> Self {
+        Self { inner }
+    }
+}
+
+impl<I: Iterator> Iterator for MaybeIter<I> {
+    type Item = I::Item;
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.as_mut()?.next()
+    }
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.as_ref().map_or((0, Some(0)), |i| i.size_hint())
+    }
+}
+
+impl<I: Iterator + std::iter::FusedIterator> std::iter::FusedIterator for MaybeIter<I> {}
+
+impl<I: ExactSizeIterator> ExactSizeIterator for MaybeIter<I> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.inner.as_ref().map_or(0, |i| i.len())
+    }
+}
