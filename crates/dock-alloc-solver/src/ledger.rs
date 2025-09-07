@@ -19,8 +19,9 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use dock_alloc_core::domain::{
-    Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
+use dock_alloc_core::{
+    domain::{Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint},
+    marker::Brand,
 };
 use dock_alloc_model::{
     Assignment, FixedAssignment, MoveableRequest, Problem, Request, RequestId, Solution,
@@ -34,7 +35,7 @@ use std::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MovableHandle<'brand> {
     id: RequestId,
-    _phantom: PhantomData<&'brand ()>,
+    _brand: Brand<'brand>,
 }
 
 impl<'brand> MovableHandle<'brand> {
@@ -42,7 +43,7 @@ impl<'brand> MovableHandle<'brand> {
     fn new(id: RequestId) -> Self {
         Self {
             id,
-            _phantom: PhantomData,
+            _brand: Brand::new(),
         }
     }
 
@@ -61,7 +62,7 @@ impl<'brand> std::fmt::Display for MovableHandle<'brand> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FixedHandle<'brand> {
     id: RequestId,
-    _phantom: PhantomData<&'brand ()>,
+    _brand: Brand<'brand>,
 }
 
 impl<'brand> FixedHandle<'brand> {
@@ -69,7 +70,7 @@ impl<'brand> FixedHandle<'brand> {
     fn new(id: RequestId) -> Self {
         Self {
             id,
-            _phantom: PhantomData,
+            _brand: Brand::new(),
         }
     }
 
@@ -353,7 +354,7 @@ where
     pub fn iter_movable_handles(&self) -> impl Iterator<Item = MovableHandle<'brand>> + '_ {
         self.committed.keys().map(|&rid| MovableHandle {
             id: rid,
-            _phantom: PhantomData,
+            _brand: Brand::new(),
         })
     }
 
@@ -487,13 +488,13 @@ where
             assignment: assignment.clone(),
             handle: MovableHandle {
                 id,
-                _phantom: PhantomData,
+                _brand: Brand::new(),
             },
             _phantom: PhantomData,
         };
 
         if let Some(existing) = self.staged_commits.get(&id) {
-            if *existing == new_ma {
+            if existing.assignment == new_ma.assignment {
                 return Ok(existing.clone());
             }
             return Err(StageError::AlreadyStagedCommit(id));
@@ -930,12 +931,11 @@ mod ledger_overlay_tests {
         let problem = b.build();
         let ledger = AssignmentLedger::from(&problem);
 
-        // dummy MA for r1 (not in base)
         let dummy_ma = BrandedMoveableAssignment {
             assignment: asg(&r1, 0, 0),
             handle: MovableHandle {
                 id: r1.id(),
-                _phantom: PhantomData,
+                _brand: Brand::new(),
             },
             _phantom: PhantomData,
         };

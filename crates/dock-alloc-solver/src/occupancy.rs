@@ -19,6 +19,7 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+use self::iterators::{FeasibleRegionIter, FreeSlotIter};
 use crate::domain::SpaceTimeRectangle;
 use crate::intervalset::IntervalSet;
 use crate::quay::{Quay, QuayRead, QuaySpaceIntervalOutOfBoundsError, QuayWrite};
@@ -26,6 +27,7 @@ use crate::timeline::Timeline;
 use dock_alloc_core::domain::{
     SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
 };
+use dock_alloc_core::marker::Brand;
 use dock_alloc_model::Problem;
 use num_traits::{PrimInt, Signed, Zero};
 use std::collections::BTreeMap;
@@ -33,7 +35,21 @@ use std::iter::{Copied, FusedIterator, Peekable};
 use std::marker::PhantomData;
 use std::ops::Bound::{Excluded, Unbounded};
 
-use self::iterators::{FeasibleRegionIter, FreeSlotIter};
+pub struct BrandedFreeSlot<'brand, T>
+where
+    T: PrimInt + Signed,
+{
+    slot: FreeSlot<T>,
+    _brand: Brand<'brand>,
+}
+
+pub struct BrandedFreeRegion<'brand, T>
+where
+    T: PrimInt + Signed,
+{
+    region: SpaceTimeRectangle<T>,
+    _brand: Brand<'brand>,
+}
 
 /// A trait for querying the occupancy state of a quay at different points in time.
 ///

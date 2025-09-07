@@ -1,7 +1,23 @@
 // Copyright (c) 2025 Felix Kahle.
-// ... (license header)
-
-#![allow(dead_code)]
+//
+// Permission is hereby granted, free of charge, to any person obtaining
+// a copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to
+// permit persons to whom the Software is furnished to do so, subject to
+// the following conditions:
+//
+// The above copyright notice and this permission notice shall be
+// included in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use std::collections::BTreeMap;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
@@ -324,15 +340,6 @@ mod tests {
             actual_map, expected_map,
             "Timeline's internal state does not match expected state."
         );
-    }
-
-    /// Creates a sample timeline using the public `insert_key` method.
-    fn sample_timeline() -> Timeline<i32, i32> {
-        let mut timeline = Timeline::new(0, 100);
-        timeline.insert_key(10, 200);
-        timeline.insert_key(20, 100);
-        timeline.insert_key(30, 300);
-        timeline
     }
 
     #[test]
