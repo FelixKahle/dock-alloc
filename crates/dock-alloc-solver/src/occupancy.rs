@@ -35,6 +35,7 @@ use std::iter::{Copied, FusedIterator, Peekable};
 use std::marker::PhantomData;
 use std::ops::Bound::{Excluded, Unbounded};
 
+#[allow(dead_code)]
 pub struct BrandedFreeSlot<'brand, T>
 where
     T: PrimInt + Signed,
@@ -43,6 +44,7 @@ where
     _brand: Brand<'brand>,
 }
 
+#[allow(dead_code)]
 pub struct BrandedFreeRegion<'brand, T>
 where
     T: PrimInt + Signed,
