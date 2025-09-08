@@ -279,38 +279,47 @@ impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> Request<K, T, C> {
     pub fn id(&self) -> RequestId {
         self.id
     }
+
     #[inline]
     pub fn typed_id(&self) -> K::Id {
         self.id.into()
     }
+
     #[inline]
     pub fn length(&self) -> SpaceLength {
         self.length
     }
+
     #[inline]
     pub fn arrival_time(&self) -> TimePoint<T> {
         self.feasible_time_window.start()
     }
+
     #[inline]
     pub fn processing_duration(&self) -> TimeDelta<T> {
         self.processing_duration
     }
+
     #[inline]
     pub fn target_position(&self) -> SpacePosition {
         self.target_position
     }
+
     #[inline]
     pub fn cost_per_delay(&self) -> Cost<C> {
         self.cost_per_delay
     }
+
     #[inline]
     pub fn cost_per_position_deviation(&self) -> Cost<C> {
         self.cost_per_position_deviation
     }
+
     #[inline]
     pub fn feasible_time_window(&self) -> TimeInterval<T> {
         self.feasible_time_window
     }
+
     #[inline]
     pub fn feasible_space_window(&self) -> SpaceInterval {
         self.feasible_space_window
@@ -371,19 +380,6 @@ where
 
 impl<'r, K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> Assignment<'r, K, T, C> {
     #[inline]
-    pub fn borrowed(
-        request: &'r Request<K, T, C>,
-        start_position: SpacePosition,
-        start_time: TimePoint<T>,
-    ) -> Self {
-        Self {
-            request: Cow::Borrowed(request),
-            start_position,
-            start_time,
-        }
-    }
-
-    #[inline]
     pub fn owned(
         request: Request<K, T, C>,
         start_position: SpacePosition,
@@ -397,10 +393,20 @@ impl<'r, K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> Assignment<'r, K, T,
     }
 
     #[inline]
-    pub fn into_owned(self) -> Assignment<'static, K, T, C>
-    where
-        Request<K, T, C>: Clone,
-    {
+    pub fn borrowed(
+        request: &'r Request<K, T, C>,
+        start_position: SpacePosition,
+        start_time: TimePoint<T>,
+    ) -> Self {
+        Self {
+            request: Cow::Borrowed(request),
+            start_position,
+            start_time,
+        }
+    }
+
+    #[inline]
+    pub fn into_owned(self) -> Assignment<'static, K, T, C> {
         Assignment {
             request: Cow::Owned(self.request.into_owned()),
             start_position: self.start_position,
@@ -450,189 +456,383 @@ impl<'r, K: Kind, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> 
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct RequestAny<T = i64, C = i64>
+pub enum AnyRequest<T = i64, C = i64>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    id: RequestId,
-    length: SpaceLength,
-    processing_duration: TimeDelta<T>,
-    target_position: SpacePosition,
-    cost_per_delay: Cost<C>,
-    cost_per_position_deviation: Cost<C>,
-    feasible_time_window: TimeInterval<T>,
-    feasible_space_window: SpaceInterval,
+    Movable(Request<Movable, T, C>),
+    Fixed(Request<Fixed, T, C>),
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> RequestAny<T, C> {
-    #[inline]
+impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
     pub fn id(&self) -> RequestId {
-        self.id
+        match self {
+            AnyRequest::Movable(r) => r.id(),
+            AnyRequest::Fixed(r) => r.id(),
+        }
     }
 
     #[inline]
     pub fn length(&self) -> SpaceLength {
-        self.length
+        match self {
+            AnyRequest::Movable(r) => r.length(),
+            AnyRequest::Fixed(r) => r.length(),
+        }
     }
-
     #[inline]
     pub fn arrival_time(&self) -> TimePoint<T> {
-        self.feasible_time_window.start()
+        match self {
+            AnyRequest::Movable(r) => r.arrival_time(),
+            AnyRequest::Fixed(r) => r.arrival_time(),
+        }
     }
-
     #[inline]
     pub fn processing_duration(&self) -> TimeDelta<T> {
-        self.processing_duration
+        match self {
+            AnyRequest::Movable(r) => r.processing_duration(),
+            AnyRequest::Fixed(r) => r.processing_duration(),
+        }
     }
-
     #[inline]
     pub fn target_position(&self) -> SpacePosition {
-        self.target_position
+        match self {
+            AnyRequest::Movable(r) => r.target_position(),
+            AnyRequest::Fixed(r) => r.target_position(),
+        }
     }
-
     #[inline]
     pub fn cost_per_delay(&self) -> Cost<C> {
-        self.cost_per_delay
+        match self {
+            AnyRequest::Movable(r) => r.cost_per_delay(),
+            AnyRequest::Fixed(r) => r.cost_per_delay(),
+        }
     }
-
     #[inline]
     pub fn cost_per_position_deviation(&self) -> Cost<C> {
-        self.cost_per_position_deviation
+        match self {
+            AnyRequest::Movable(r) => r.cost_per_position_deviation(),
+            AnyRequest::Fixed(r) => r.cost_per_position_deviation(),
+        }
     }
-
     #[inline]
     pub fn feasible_time_window(&self) -> TimeInterval<T> {
-        self.feasible_time_window
+        match self {
+            AnyRequest::Movable(r) => r.feasible_time_window(),
+            AnyRequest::Fixed(r) => r.feasible_time_window(),
+        }
     }
-
     #[inline]
     pub fn feasible_space_window(&self) -> SpaceInterval {
-        self.feasible_space_window
-    }
-}
-
-impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> From<&Request<K, T, C>>
-    for RequestAny<T, C>
-{
-    fn from(r: &Request<K, T, C>) -> Self {
-        Self {
-            id: r.id(),
-            length: r.length(),
-            processing_duration: r.processing_duration(),
-            target_position: r.target_position(),
-            cost_per_delay: r.cost_per_delay(),
-            cost_per_position_deviation: r.cost_per_position_deviation(),
-            feasible_time_window: r.feasible_time_window(),
-            feasible_space_window: r.feasible_space_window(),
+        match self {
+            AnyRequest::Movable(r) => r.feasible_space_window(),
+            AnyRequest::Fixed(r) => r.feasible_space_window(),
         }
     }
 }
 
-impl<T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> Display for RequestAny<T, C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "RequestAny(id: {}, length: {}, processing_duration: {}, target_position: {}, \
-             cost_per_delay: {}, cost_per_position_deviation: {}, feasible_time_window: {}, \
-             feasible_space_window: {})",
-            self.id,
-            self.length,
-            self.processing_duration,
-            self.target_position,
-            self.cost_per_delay,
-            self.cost_per_position_deviation,
-            self.feasible_time_window,
-            self.feasible_space_window
-        )
+impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Request<Movable, T, C>> for AnyRequest<T, C> {
+    fn from(r: Request<Movable, T, C>) -> Self {
+        AnyRequest::Movable(r)
+    }
+}
+
+impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Request<Fixed, T, C>> for AnyRequest<T, C> {
+    fn from(r: Request<Fixed, T, C>) -> Self {
+        AnyRequest::Fixed(r)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AssignmentAny<'r, T = i64, C = i64>
+pub enum AnyRequestRef<'a, T = i64, C = i64>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    request: Cow<'r, RequestAny<T, C>>,
+    Movable(&'a Request<Movable, T, C>),
+    Fixed(&'a Request<Fixed, T, C>),
+}
+
+impl<'a, T, C> AnyRequestRef<'a, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    pub fn id(&self) -> RequestId {
+        match self {
+            AnyRequestRef::Movable(r) => r.id(),
+            AnyRequestRef::Fixed(r) => r.id(),
+        }
+    }
+
+    #[inline]
+    pub fn length(&self) -> SpaceLength {
+        match self {
+            AnyRequestRef::Movable(r) => r.length(),
+            AnyRequestRef::Fixed(r) => r.length(),
+        }
+    }
+    #[inline]
+    pub fn arrival_time(&self) -> TimePoint<T> {
+        match self {
+            AnyRequestRef::Movable(r) => r.arrival_time(),
+            AnyRequestRef::Fixed(r) => r.arrival_time(),
+        }
+    }
+    #[inline]
+    pub fn processing_duration(&self) -> TimeDelta<T> {
+        match self {
+            AnyRequestRef::Movable(r) => r.processing_duration(),
+            AnyRequestRef::Fixed(r) => r.processing_duration(),
+        }
+    }
+    #[inline]
+    pub fn target_position(&self) -> SpacePosition {
+        match self {
+            AnyRequestRef::Movable(r) => r.target_position(),
+            AnyRequestRef::Fixed(r) => r.target_position(),
+        }
+    }
+    #[inline]
+    pub fn cost_per_delay(&self) -> Cost<C> {
+        match self {
+            AnyRequestRef::Movable(r) => r.cost_per_delay(),
+            AnyRequestRef::Fixed(r) => r.cost_per_delay(),
+        }
+    }
+    #[inline]
+    pub fn cost_per_position_deviation(&self) -> Cost<C> {
+        match self {
+            AnyRequestRef::Movable(r) => r.cost_per_position_deviation(),
+            AnyRequestRef::Fixed(r) => r.cost_per_position_deviation(),
+        }
+    }
+    #[inline]
+    pub fn feasible_time_window(&self) -> TimeInterval<T> {
+        match self {
+            AnyRequestRef::Movable(r) => r.feasible_time_window(),
+            AnyRequestRef::Fixed(r) => r.feasible_time_window(),
+        }
+    }
+    #[inline]
+    pub fn feasible_space_window(&self) -> SpaceInterval {
+        match self {
+            AnyRequestRef::Movable(r) => r.feasible_space_window(),
+            AnyRequestRef::Fixed(r) => r.feasible_space_window(),
+        }
+    }
+}
+
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Request<Movable, T, C>>
+    for AnyRequestRef<'a, T, C>
+{
+    fn from(r: &'a Request<Movable, T, C>) -> Self {
+        AnyRequestRef::Movable(r)
+    }
+}
+
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Request<Fixed, T, C>>
+    for AnyRequestRef<'a, T, C>
+{
+    fn from(r: &'a Request<Fixed, T, C>) -> Self {
+        AnyRequestRef::Fixed(r)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AnyAssignment<T = i64, C = i64>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    request: AnyRequest<T, C>,
     start_position: SpacePosition,
     start_time: TimePoint<T>,
 }
 
-impl<'r, T: PrimInt + Signed, C: PrimInt + Signed> AssignmentAny<'r, T, C> {
-    #[inline]
-    pub fn borrowed(req: &'r RequestAny<T, C>, p: SpacePosition, t: TimePoint<T>) -> Self {
+impl<T, C> AnyAssignment<T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    fn new(
+        request: AnyRequest<T, C>,
+        start_position: SpacePosition,
+        start_time: TimePoint<T>,
+    ) -> Self {
         Self {
-            request: Cow::Borrowed(req),
-            start_position: p,
-            start_time: t,
+            request,
+            start_position,
+            start_time,
         }
     }
-    #[inline]
-    pub fn owned(req: RequestAny<T, C>, p: SpacePosition, t: TimePoint<T>) -> Self {
-        Self {
-            request: Cow::Owned(req),
-            start_position: p,
-            start_time: t,
-        }
+
+    pub fn id(&self) -> RequestId {
+        self.request.id()
     }
-    #[inline]
-    pub fn into_owned(self) -> AssignmentAny<'static, T, C> {
-        AssignmentAny {
-            request: Cow::Owned(self.request.into_owned()),
-            start_position: self.start_position,
-            start_time: self.start_time,
-        }
-    }
-    #[inline]
-    pub fn request(&self) -> &RequestAny<T, C> {
+
+    pub fn request(&self) -> &AnyRequest<T, C> {
         &self.request
     }
 
-    #[inline]
     pub fn start_position(&self) -> SpacePosition {
         self.start_position
     }
 
-    #[inline]
     pub fn start_time(&self) -> TimePoint<T> {
         self.start_time
     }
 
-    #[inline]
+    pub fn into_ref<'a>(&'a self) -> AnyAssignmentRef<'a, T, C> {
+        let request = match &self.request {
+            AnyRequest::Movable(r) => AnyRequestRef::Movable(r),
+            AnyRequest::Fixed(r) => AnyRequestRef::Fixed(r),
+        };
+        AnyAssignmentRef {
+            request,
+            start_position: self.start_position,
+            start_time: self.start_time,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AnyAssignmentRef<'a, T = i64, C = i64>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    request: AnyRequestRef<'a, T, C>,
+    start_position: SpacePosition,
+    start_time: TimePoint<T>,
+}
+
+impl<'a, T, C> AnyAssignmentRef<'a, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    fn new(
+        request: AnyRequestRef<'a, T, C>,
+        start_position: SpacePosition,
+        start_time: TimePoint<T>,
+    ) -> Self {
+        Self {
+            request,
+            start_position,
+            start_time,
+        }
+    }
+
     pub fn id(&self) -> RequestId {
         self.request.id()
     }
-}
 
-impl<'r, K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<'r, K, T, C>>
-    for AssignmentAny<'r, T, C>
-{
-    fn from(a: &Assignment<'r, K, T, C>) -> Self {
-        let req_any: RequestAny<T, C> = RequestAny::from(a.request());
-        AssignmentAny::owned(req_any, a.start_position(), a.start_time())
+    pub fn request(&self) -> &AnyRequestRef<'a, T, C> {
+        &self.request
+    }
+
+    pub fn start_position(&self) -> SpacePosition {
+        self.start_position
+    }
+
+    pub fn start_time(&self) -> TimePoint<T> {
+        self.start_time
+    }
+
+    pub fn into_owned(self) -> AnyAssignment<T, C> {
+        let request = match self.request {
+            AnyRequestRef::Movable(r) => AnyRequest::Movable(r.clone()),
+            AnyRequestRef::Fixed(r) => AnyRequest::Fixed(r.clone()),
+        };
+        AnyAssignment {
+            request,
+            start_position: self.start_position,
+            start_time: self.start_time,
+        }
+    }
+
+    pub fn to_owned(&self) -> AnyAssignment<T, C> {
+        let request = match self.request {
+            AnyRequestRef::Movable(r) => AnyRequest::Movable(r.clone()),
+            AnyRequestRef::Fixed(r) => AnyRequest::Fixed(r.clone()),
+        };
+        AnyAssignment::new(request, self.start_position, self.start_time)
     }
 }
 
-impl<'r, K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<'r, K, T, C>>
-    for AssignmentAny<'r, T, C>
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<'a, Movable, T, C>>
+    for AnyAssignmentRef<'a, T, C>
 {
-    fn from(a: Assignment<'r, K, T, C>) -> Self {
-        let req_any: RequestAny<T, C> = RequestAny::from(a.request.as_ref());
-        AssignmentAny::owned(req_any, a.start_position, a.start_time)
+    #[inline]
+    fn from(a: &'a Assignment<'a, Movable, T, C>) -> Self {
+        AnyAssignmentRef::new(
+            AnyRequestRef::Movable(a.request()),
+            a.start_position(),
+            a.start_time(),
+        )
     }
 }
 
-impl<'r, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> Display
-    for AssignmentAny<'r, T, C>
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<'a, Fixed, T, C>>
+    for AnyAssignmentRef<'a, T, C>
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "AssignmentAny(request_id: {}, start_position: {}, start_time: {})",
-            self.request.id(),
-            self.start_position,
-            self.start_time
+    #[inline]
+    fn from(a: &'a Assignment<'a, Fixed, T, C>) -> Self {
+        AnyAssignmentRef::new(
+            AnyRequestRef::Fixed(a.request()),
+            a.start_position(),
+            a.start_time(),
+        )
+    }
+}
+
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<'a, Movable, T, C>>
+    for AnyAssignment<T, C>
+{
+    #[inline]
+    fn from(a: &Assignment<'a, Movable, T, C>) -> Self {
+        AnyAssignment::new(
+            AnyRequest::Movable(a.request().clone()),
+            a.start_position(),
+            a.start_time(),
+        )
+    }
+}
+
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<'a, Fixed, T, C>>
+    for AnyAssignment<T, C>
+{
+    #[inline]
+    fn from(a: &Assignment<'a, Fixed, T, C>) -> Self {
+        AnyAssignment::new(
+            AnyRequest::Fixed(a.request().clone()),
+            a.start_position(),
+            a.start_time(),
+        )
+    }
+}
+
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<'a, Movable, T, C>>
+    for AnyAssignment<T, C>
+{
+    fn from(a: Assignment<'a, Movable, T, C>) -> Self {
+        AnyAssignment::new(
+            AnyRequest::Movable(a.request().clone()),
+            a.start_position(),
+            a.start_time(),
+        )
+    }
+}
+
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<'a, Fixed, T, C>>
+    for AnyAssignment<T, C>
+{
+    fn from(a: Assignment<'a, Fixed, T, C>) -> Self {
+        AnyAssignment::new(
+            AnyRequest::Fixed(a.request().clone()),
+            a.start_position(),
+            a.start_time(),
         )
     }
 }
@@ -873,10 +1073,10 @@ impl<'p, T: PrimInt + Signed, C: PrimInt + Signed> Problem<'p, T, C> {
     }
 
     #[inline]
-    pub fn iter_requests_any(&self) -> impl Iterator<Item = RequestAny<T, C>> + '_ {
+    pub fn iter_any_requests(&self) -> impl Iterator<Item = AnyRequestRef<'_, T, C>> + '_ {
         self.iter_movable_requests()
-            .map(RequestAny::from)
-            .chain(self.iter_fixed_requests().map(RequestAny::from))
+            .map(AnyRequestRef::from)
+            .chain(self.iter_fixed_requests().map(AnyRequestRef::from))
     }
 
     #[inline]
@@ -1029,34 +1229,76 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> SolutionStats<T, C> {
     }
 }
 
+pub struct OwnedSolution<T = i64, C = i64>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    decisions: HashMap<RequestId, AnyAssignment<T, C>>,
+    stats: SolutionStats<T, C>,
+}
+
+impl<T, C> OwnedSolution<T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    fn new(decisions: HashMap<RequestId, AnyAssignment<T, C>>, stats: SolutionStats<T, C>) -> Self {
+        Self { decisions, stats }
+    }
+
+    #[inline]
+    pub fn stats(&self) -> &SolutionStats<T, C> {
+        &self.stats
+    }
+
+    #[inline]
+    pub fn decisions(&self) -> &HashMap<RequestId, AnyAssignment<T, C>> {
+        &self.decisions
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Solution<T = i64, C = i64>
+pub struct SolutionRef<'a, T = i64, C = i64>
 where
     T: PrimInt + Signed + 'static,
     C: PrimInt + Signed + 'static,
 {
-    decisions: HashMap<RequestId, AssignmentAny<'static, T, C>>,
+    decisions: HashMap<RequestId, AnyAssignmentRef<'a, T, C>>,
     stats: SolutionStats<T, C>,
 }
 
-impl<T, C> Solution<T, C>
+impl<'a, T, C> SolutionRef<'a, T, C>
 where
-    T: PrimInt + Signed + 'static,
-    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize> + 'static,
+    T: PrimInt + Signed,
+    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
 {
+    pub fn new(
+        assignments: HashMap<RequestId, AnyAssignmentRef<'a, T, C>>,
+        stats: SolutionStats<T, C>,
+    ) -> Self {
+        Self {
+            decisions: assignments,
+            stats,
+        }
+    }
+
     #[inline]
-    pub fn from_assignments(assignments: HashMap<RequestId, AssignmentAny<'static, T, C>>) -> Self {
+    pub fn from_assignments(assignments: HashMap<RequestId, AnyAssignmentRef<'a, T, C>>) -> Self {
         let mut total_wait = TimeDelta::<T>::new(T::zero());
         let mut total_dev = SpaceLength::new(0);
         let mut total_cost = Cost::<C>::new(C::zero());
 
         for a in assignments.values() {
             let r = a.request();
+
             let wait = (a.start_time() - r.arrival_time())
                 .clamp(TimeDelta::zero(), TimeDelta::new(T::max_value()));
             total_wait += wait;
+
             let dev = a.start_position() - r.target_position();
             total_dev += dev;
+
             let wait_cost = {
                 let scalar: C = C::try_from(wait.value())
                     .ok()
@@ -1069,13 +1311,14 @@ where
                     .expect("dev does not fit in C");
                 r.cost_per_position_deviation() * scalar
             };
+
             total_cost = total_cost + wait_cost + dev_cost;
         }
 
-        Self {
-            decisions: assignments,
-            stats: SolutionStats::new(total_cost, total_wait, total_dev),
-        }
+        Self::new(
+            assignments,
+            SolutionStats::new(total_cost, total_wait, total_dev),
+        )
     }
 
     #[inline]
@@ -1084,8 +1327,47 @@ where
     }
 
     #[inline]
-    pub fn decisions(&self) -> &HashMap<RequestId, AssignmentAny<'_, T, C>> {
+    pub fn decisions(&self) -> &HashMap<RequestId, AnyAssignmentRef<'_, T, C>> {
         &self.decisions
+    }
+}
+
+impl<'a, T, C> SolutionRef<'a, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    #[inline]
+    pub fn to_owned(&self) -> OwnedSolution<T, C> {
+        let owned_decisions = self
+            .decisions
+            .iter()
+            .map(|(&id, a)| (id, a.to_owned()))
+            .collect();
+
+        OwnedSolution::new(owned_decisions, self.stats)
+    }
+
+    #[inline]
+    pub fn into_owned(self) -> OwnedSolution<T, C> {
+        let owned_decisions = self
+            .decisions
+            .into_iter()
+            .map(|(id, a)| (id, a.into_owned()))
+            .collect();
+
+        OwnedSolution::new(owned_decisions, self.stats)
+    }
+}
+
+impl<'a, T, C> From<&SolutionRef<'a, T, C>> for OwnedSolution<T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    #[inline]
+    fn from(s: &SolutionRef<'a, T, C>) -> Self {
+        s.to_owned()
     }
 }
 
@@ -1286,14 +1568,6 @@ mod tests {
         // fixed assignments exist
         assert_eq!(p.iter_fixed_assignments().count(), 1);
 
-        // Build a "solution" example: include fixed + one movable placed
-        let a_fixed = p
-            .preassigned()
-            .values()
-            .next()
-            .unwrap()
-            .clone()
-            .into_owned();
         // place r1 at (0,0)
         let a_r1 = Assignment::borrowed(
             p.get_movable(MovableRequestId::from(RequestId::new(1)))
@@ -1302,11 +1576,15 @@ mod tests {
             TimePoint::new(0),
         );
 
-        let mut map: HashMap<RequestId, AssignmentAny<'static, Tm, Cm>> = HashMap::new();
-        map.insert(a_fixed.id(), AssignmentAny::from(a_fixed).into_owned());
-        map.insert(a_r1.id(), AssignmentAny::from(a_r1).into_owned());
+        let a_fixed_ref: AnyAssignmentRef<'_, Tm, Cm> =
+            AnyAssignmentRef::from(p.preassigned().values().next().unwrap());
+        let a_r1_ref: AnyAssignmentRef<'_, Tm, Cm> = AnyAssignmentRef::from(&a_r1);
 
-        let sol = Solution::from_assignments(map);
+        let mut map: HashMap<RequestId, AnyAssignmentRef<'_, Tm, Cm>> = HashMap::new();
+        map.insert(a_fixed_ref.id(), a_fixed_ref);
+        map.insert(a_r1_ref.id(), a_r1_ref);
+
+        let sol = SolutionRef::from_assignments(map);
         // Stats are deterministic under unit costs:
         // r_fixed wait 0, dev 0; r1 wait 0, dev |0 - target(0)| = 0
         assert_eq!(sol.stats().total_waiting_time(), TimeDelta::new(0));
@@ -1321,13 +1599,13 @@ mod tests {
     fn assignment_into_erased_roundtrip() {
         let r = req_movable_ok(5, 4, 3, 0, 10, 2, 20);
         let a = asg(&r, 7, 1);
-        let ae: AssignmentAny<'_, Tm, Cm> = AssignmentAny::from(&a);
+        let ae: AnyAssignmentRef<'_, Tm, Cm> = AnyAssignmentRef::from(&a);
         assert_eq!(ae.id(), a.id());
         assert_eq!(ae.start_time(), a.start_time());
         assert_eq!(ae.start_position(), a.start_position());
 
         // owned conversion
-        let a2: AssignmentAny<'_, Tm, Cm> = AssignmentAny::from(a.clone());
+        let a2: AnyAssignment<Tm, Cm> = AnyAssignment::from(a.clone());
         assert_eq!(a2.id(), a.id());
     }
 
@@ -1348,7 +1626,7 @@ mod tests {
 
         // start at t=9 (wait=4), position=13 (dev=3)
         let a = Assignment::borrowed(&r, SpacePosition::new(13), TimePoint::new(9));
-        let ae: AssignmentAny<'_, Tm, Cm> = AssignmentAny::from(&a);
+        let ae: AnyAssignmentRef<'_, Tm, Cm> = AnyAssignmentRef::from(&a);
 
         // replicate Solution math
         let wait = (ae.start_time() - ae.request().arrival_time())
@@ -1359,8 +1637,8 @@ mod tests {
         assert_eq!(dev, SpaceLength::new(3));
 
         let mut map = HashMap::new();
-        map.insert(ae.id(), ae.into_owned());
-        let sol = Solution::from_assignments(map);
+        map.insert(ae.id(), ae.clone());
+        let sol = SolutionRef::from_assignments(map);
 
         // expected: cost = 2*4 + 3*3 = 8 + 9 = 17
         assert_eq!(sol.stats().total_cost(), Cost::new(17));

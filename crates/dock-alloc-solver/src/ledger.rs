@@ -24,8 +24,8 @@ use dock_alloc_core::{
     marker::Brand,
 };
 use dock_alloc_model::{
-    Assignment, AssignmentAny, Fixed, FixedRequestId, Movable, MovableRequestId, Problem, Request,
-    RequestId, Solution,
+    AnyAssignmentRef, Assignment, Fixed, FixedRequestId, Movable, MovableRequestId, Problem,
+    Request, RequestId, SolutionRef,
 };
 use num_traits::{PrimInt, Signed};
 use std::collections::{BTreeMap, HashMap};
@@ -390,18 +390,14 @@ where
             .filter(move |req| self.committed.contains_key(&req.typed_id()))
     }
 
-    /// Erased (kind-agnostic) view over all visible assignments in the ledger.
     #[inline]
-    pub fn iter_assignments(&self) -> impl Iterator<Item = AssignmentAny<'_, T, C>> + '_ {
+    pub fn iter_assignments(&self) -> impl Iterator<Item = AnyAssignmentRef<'_, T, C>> + '_ {
         let fixed_iter = self
             .problem
             .preassigned()
             .values()
-            .map(|fixed| AssignmentAny::from(fixed.clone()));
-        let movable_iter = self
-            .committed
-            .values()
-            .map(|ma| AssignmentAny::from(ma.clone()));
+            .map(AnyAssignmentRef::from);
+        let movable_iter = self.committed.values().map(AnyAssignmentRef::from);
         fixed_iter.chain(movable_iter)
     }
 
@@ -548,25 +544,19 @@ where
     where
         'l: 'a,
     {
-        // Ensure the move keeps the same request id.
         debug_assert_eq!(
             old.id(),
             new_asg.typed_id(),
             "move_assignment(): request id mismatch"
         );
 
-        // 1) Stage uncommit of the old placement (creates a tombstone if it was in base).
         self.uncommit_assignment(old)?;
-
-        // 2) Resolve the movable request from this problem.
         let mid: MovableRequestId = new_asg.typed_id();
         let req = self
             .ledger
             .problem
             .get_movable(mid)
             .expect("move_assignment: unknown movable request id");
-
-        // 3) Stage the new placement.
         self.commit_assignment(req, new_asg.start_time(), new_asg.start_position())
     }
 
@@ -632,26 +622,23 @@ where
         self.staged_uncommits.values()
     }
 
-    /// Erased (kind-agnostic) view over all visible assignments in the overlay.
-    pub fn iter_assignments(&'_ self) -> impl Iterator<Item = AssignmentAny<'_, T, C>> + '_ {
+    pub fn iter_assignments(&'_ self) -> impl Iterator<Item = AnyAssignmentRef<'_, T, C>> + '_ {
         let fixed = self
             .ledger
-            .problem()
-            .preassigned()
-            .values()
-            .map(|fx| AssignmentAny::from(fx.clone()));
+            .iter_fixed_assignments()
+            .map(AnyAssignmentRef::from);
         let base = self
             .ledger
-            .iter_committed()
+            .iter_movable_assignments()
             .filter(move |ma| {
                 let id = ma.typed_id();
                 !self.staged_uncommits.contains_key(&id) && !self.staged_commits.contains_key(&id)
             })
-            .map(|ma| AssignmentAny::from(ma.clone()));
+            .map(AnyAssignmentRef::from);
         let staged = self
             .staged_commits
             .values()
-            .map(|ma| AssignmentAny::from(ma.assignment().clone()));
+            .map(|bma| AnyAssignmentRef::from(bma.assignment()));
         fixed.chain(base).chain(staged)
     }
 
@@ -690,31 +677,28 @@ where
     }
 }
 
-impl<'a, T, C> From<&AssignmentLedger<'a, T, C>> for Solution<T, C>
+impl<'a, 'l, T, C> From<&'l AssignmentLedger<'a, T, C>> for SolutionRef<'l, T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
 {
-    fn from(val: &AssignmentLedger<'a, T, C>) -> Self {
-        let decisions: HashMap<RequestId, AssignmentAny<'static, T, C>> = val
-            .iter_assignments()
-            .map(|a| (a.id(), a.into_owned()))
-            .collect();
-        Solution::from_assignments(decisions)
+    fn from(val: &'l AssignmentLedger<'a, T, C>) -> Self {
+        let decisions: HashMap<RequestId, AnyAssignmentRef<'l, T, C>> =
+            val.iter_assignments().map(|a| (a.id(), a)).collect();
+        SolutionRef::from_assignments(decisions)
     }
 }
 
-impl<'brand, 'p, T, C> From<&AssignmentLedgerOverlay<'brand, 'p, '_, T, C>> for Solution<T, C>
+impl<'brand, 'p, 'l, T, C> From<&'l AssignmentLedgerOverlay<'brand, 'p, 'l, T, C>>
+    for SolutionRef<'l, T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
 {
-    fn from(val: &AssignmentLedgerOverlay<'brand, 'p, '_, T, C>) -> Self {
-        let decisions: HashMap<RequestId, AssignmentAny<'static, T, C>> = val
-            .iter_assignments()
-            .map(|a| (a.id(), a.into_owned()))
-            .collect();
-        Solution::from_assignments(decisions)
+    fn from(val: &'l AssignmentLedgerOverlay<'brand, 'p, 'l, T, C>) -> Self {
+        let decisions: HashMap<RequestId, AnyAssignmentRef<'l, T, C>> =
+            val.iter_assignments().map(|a| (a.id(), a)).collect();
+        SolutionRef::from_assignments(decisions)
     }
 }
 
@@ -724,7 +708,7 @@ mod ledger_overlay_tests {
     use dock_alloc_core::domain::{
         Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
     };
-    use dock_alloc_model::ProblemBuilder;
+    use dock_alloc_model::{ProblemBuilder, RequestId};
 
     type Tm = i64;
     type Cm = i64;
@@ -1137,7 +1121,7 @@ mod ledger_overlay_tests {
         let _ = ledger.commit_assignment(mov1, 0.into(), 0.into()).unwrap();
 
         // ledger -> solution contains fixed + r1
-        let sol_from_ledger: Solution<_, _> = (&ledger).into();
+        let sol_from_ledger: SolutionRef<_, _> = (&ledger).into();
         let ids_from_ledger: Vec<_> = sol_from_ledger.decisions().keys().copied().collect();
         assert_id_sets_eq(ids_from_ledger, vec![r_fixed.id(), r1.id()]);
 
@@ -1149,7 +1133,7 @@ mod ledger_overlay_tests {
         let _ = ov.commit_assignment(req2, 0.into(), 20.into()).unwrap();
 
         // overlay -> solution contains fixed + r1(base) + r2(staged)
-        let sol_from_overlay: Solution<_, _> = (&ov).into();
+        let sol_from_overlay: SolutionRef<_, _> = (&ov).into();
         let ids_from_overlay: Vec<_> = sol_from_overlay.decisions().keys().copied().collect();
         assert_id_sets_eq(ids_from_overlay, vec![r_fixed.id(), r1.id(), r2.id()]);
     }

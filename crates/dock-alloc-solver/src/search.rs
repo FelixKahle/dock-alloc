@@ -31,7 +31,7 @@ use crate::{
     quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError},
 };
 use dock_alloc_core::domain::{SpaceInterval, TimeInterval};
-use dock_alloc_model::{Assignment, AssignmentAny, Fixed, Kind, Problem};
+use dock_alloc_model::{AnyAssignmentRef, Assignment, Fixed, Kind, Problem};
 use num_traits::{PrimInt, Signed};
 
 #[derive(Clone, Debug, PartialEq, Eq, Copy)]
@@ -396,7 +396,7 @@ where
     }
 
     #[inline]
-    pub fn iter_assignments(&self) -> impl Iterator<Item = AssignmentAny<'_, T, C>> + '_ {
+    pub fn iter_assignments(&self) -> impl Iterator<Item = AnyAssignmentRef<'_, T, C>> + '_ {
         self.builder.assignment_overlay.iter_assignments()
     }
 
