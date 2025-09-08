@@ -206,13 +206,13 @@ where
     }
 }
 
-impl<'brand, 'a, T, C> Into<Assignment<'a, T, C>> for BrandedMoveableAssignment<'brand, 'a, T, C>
+impl<'brand, 'a, T, C> From<BrandedMoveableAssignment<'brand, 'a, T, C>> for Assignment<'a, T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    fn into(self) -> Assignment<'a, T, C> {
-        self.assignment
+    fn from(val: BrandedMoveableAssignment<'brand, 'a, T, C>) -> Self {
+        val.assignment
     }
 }
 
@@ -222,7 +222,7 @@ pub struct AssignmentLedger<'a, T: PrimInt + Signed, C: PrimInt + Signed> {
     committed: HashMap<MoveableRequestId, MoveableAssignment<'a, T, C>>,
 }
 
-impl<'brand, 'a, T, C> From<&'a Problem<'a, T, C>> for AssignmentLedger<'a, T, C>
+impl<'a, T, C> From<&'a Problem<'a, T, C>> for AssignmentLedger<'a, T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
@@ -494,11 +494,11 @@ where
         'l: 'a,
     {
         let id = ma_ref.id();
-        if let Some(staged) = self.staged_commits.remove(&id.into()) {
+        if let Some(staged) = self.staged_commits.remove(&id) {
             return Ok(staged);
         }
 
-        if self.staged_uncommits.contains_key(&id.into()) {
+        if self.staged_uncommits.contains_key(&id) {
             return Err(StageError::AlreadyStagedUncommit(id.into()));
         }
 
@@ -530,7 +530,7 @@ where
     pub fn iter_fixed_handles(&self) -> impl Iterator<Item = BrandedFixedRequestId<'brand>> + '_ {
         self.ledger
             .iter_fixed_handles()
-            .map(|id| BrandedFixedRequestId::new(id.clone()))
+            .map(|id| BrandedFixedRequestId::new(*id))
     }
 
     #[inline]
@@ -642,7 +642,7 @@ where
     }
 }
 
-impl<'brand, 'a, T, C> From<&AssignmentLedger<'a, T, C>> for Solution<T, C>
+impl<'a, T, C> From<&AssignmentLedger<'a, T, C>> for Solution<T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
@@ -677,8 +677,6 @@ mod ledger_overlay_tests {
         Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
     };
     use dock_alloc_model::{ProblemBuilder, Request};
-
-    // ---------- helpers ----------
 
     fn req_ok(id: u64, len: usize, proc_t: i64, t0: i64, t1: i64, s0: usize, s1: usize) -> Request {
         Request::new(

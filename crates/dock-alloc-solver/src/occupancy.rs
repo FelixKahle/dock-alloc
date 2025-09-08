@@ -1265,9 +1265,9 @@ mod iterators {
         let mut last: Option<TimePoint<T>> = out.last().copied(); // or None if you prefer
 
         #[inline]
-        fn push_if_new<Tp: Copy>(out: &mut Vec<Tp>, last: &mut Option<Tp>, x: Tp)
+        fn push_if_new<Tp>(out: &mut Vec<Tp>, last: &mut Option<Tp>, x: Tp)
         where
-            Tp: PartialEq,
+            Tp: PartialEq + Copy,
         {
             if Some(x) != *last {
                 out.push(x);
@@ -1589,10 +1589,10 @@ mod iterators {
                     self.cur_right = None;
                 }
 
-                if let Some(iv) = inter {
-                    if iv.length() >= self.required {
-                        return Some(iv);
-                    }
+                if let Some(iv) = inter
+                    && iv.length() >= self.required
+                {
+                    return Some(iv);
                 }
             }
         }
