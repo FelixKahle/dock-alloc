@@ -486,6 +486,16 @@ impl<'a, K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> AssignmentRef<'a, K,
     pub fn typed_id(&self) -> K::Id {
         self.request.typed_id()
     }
+
+    #[inline]
+    pub fn to_owned(&self) -> Assignment<K, T, C> {
+        Assignment::new(self.request.clone(), self.start_position, self.start_time)
+    }
+
+    #[inline]
+    pub fn into_owned(self) -> Assignment<K, T, C> {
+        Assignment::new(self.request.clone(), self.start_position, self.start_time)
+    }
 }
 
 impl<'a, K: Kind, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> Display
