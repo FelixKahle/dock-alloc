@@ -27,65 +27,12 @@ use crate::timeline::Timeline;
 use dock_alloc_core::domain::{
     SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
 };
-use dock_alloc_core::marker::Brand;
 use dock_alloc_model::Problem;
 use num_traits::{PrimInt, Signed, Zero};
 use std::collections::BTreeMap;
 use std::iter::{Copied, FusedIterator, Peekable};
 use std::marker::PhantomData;
 use std::ops::Bound::{Excluded, Unbounded};
-
-pub struct BrandedFreeSlot<'brand, T>
-where
-    T: PrimInt + Signed,
-{
-    slot: FreeSlot<T>,
-    _brand: Brand<'brand>,
-}
-
-impl<'brand, T> BrandedFreeSlot<'brand, T>
-where
-    T: PrimInt + Signed,
-{
-    #[inline]
-    fn new(slot: FreeSlot<T>) -> Self {
-        Self {
-            slot,
-            _brand: Brand::default(),
-        }
-    }
-
-    #[inline]
-    pub fn slot(&self) -> &FreeSlot<T> {
-        &self.slot
-    }
-}
-
-pub struct BrandedFreeRegion<'brand, T>
-where
-    T: PrimInt + Signed,
-{
-    region: SpaceTimeRectangle<T>,
-    _brand: Brand<'brand>,
-}
-
-impl<'brand, T> BrandedFreeRegion<'brand, T>
-where
-    T: PrimInt + Signed,
-{
-    #[inline]
-    fn new(region: SpaceTimeRectangle<T>) -> Self {
-        Self {
-            region,
-            _brand: Brand::default(),
-        }
-    }
-
-    #[inline]
-    pub fn region(&self) -> &SpaceTimeRectangle<T> {
-        &self.region
-    }
-}
 
 /// A trait for querying the occupancy state of a quay at different points in time.
 ///
@@ -994,12 +941,11 @@ where
         duration: TimeDelta<T>,
         required_space: SpaceLength,
         space_window: SpaceInterval,
-    ) -> impl Iterator<Item = BrandedFreeSlot<'brand, T>> + 'a
+    ) -> impl Iterator<Item = FreeSlot<T>> + 'a
     where
         T: Copy,
     {
         FreeSlotIter::new(self, time_window, duration, required_space, space_window)
-            .map(|slot| BrandedFreeSlot::new(slot))
     }
 
     /// Returns an iterator over all feasible `SpaceTimeRectangle` regions, considering the overlay.
@@ -1010,12 +956,11 @@ where
         duration: TimeDelta<T>,
         required_space: SpaceLength,
         space_window: SpaceInterval,
-    ) -> impl Iterator<Item = BrandedFreeRegion<'brand, T>> + 'a
+    ) -> impl Iterator<Item = SpaceTimeRectangle<T>> + 'a
     where
         T: Copy,
     {
         FeasibleRegionIter::new(self, window, duration, required_space, space_window)
-            .map(|region| BrandedFreeRegion::new(region))
     }
 
     /// Finds the next timeline key after a given time point, considering both base and overlay keys.
@@ -2221,11 +2166,8 @@ mod tests {
             .iter_free_slots(ti(5, 9), TimeDelta::new(3), len(2), si(0, 10))
             .map(|f| {
                 (
-                    f.slot().start_time().value(),
-                    (
-                        f.slot().space().start().value(),
-                        f.slot().space().end().value(),
-                    ),
+                    f.start_time().value(),
+                    (f.space().start().value(), f.space().end().value()),
                 )
             })
             .collect();
@@ -2268,7 +2210,7 @@ mod tests {
         // Duration 2 forces candidate starts at 0 and 7 (overlay key)
         let items: Vec<_> = ov
             .iter_free_slots(ti(0, 10), TimeDelta::new(2), len(1), si(0, 10))
-            .map(|f| f.slot().start_time().value())
+            .map(|f| f.start_time().value())
             .collect();
         let mut unique_items: Vec<_> = items;
         unique_items.sort();
@@ -2313,9 +2255,9 @@ mod tests {
             .collect();
 
         assert!(
-            items.iter().any(|f| f.slot().start_time().value() == 5
-                && f.slot().space().start().value() <= 2
-                && f.slot().space().end().value() >= 6),
+            items.iter().any(|f| f.start_time().value() == 5
+                && f.space().start().value() <= 2
+                && f.space().end().value() >= 6),
             "Expected overlay free at `start` to apply to the initial slice"
         );
     }
@@ -2387,12 +2329,9 @@ mod tests {
     ) -> BTreeMap<(T, T), BTreeSet<(usize, usize)>> {
         let mut out: BTreeMap<(T, T), Vec<SpaceInterval>> = BTreeMap::new();
         for r in ov.iter_free_regions(window, duration, required, bounds) {
-            out.entry((
-                r.region().time().start().value(),
-                r.region().time().end().value(),
-            ))
-            .or_default()
-            .push(r.region().space());
+            out.entry((r.time().start().value(), r.time().end().value()))
+                .or_default()
+                .push(r.space());
         }
         out.into_iter()
             .map(|(k, v)| (k, set_from_intervals(v)))
@@ -2437,8 +2376,8 @@ mod tests {
         }
         let tw = TimeInterval::new(s, s + duration);
         ov.iter_free_slots(tw, duration, required, bounds)
-            .filter(|fs| fs.slot().start_time() == s)
-            .map(|fs| iv_to_tuple(fs.slot().space()))
+            .filter(|fs| fs.start_time() == s)
+            .map(|fs| iv_to_tuple(fs.space()))
             .collect()
     }
 

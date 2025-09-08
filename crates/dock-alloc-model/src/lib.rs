@@ -754,6 +754,53 @@ where
     }
 }
 
+impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<Movable, T, C>>
+    for AnyAssignment<T, C>
+{
+    fn from(a: Assignment<Movable, T, C>) -> Self {
+        AnyAssignment::new(
+            AnyRequest::Movable(a.request().clone()),
+            a.start_position(),
+            a.start_time(),
+        )
+    }
+}
+impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<Fixed, T, C>>
+    for AnyAssignment<T, C>
+{
+    fn from(a: Assignment<Fixed, T, C>) -> Self {
+        AnyAssignment::new(
+            AnyRequest::Fixed(a.request().clone()),
+            a.start_position(),
+            a.start_time(),
+        )
+    }
+}
+
+// From AssignmentRef (Copy) → owned erased view
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Movable, T, C>>
+    for AnyAssignment<T, C>
+{
+    fn from(a: AssignmentRef<'a, Movable, T, C>) -> Self {
+        AnyAssignment::new(
+            AnyRequest::Movable(a.request().clone()),
+            a.start_position(),
+            a.start_time(),
+        )
+    }
+}
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Fixed, T, C>>
+    for AnyAssignment<T, C>
+{
+    fn from(a: AssignmentRef<'a, Fixed, T, C>) -> Self {
+        AnyAssignment::new(
+            AnyRequest::Fixed(a.request().clone()),
+            a.start_position(),
+            a.start_time(),
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AnyAssignmentRef<'a, T = i64, C = i64>
 where
@@ -819,10 +866,10 @@ where
     }
 }
 
+// From owned Assignment → borrowed erased view (we borrow its inner request)
 impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<Movable, T, C>>
     for AnyAssignmentRef<'a, T, C>
 {
-    #[inline]
     fn from(a: &'a Assignment<Movable, T, C>) -> Self {
         AnyAssignmentRef::new(
             AnyRequestRef::Movable(a.request()),
@@ -831,11 +878,9 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<Movable, 
         )
     }
 }
-
 impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<Fixed, T, C>>
     for AnyAssignmentRef<'a, T, C>
 {
-    #[inline]
     fn from(a: &'a Assignment<Fixed, T, C>) -> Self {
         AnyAssignmentRef::new(
             AnyRequestRef::Fixed(a.request()),
@@ -845,132 +890,6 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<Fixed, T,
     }
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<Movable, T, C>>
-    for AnyAssignment<T, C>
-{
-    #[inline]
-    fn from(a: &Assignment<Movable, T, C>) -> Self {
-        AnyAssignment::new(
-            AnyRequest::Movable(a.request().clone()),
-            a.start_position(),
-            a.start_time(),
-        )
-    }
-}
-
-impl<T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<Fixed, T, C>>
-    for AnyAssignment<T, C>
-{
-    #[inline]
-    fn from(a: &Assignment<Fixed, T, C>) -> Self {
-        AnyAssignment::new(
-            AnyRequest::Fixed(a.request().clone()),
-            a.start_position(),
-            a.start_time(),
-        )
-    }
-}
-
-impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<Movable, T, C>>
-    for AnyAssignment<T, C>
-{
-    fn from(a: Assignment<Movable, T, C>) -> Self {
-        AnyAssignment::new(
-            AnyRequest::Movable(a.request().clone()),
-            a.start_position(),
-            a.start_time(),
-        )
-    }
-}
-
-impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<Fixed, T, C>>
-    for AnyAssignment<T, C>
-{
-    fn from(a: Assignment<Fixed, T, C>) -> Self {
-        AnyAssignment::new(
-            AnyRequest::Fixed(a.request().clone()),
-            a.start_position(),
-            a.start_time(),
-        )
-    }
-}
-
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a AssignmentRef<'a, Movable, T, C>>
-    for AnyAssignmentRef<'a, T, C>
-{
-    #[inline]
-    fn from(a: &'a AssignmentRef<'a, Movable, T, C>) -> Self {
-        AnyAssignmentRef::new(
-            AnyRequestRef::Movable(a.request()),
-            a.start_position(),
-            a.start_time(),
-        )
-    }
-}
-
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a AssignmentRef<'a, Fixed, T, C>>
-    for AnyAssignmentRef<'a, T, C>
-{
-    #[inline]
-    fn from(a: &'a AssignmentRef<'a, Fixed, T, C>) -> Self {
-        AnyAssignmentRef::new(
-            AnyRequestRef::Fixed(a.request()),
-            a.start_position(),
-            a.start_time(),
-        )
-    }
-}
-
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&AssignmentRef<'a, Movable, T, C>>
-    for AnyAssignment<T, C>
-{
-    #[inline]
-    fn from(a: &AssignmentRef<'a, Movable, T, C>) -> Self {
-        AnyAssignment::new(
-            AnyRequest::Movable(a.request().clone()),
-            a.start_position(),
-            a.start_time(),
-        )
-    }
-}
-
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&AssignmentRef<'a, Fixed, T, C>>
-    for AnyAssignment<T, C>
-{
-    #[inline]
-    fn from(a: &AssignmentRef<'a, Fixed, T, C>) -> Self {
-        AnyAssignment::new(
-            AnyRequest::Fixed(a.request().clone()),
-            a.start_position(),
-            a.start_time(),
-        )
-    }
-}
-
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Movable, T, C>>
-    for AnyAssignment<T, C>
-{
-    fn from(a: AssignmentRef<'a, Movable, T, C>) -> Self {
-        AnyAssignment::new(
-            AnyRequest::Movable(a.request().clone()),
-            a.start_position(),
-            a.start_time(),
-        )
-    }
-}
-
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Fixed, T, C>>
-    for AnyAssignment<T, C>
-{
-    fn from(a: AssignmentRef<'a, Fixed, T, C>) -> Self {
-        AnyAssignment::new(
-            AnyRequest::Fixed(a.request().clone()),
-            a.start_position(),
-            a.start_time(),
-        )
-    }
-}
-
 impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Movable, T, C>>
     for AnyAssignmentRef<'a, T, C>
 {
@@ -982,7 +901,6 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Movabl
         )
     }
 }
-
 impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Fixed, T, C>>
     for AnyAssignmentRef<'a, T, C>
 {
