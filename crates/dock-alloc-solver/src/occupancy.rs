@@ -543,7 +543,7 @@ where
     }
 }
 
-impl<'a, T, C, Q> TryFrom<&Problem<'a, T, C>> for BerthOccupancy<T, Q>
+impl<T, C, Q> TryFrom<&Problem<T, C>> for BerthOccupancy<T, Q>
 where
     T: PrimInt + Signed + Zero + Copy,
     C: PrimInt + Signed + Zero + Copy,

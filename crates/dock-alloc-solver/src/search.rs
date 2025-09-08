@@ -63,13 +63,13 @@ impl<'bo, T: PrimInt + Signed> FreeSlot<'bo, T> {
 
 pub struct ProposeCtx<'p, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: PrimInt + Signed + 'static,
+    C: PrimInt + Signed + 'static,
     Q: QuayRead,
 {
     ledger: &'p AssignmentLedger<'p, T, C>,
     berth: &'p BerthOccupancy<T, Q>,
-    problem: &'p Problem<'p, T, C>,
+    problem: &'p Problem<T, C>,
     stamp: Version,
 }
 
@@ -83,7 +83,7 @@ where
     pub fn new(
         ledger: &'p AssignmentLedger<'p, T, C>,
         berth: &'p BerthOccupancy<T, Q>,
-        problem: &'p Problem<'p, T, C>,
+        problem: &'p Problem<T, C>,
         stamp: Version,
     ) -> Self {
         Self {
@@ -105,7 +105,7 @@ where
     }
 
     #[inline]
-    pub fn problem(&self) -> &'p Problem<'p, T, C> {
+    pub fn problem(&self) -> &'p Problem<T, C> {
         self.problem
     }
 
@@ -321,11 +321,11 @@ impl std::error::Error for ProposeError {}
 
 pub struct PlanBuilder<'brand, 'bo, 'p, 'al, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: PrimInt + Signed + 'static,
+    C: PrimInt + Signed + 'static,
     Q: QuayRead,
 {
-    problem: &'p Problem<'p, T, C>,
+    problem: &'p Problem<T, C>,
     assignment_overlay: AssignmentLedgerOverlay<'brand, 'p, 'al, T, C>,
     berth_overlay: BerthOccupancyOverlay<'bo, 'p, T, Q>,
     operations: Vec<Operation<'brand, 'p, T, C>>,
@@ -333,8 +333,8 @@ where
 
 pub struct Explorer<'brand, 'bo, 'p, 'al, 'pb, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: PrimInt + Signed + 'static,
+    C: PrimInt + Signed + 'static,
     Q: QuayRead,
 {
     builder: &'pb PlanBuilder<'brand, 'bo, 'p, 'al, T, C, Q>,
@@ -342,8 +342,8 @@ where
 
 impl<'brand, 'bo, 'p, 'al, 'pb, T, C, Q> Explorer<'brand, 'bo, 'p, 'al, 'pb, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: PrimInt + Signed + 'static,
+    C: PrimInt + Signed + 'static,
     Q: QuayRead,
 {
     #[allow(dead_code)]
@@ -465,7 +465,7 @@ where
     Q: QuayRead,
 {
     fn new(
-        problem: &'p Problem<'p, T, C>,
+        problem: &'p Problem<T, C>,
         assignment_overlay: AssignmentLedgerOverlay<'brand, 'p, 'al, T, C>,
         berth_overlay: BerthOccupancyOverlay<'bo, 'p, T, Q>,
     ) -> Self {
@@ -478,7 +478,7 @@ where
     }
 
     #[inline]
-    pub fn problem(&self) -> &'p Problem<'p, T, C> {
+    pub fn problem(&self) -> &'p Problem<T, C> {
         self.problem
     }
 

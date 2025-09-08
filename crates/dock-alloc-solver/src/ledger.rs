@@ -234,12 +234,12 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AssignmentLedger<'a, T: PrimInt + Signed, C: PrimInt + Signed> {
-    problem: &'a Problem<'a, T, C>,
+pub struct AssignmentLedger<'a, T: PrimInt + Signed + 'static, C: PrimInt + Signed + 'static> {
+    problem: &'a Problem<T, C>,
     committed: HashMap<MovableRequestId, Assignment<'a, Movable, T, C>>,
 }
 
-impl<'a, T, C> From<&'a Problem<'a, T, C>> for AssignmentLedger<'a, T, C>
+impl<'a, T, C> From<&'a Problem<T, C>> for AssignmentLedger<'a, T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
@@ -285,7 +285,7 @@ where
     }
 
     #[inline]
-    pub fn problem(&self) -> &'a Problem<'a, T, C> {
+    pub fn problem(&self) -> &'a Problem<T, C> {
         self.problem
     }
 
@@ -419,8 +419,8 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssignmentLedgerOverlay<'brand, 'a, 'l, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: PrimInt + Signed + 'static,
+    C: PrimInt + Signed + 'static,
 {
     ledger: &'l AssignmentLedger<'a, T, C>,
     staged_commits: BTreeMap<MovableRequestId, BrandedMovableAssignment<'brand, 'a, T, C>>,

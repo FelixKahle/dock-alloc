@@ -1021,17 +1021,17 @@ impl<T: PrimInt + Signed + Display + Debug> Display for ProblemBuildError<T> {
 impl<T: PrimInt + Signed + Display + Debug> std::error::Error for ProblemBuildError<T> {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Problem<'p, T = i64, C = i64>
+pub struct Problem<T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: PrimInt + Signed + 'static,
+    C: PrimInt + Signed + 'static,
 {
     movables: HashMap<MovableRequestId, Request<Movable, T, C>>,
-    preassigned: HashMap<FixedRequestId, Assignment<'p, Fixed, T, C>>,
+    preassigned: HashMap<FixedRequestId, Assignment<'static, Fixed, T, C>>,
     quay_length: SpaceLength,
 }
 
-impl<'p, T: PrimInt + Signed, C: PrimInt + Signed> Problem<'p, T, C> {
+impl<T: PrimInt + Signed, C: PrimInt + Signed> Problem<T, C> {
     #[inline]
     pub fn quay_length(&self) -> SpaceLength {
         self.quay_length
@@ -1048,7 +1048,7 @@ impl<'p, T: PrimInt + Signed, C: PrimInt + Signed> Problem<'p, T, C> {
     }
 
     #[inline]
-    pub fn preassigned(&self) -> &HashMap<FixedRequestId, Assignment<'p, Fixed, T, C>> {
+    pub fn preassigned(&self) -> &HashMap<FixedRequestId, Assignment<'static, Fixed, T, C>> {
         &self.preassigned
     }
 
@@ -1058,7 +1058,7 @@ impl<'p, T: PrimInt + Signed, C: PrimInt + Signed> Problem<'p, T, C> {
     }
 
     #[inline]
-    pub fn get_preassigned(&self, id: FixedRequestId) -> Option<&Assignment<'p, Fixed, T, C>> {
+    pub fn get_preassigned(&self, id: FixedRequestId) -> Option<&Assignment<'static, Fixed, T, C>> {
         self.preassigned.get(&id)
     }
 
@@ -1080,24 +1080,26 @@ impl<'p, T: PrimInt + Signed, C: PrimInt + Signed> Problem<'p, T, C> {
     }
 
     #[inline]
-    pub fn iter_fixed_assignments(&self) -> impl Iterator<Item = &Assignment<'p, Fixed, T, C>> {
+    pub fn iter_fixed_assignments(
+        &self,
+    ) -> impl Iterator<Item = &Assignment<'static, Fixed, T, C>> {
         self.preassigned.values()
     }
 }
 
-pub type BerthAllocationProblem<'a> = Problem<'a, i64, i64>;
+pub type BerthAllocationProblem = Problem<i64, i64>;
 
-pub struct ProblemBuilder<'p, T = i64, C = i64>
+pub struct ProblemBuilder<T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: PrimInt + Signed + 'static,
+    C: PrimInt + Signed + 'static,
 {
     movables: HashMap<MovableRequestId, Request<Movable, T, C>>,
-    preassigned: HashMap<FixedRequestId, Assignment<'p, Fixed, T, C>>,
+    preassigned: HashMap<FixedRequestId, Assignment<'static, Fixed, T, C>>,
     quay_length: SpaceLength,
 }
 
-impl<'p, T: PrimInt + Signed, C: PrimInt + Signed> ProblemBuilder<'p, T, C> {
+impl<T: PrimInt + Signed, C: PrimInt + Signed> ProblemBuilder<T, C> {
     #[inline]
     pub fn new(quay_length: SpaceLength) -> Self {
         Self {
@@ -1136,7 +1138,7 @@ impl<'p, T: PrimInt + Signed, C: PrimInt + Signed> ProblemBuilder<'p, T, C> {
 
     pub fn add_preassigned(
         &mut self,
-        fixed: Assignment<'p, Fixed, T, C>,
+        fixed: Assignment<'_, Fixed, T, C>,
     ) -> Result<&mut Self, ProblemBuildError<T>> {
         let a = &fixed;
         let r = a.request();
@@ -1177,11 +1179,11 @@ impl<'p, T: PrimInt + Signed, C: PrimInt + Signed> ProblemBuilder<'p, T, C> {
             }
         }
 
-        self.preassigned.insert(id.into(), fixed);
+        self.preassigned.insert(id.into(), fixed.into_owned());
         Ok(self)
     }
 
-    pub fn build(&'_ self) -> Problem<'_, T, C> {
+    pub fn build(&self) -> Problem<T, C> {
         Problem {
             movables: self.movables.clone(),
             preassigned: self.preassigned.clone(),
