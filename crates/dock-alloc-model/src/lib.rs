@@ -23,7 +23,6 @@ use dock_alloc_core::domain::{
     Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
 };
 use num_traits::{PrimInt, Signed};
-use std::borrow::Cow;
 use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::{collections::HashMap, hash::Hash};
@@ -368,49 +367,27 @@ impl<K: Kind, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> Disp
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Assignment<'r, K: Kind, T = i64, C = i64>
+pub struct Assignment<K: Kind, T = i64, C = i64>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    request: Cow<'r, Request<K, T, C>>,
+    request: Request<K, T, C>,
     start_position: SpacePosition,
     start_time: TimePoint<T>,
 }
 
-impl<'r, K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> Assignment<'r, K, T, C> {
+impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> Assignment<K, T, C> {
     #[inline]
-    pub fn owned(
+    pub fn new(
         request: Request<K, T, C>,
         start_position: SpacePosition,
         start_time: TimePoint<T>,
     ) -> Self {
         Self {
-            request: Cow::Owned(request),
+            request,
             start_position,
             start_time,
-        }
-    }
-
-    #[inline]
-    pub fn borrowed(
-        request: &'r Request<K, T, C>,
-        start_position: SpacePosition,
-        start_time: TimePoint<T>,
-    ) -> Self {
-        Self {
-            request: Cow::Borrowed(request),
-            start_position,
-            start_time,
-        }
-    }
-
-    #[inline]
-    pub fn into_owned(self) -> Assignment<'static, K, T, C> {
-        Assignment {
-            request: Cow::Owned(self.request.into_owned()),
-            start_position: self.start_position,
-            start_time: self.start_time,
         }
     }
 
@@ -438,15 +415,86 @@ impl<'r, K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> Assignment<'r, K, T,
     pub fn typed_id(&self) -> K::Id {
         self.request.typed_id()
     }
+
+    #[inline]
+    pub fn as_ref(&self) -> AssignmentRef<'_, K, T, C> {
+        AssignmentRef::new(&self.request, self.start_position, self.start_time)
+    }
 }
 
-impl<'r, K: Kind, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> Display
-    for Assignment<'r, K, T, C>
+impl<K: Kind, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> Display
+    for Assignment<K, T, C>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "{} Assignment(request_id: {}, start_position: {}, start_time: {})",
+            K::NAME,
+            self.request.id(),
+            self.start_position,
+            self.start_time
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AssignmentRef<'a, K: Kind, T = i64, C = i64>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    request: &'a Request<K, T, C>,
+    start_position: SpacePosition,
+    start_time: TimePoint<T>,
+}
+
+impl<'a, K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> AssignmentRef<'a, K, T, C> {
+    #[inline]
+    pub fn new(
+        request: &'a Request<K, T, C>,
+        start_position: SpacePosition,
+        start_time: TimePoint<T>,
+    ) -> Self {
+        Self {
+            request,
+            start_position,
+            start_time,
+        }
+    }
+
+    #[inline]
+    pub fn request(&self) -> &'a Request<K, T, C> {
+        self.request
+    }
+
+    #[inline]
+    pub fn start_position(&self) -> SpacePosition {
+        self.start_position
+    }
+
+    #[inline]
+    pub fn start_time(&self) -> TimePoint<T> {
+        self.start_time
+    }
+
+    #[inline]
+    pub fn id(&self) -> RequestId {
+        self.request.id()
+    }
+
+    #[inline]
+    pub fn typed_id(&self) -> K::Id {
+        self.request.typed_id()
+    }
+}
+
+impl<'a, K: Kind, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> Display
+    for AssignmentRef<'a, K, T, C>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} AssignmentRef(request_id: {}, start_position: {}, start_time: {})",
             K::NAME,
             self.request.id(),
             self.start_position,
@@ -761,11 +809,11 @@ where
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<'a, Movable, T, C>>
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<Movable, T, C>>
     for AnyAssignmentRef<'a, T, C>
 {
     #[inline]
-    fn from(a: &'a Assignment<'a, Movable, T, C>) -> Self {
+    fn from(a: &'a Assignment<Movable, T, C>) -> Self {
         AnyAssignmentRef::new(
             AnyRequestRef::Movable(a.request()),
             a.start_position(),
@@ -774,11 +822,11 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<'a, Movab
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<'a, Fixed, T, C>>
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<Fixed, T, C>>
     for AnyAssignmentRef<'a, T, C>
 {
     #[inline]
-    fn from(a: &'a Assignment<'a, Fixed, T, C>) -> Self {
+    fn from(a: &'a Assignment<Fixed, T, C>) -> Self {
         AnyAssignmentRef::new(
             AnyRequestRef::Fixed(a.request()),
             a.start_position(),
@@ -787,11 +835,11 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<'a, Fixed
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<'a, Movable, T, C>>
+impl<T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<Movable, T, C>>
     for AnyAssignment<T, C>
 {
     #[inline]
-    fn from(a: &Assignment<'a, Movable, T, C>) -> Self {
+    fn from(a: &Assignment<Movable, T, C>) -> Self {
         AnyAssignment::new(
             AnyRequest::Movable(a.request().clone()),
             a.start_position(),
@@ -800,11 +848,11 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<'a, Movable,
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<'a, Fixed, T, C>>
+impl<T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<Fixed, T, C>>
     for AnyAssignment<T, C>
 {
     #[inline]
-    fn from(a: &Assignment<'a, Fixed, T, C>) -> Self {
+    fn from(a: &Assignment<Fixed, T, C>) -> Self {
         AnyAssignment::new(
             AnyRequest::Fixed(a.request().clone()),
             a.start_position(),
@@ -813,10 +861,10 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<'a, Fixed, T
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<'a, Movable, T, C>>
+impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<Movable, T, C>>
     for AnyAssignment<T, C>
 {
-    fn from(a: Assignment<'a, Movable, T, C>) -> Self {
+    fn from(a: Assignment<Movable, T, C>) -> Self {
         AnyAssignment::new(
             AnyRequest::Movable(a.request().clone()),
             a.start_position(),
@@ -825,12 +873,112 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<'a, Movable, 
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<'a, Fixed, T, C>>
+impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<Fixed, T, C>>
     for AnyAssignment<T, C>
 {
-    fn from(a: Assignment<'a, Fixed, T, C>) -> Self {
+    fn from(a: Assignment<Fixed, T, C>) -> Self {
         AnyAssignment::new(
             AnyRequest::Fixed(a.request().clone()),
+            a.start_position(),
+            a.start_time(),
+        )
+    }
+}
+
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a AssignmentRef<'a, Movable, T, C>>
+    for AnyAssignmentRef<'a, T, C>
+{
+    #[inline]
+    fn from(a: &'a AssignmentRef<'a, Movable, T, C>) -> Self {
+        AnyAssignmentRef::new(
+            AnyRequestRef::Movable(a.request()),
+            a.start_position(),
+            a.start_time(),
+        )
+    }
+}
+
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a AssignmentRef<'a, Fixed, T, C>>
+    for AnyAssignmentRef<'a, T, C>
+{
+    #[inline]
+    fn from(a: &'a AssignmentRef<'a, Fixed, T, C>) -> Self {
+        AnyAssignmentRef::new(
+            AnyRequestRef::Fixed(a.request()),
+            a.start_position(),
+            a.start_time(),
+        )
+    }
+}
+
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&AssignmentRef<'a, Movable, T, C>>
+    for AnyAssignment<T, C>
+{
+    #[inline]
+    fn from(a: &AssignmentRef<'a, Movable, T, C>) -> Self {
+        AnyAssignment::new(
+            AnyRequest::Movable(a.request().clone()),
+            a.start_position(),
+            a.start_time(),
+        )
+    }
+}
+
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&AssignmentRef<'a, Fixed, T, C>>
+    for AnyAssignment<T, C>
+{
+    #[inline]
+    fn from(a: &AssignmentRef<'a, Fixed, T, C>) -> Self {
+        AnyAssignment::new(
+            AnyRequest::Fixed(a.request().clone()),
+            a.start_position(),
+            a.start_time(),
+        )
+    }
+}
+
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Movable, T, C>>
+    for AnyAssignment<T, C>
+{
+    fn from(a: AssignmentRef<'a, Movable, T, C>) -> Self {
+        AnyAssignment::new(
+            AnyRequest::Movable(a.request().clone()),
+            a.start_position(),
+            a.start_time(),
+        )
+    }
+}
+
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Fixed, T, C>>
+    for AnyAssignment<T, C>
+{
+    fn from(a: AssignmentRef<'a, Fixed, T, C>) -> Self {
+        AnyAssignment::new(
+            AnyRequest::Fixed(a.request().clone()),
+            a.start_position(),
+            a.start_time(),
+        )
+    }
+}
+
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Movable, T, C>>
+    for AnyAssignmentRef<'a, T, C>
+{
+    fn from(a: AssignmentRef<'a, Movable, T, C>) -> Self {
+        AnyAssignmentRef::new(
+            AnyRequestRef::Movable(a.request()),
+            a.start_position(),
+            a.start_time(),
+        )
+    }
+}
+
+impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Fixed, T, C>>
+    for AnyAssignmentRef<'a, T, C>
+{
+    fn from(a: AssignmentRef<'a, Fixed, T, C>) -> Self {
+        AnyAssignmentRef::new(
+            AnyRequestRef::Fixed(a.request()),
             a.start_position(),
             a.start_time(),
         )
@@ -1023,11 +1171,11 @@ impl<T: PrimInt + Signed + Display + Debug> std::error::Error for ProblemBuildEr
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Problem<T = i64, C = i64>
 where
-    T: PrimInt + Signed + 'static,
-    C: PrimInt + Signed + 'static,
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
 {
     movables: HashMap<MovableRequestId, Request<Movable, T, C>>,
-    preassigned: HashMap<FixedRequestId, Assignment<'static, Fixed, T, C>>,
+    preassigned: HashMap<FixedRequestId, Assignment<Fixed, T, C>>,
     quay_length: SpaceLength,
 }
 
@@ -1048,7 +1196,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> Problem<T, C> {
     }
 
     #[inline]
-    pub fn preassigned(&self) -> &HashMap<FixedRequestId, Assignment<'static, Fixed, T, C>> {
+    pub fn preassigned(&self) -> &HashMap<FixedRequestId, Assignment<Fixed, T, C>> {
         &self.preassigned
     }
 
@@ -1058,7 +1206,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> Problem<T, C> {
     }
 
     #[inline]
-    pub fn get_preassigned(&self, id: FixedRequestId) -> Option<&Assignment<'static, Fixed, T, C>> {
+    pub fn get_preassigned(&self, id: FixedRequestId) -> Option<&Assignment<Fixed, T, C>> {
         self.preassigned.get(&id)
     }
 
@@ -1080,9 +1228,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> Problem<T, C> {
     }
 
     #[inline]
-    pub fn iter_fixed_assignments(
-        &self,
-    ) -> impl Iterator<Item = &Assignment<'static, Fixed, T, C>> {
+    pub fn iter_fixed_assignments(&self) -> impl Iterator<Item = &Assignment<Fixed, T, C>> {
         self.preassigned.values()
     }
 }
@@ -1091,11 +1237,11 @@ pub type BerthAllocationProblem = Problem<i64, i64>;
 
 pub struct ProblemBuilder<T = i64, C = i64>
 where
-    T: PrimInt + Signed + 'static,
-    C: PrimInt + Signed + 'static,
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
 {
     movables: HashMap<MovableRequestId, Request<Movable, T, C>>,
-    preassigned: HashMap<FixedRequestId, Assignment<'static, Fixed, T, C>>,
+    preassigned: HashMap<FixedRequestId, Assignment<Fixed, T, C>>,
     quay_length: SpaceLength,
 }
 
@@ -1138,7 +1284,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> ProblemBuilder<T, C> {
 
     pub fn add_preassigned(
         &mut self,
-        fixed: Assignment<'_, Fixed, T, C>,
+        fixed: Assignment<Fixed, T, C>,
     ) -> Result<&mut Self, ProblemBuildError<T>> {
         let a = &fixed;
         let r = a.request();
@@ -1179,7 +1325,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> ProblemBuilder<T, C> {
             }
         }
 
-        self.preassigned.insert(id.into(), fixed.into_owned());
+        self.preassigned.insert(id.into(), fixed);
         Ok(self)
     }
 
@@ -1263,8 +1409,8 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SolutionRef<'a, T = i64, C = i64>
 where
-    T: PrimInt + Signed + 'static,
-    C: PrimInt + Signed + 'static,
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
 {
     decisions: HashMap<RequestId, AnyAssignmentRef<'a, T, C>>,
     stats: SolutionStats<T, C>,
@@ -1425,12 +1571,8 @@ mod tests {
         .expect("valid fixed request")
     }
 
-    fn asg<'r, K: Kind>(
-        r: &'r Request<K, Tm, Cm>,
-        pos: usize,
-        time: i64,
-    ) -> Assignment<'r, K, Tm, Cm> {
-        Assignment::borrowed(r, SpacePosition::new(pos), TimePoint::new(time))
+    fn asg<K: Kind>(r: Request<K, Tm, Cm>, pos: usize, time: i64) -> Assignment<K, Tm, Cm> {
+        Assignment::new(r, SpacePosition::new(pos), TimePoint::new(time))
     }
 
     fn ids_sorted(mut v: Vec<RequestId>) -> Vec<RequestId> {
@@ -1483,14 +1625,14 @@ mod tests {
     fn builder_preassigned_window_violations_rejected() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(20));
         let rf = req_fixed_ok(1, 4, 5, 10, 20, 0, 20);
-        let a = Assignment::borrowed(&rf, SpacePosition::new(0), TimePoint::new(16)); // [16,21) leaks past
+        let a = Assignment::new(rf, SpacePosition::new(0), TimePoint::new(16)); // [16,21) leaks past
         assert!(matches!(
             b.add_preassigned(a),
             Err(ProblemBuildError::AssignmentOutsideTimeWindow(_))
         ));
 
         let rf2 = req_fixed_ok(2, 6, 2, 0, 10, 5, 12);
-        let a2 = Assignment::borrowed(&rf2, SpacePosition::new(7), TimePoint::new(1)); // [7,13) leaks past 12
+        let a2 = Assignment::new(rf2, SpacePosition::new(7), TimePoint::new(1)); // [7,13) leaks past 12
         assert!(matches!(
             b.add_preassigned(a2),
             Err(ProblemBuildError::AssignmentOutsideSpaceWindow(_))
@@ -1501,7 +1643,7 @@ mod tests {
     fn builder_preassigned_exceeds_quay_rejected() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(10));
         let rf = req_fixed_ok(1, 6, 2, 0, 10, 0, 20);
-        let a = Assignment::borrowed(&rf, SpacePosition::new(6), TimePoint::new(1)); // [6,12) > quay 10
+        let a = Assignment::new(rf, SpacePosition::new(6), TimePoint::new(1)); // [6,12) > quay 10
         assert!(matches!(
             b.add_preassigned(a),
             Err(ProblemBuildError::AssignmentExceedsQuay(_))
@@ -1514,13 +1656,13 @@ mod tests {
         let r1 = req_fixed_ok(1, 4, 5, 0, 20, 0, 20);
         let r2 = req_fixed_ok(2, 4, 5, 0, 20, 0, 20);
 
-        b.add_preassigned(Assignment::borrowed(
-            &r1,
+        b.add_preassigned(Assignment::new(
+            r1,
             SpacePosition::new(5),
             TimePoint::new(2),
         ))
         .unwrap(); // t[2,7), s[5,9)
-        let a2 = Assignment::borrowed(&r2, SpacePosition::new(7), TimePoint::new(4)); // t[4,9), s[7,11) -> overlaps
+        let a2 = Assignment::new(r2, SpacePosition::new(7), TimePoint::new(4)); // t[4,9), s[7,11) -> overlaps
         assert!(matches!(
             b.add_preassigned(a2),
             Err(ProblemBuildError::PreassignedOverlap(_))
@@ -1533,8 +1675,8 @@ mod tests {
         let r_m = req_movable_ok(1, 4, 3, 0, 10, 0, 20);
         let r_f = req_fixed_ok(2, 4, 3, 0, 10, 10, 20);
         b.add_movable_request(r_m).unwrap();
-        b.add_preassigned(Assignment::borrowed(
-            &r_f,
+        b.add_preassigned(Assignment::new(
+            r_f,
             SpacePosition::new(10),
             TimePoint::new(0),
         ))
@@ -1554,8 +1696,8 @@ mod tests {
 
         b.add_movable_request(r1.clone()).unwrap();
         b.add_movable_request(r2.clone()).unwrap();
-        b.add_preassigned(Assignment::borrowed(
-            &r_fixed,
+        b.add_preassigned(Assignment::new(
+            r_fixed,
             SpacePosition::new(60),
             TimePoint::new(0),
         ))
@@ -1571,9 +1713,10 @@ mod tests {
         assert_eq!(p.iter_fixed_assignments().count(), 1);
 
         // place r1 at (0,0)
-        let a_r1 = Assignment::borrowed(
+        let a_r1 = Assignment::new(
             p.get_movable(MovableRequestId::from(RequestId::new(1)))
-                .unwrap(),
+                .unwrap()
+                .clone(),
             SpacePosition::new(0),
             TimePoint::new(0),
         );
@@ -1600,7 +1743,7 @@ mod tests {
     #[test]
     fn assignment_into_erased_roundtrip() {
         let r = req_movable_ok(5, 4, 3, 0, 10, 2, 20);
-        let a = asg(&r, 7, 1);
+        let a = asg(r, 7, 1);
         let ae: AnyAssignmentRef<'_, Tm, Cm> = AnyAssignmentRef::from(&a);
         assert_eq!(ae.id(), a.id());
         assert_eq!(ae.start_time(), a.start_time());
@@ -1627,7 +1770,7 @@ mod tests {
         .unwrap();
 
         // start at t=9 (wait=4), position=13 (dev=3)
-        let a = Assignment::borrowed(&r, SpacePosition::new(13), TimePoint::new(9));
+        let a = Assignment::new(r, SpacePosition::new(13), TimePoint::new(9));
         let ae: AnyAssignmentRef<'_, Tm, Cm> = AnyAssignmentRef::from(&a);
 
         // replicate Solution math

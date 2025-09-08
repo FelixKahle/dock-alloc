@@ -31,7 +31,7 @@ use crate::{
     quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError},
 };
 use dock_alloc_core::domain::{SpaceInterval, TimeInterval};
-use dock_alloc_model::{AnyAssignmentRef, Assignment, Fixed, Kind, Problem};
+use dock_alloc_model::{AnyAssignmentRef, AssignmentRef, Fixed, Kind, Problem};
 use num_traits::{PrimInt, Signed};
 
 #[derive(Clone, Debug, PartialEq, Eq, Copy)]
@@ -150,13 +150,13 @@ where
     }
 }
 
-impl<'p, K, T, C> From<&Assignment<'p, K, T, C>> for SpaceTimeRectangle<T>
+impl<'p, K, T, C> From<&AssignmentRef<'p, K, T, C>> for SpaceTimeRectangle<T>
 where
     K: Kind,
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    fn from(a: &Assignment<'p, K, T, C>) -> Self {
+    fn from(a: &AssignmentRef<'p, K, T, C>) -> Self {
         // Time
         let start_time = a.start_time();
         let processing_duration = a.request().processing_duration();
@@ -360,7 +360,7 @@ where
     #[inline]
     pub fn iter_fixed_assignments(
         &self,
-    ) -> impl Iterator<Item = &'_ Assignment<'_, Fixed, T, C>> + '_ {
+    ) -> impl Iterator<Item = AssignmentRef<'_, Fixed, T, C>> + '_ {
         self.builder.assignment_overlay.iter_fixed_assignments()
     }
 
@@ -525,7 +525,7 @@ where
         req: &BrandedMovableRequest<'brand, 'p, T, C>,
         slot: FreeSlot<'bo, T>,
     ) -> Result<BrandedMovableAssignment<'brand, 'p, T, C>, ProposeError> {
-        let a = Assignment::borrowed(req.request(), slot.space().start(), slot.time().start());
+        let a = AssignmentRef::new(req.request(), slot.space().start(), slot.time().start());
         let ma = self.assignment_overlay.commit_assignment(
             req.request(),
             slot.time().start(),

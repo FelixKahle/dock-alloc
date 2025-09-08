@@ -24,7 +24,7 @@ use dock_alloc_core::{
     marker::Brand,
 };
 use dock_alloc_model::{
-    AnyAssignmentRef, Assignment, Fixed, FixedRequestId, Movable, MovableRequestId, Problem,
+    AnyAssignmentRef, AssignmentRef, Fixed, FixedRequestId, Movable, MovableRequestId, Problem,
     Request, RequestId, SolutionRef,
 };
 use num_traits::{PrimInt, Signed};
@@ -169,7 +169,7 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    assignment: Assignment<'a, Movable, T, C>,
+    assignment: AssignmentRef<'a, Movable, T, C>,
     _brand: Brand<'brand>,
 }
 
@@ -179,7 +179,7 @@ where
     C: PrimInt + Signed,
 {
     #[inline]
-    fn new(assignment: Assignment<'a, Movable, T, C>) -> Self {
+    fn new(assignment: AssignmentRef<'a, Movable, T, C>) -> Self {
         Self {
             assignment,
             _brand: Brand::new(),
@@ -187,7 +187,7 @@ where
     }
 
     #[inline]
-    pub fn assignment(&'_ self) -> &'_ Assignment<'_, Movable, T, C> {
+    pub fn assignment(&'_ self) -> &'_ AssignmentRef<'_, Movable, T, C> {
         &self.assignment
     }
 
@@ -223,7 +223,7 @@ where
 }
 
 impl<'brand, 'a, T, C> From<BrandedMovableAssignment<'brand, 'a, T, C>>
-    for Assignment<'a, Movable, T, C>
+    for AssignmentRef<'a, Movable, T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
@@ -234,9 +234,9 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AssignmentLedger<'a, T: PrimInt + Signed + 'static, C: PrimInt + Signed + 'static> {
+pub struct AssignmentLedger<'a, T: PrimInt + Signed, C: PrimInt + Signed> {
     problem: &'a Problem<T, C>,
-    committed: HashMap<MovableRequestId, Assignment<'a, Movable, T, C>>,
+    committed: HashMap<MovableRequestId, AssignmentRef<'a, Movable, T, C>>,
 }
 
 impl<'a, T, C> From<&'a Problem<T, C>> for AssignmentLedger<'a, T, C>
@@ -290,7 +290,7 @@ where
     }
 
     #[inline]
-    pub fn committed(&self) -> &HashMap<MovableRequestId, Assignment<'a, Movable, T, C>> {
+    pub fn committed(&self) -> &HashMap<MovableRequestId, AssignmentRef<'a, Movable, T, C>> {
         &self.committed
     }
 
@@ -301,22 +301,22 @@ where
         req: &'a Request<Movable, T, C>,
         start_time: TimePoint<T>,
         start_position: SpacePosition,
-    ) -> Result<Assignment<'a, Movable, T, C>, LedgerError> {
+    ) -> Result<AssignmentRef<'a, Movable, T, C>, LedgerError> {
         let id = req.typed_id();
         if self.committed.contains_key(&id) {
             return Err(LedgerError::AlreadyCommitted);
         }
 
-        let assignment = Assignment::borrowed(req, start_position, start_time);
-        self.committed.insert(id, assignment.clone());
+        let assignment = AssignmentRef::new(req, start_position, start_time);
+        self.committed.insert(id, assignment);
         Ok(assignment)
     }
 
     #[inline]
     pub fn uncommit_assignment(
         &mut self,
-        assignment: &Assignment<'a, Movable, T, C>,
-    ) -> Result<Assignment<'a, Movable, T, C>, LedgerError> {
+        assignment: &AssignmentRef<'a, Movable, T, C>,
+    ) -> Result<AssignmentRef<'a, Movable, T, C>, LedgerError> {
         self.committed
             .remove(&assignment.typed_id())
             .ok_or(LedgerError::NotCommitted)
@@ -340,7 +340,7 @@ where
         }
 
         for (id, bma) in overlay.staged_commits.into_iter() {
-            let asg: Assignment<'a, Movable, T, C> = bma.into();
+            let asg: AssignmentRef<'a, Movable, T, C> = bma.into();
             let _prev = self.committed.insert(id, asg);
         }
     }
@@ -353,8 +353,8 @@ where
     #[inline]
     pub fn iter_fixed_assignments(
         &self,
-    ) -> impl Iterator<Item = &'_ Assignment<'_, Fixed, T, C>> + '_ {
-        self.problem.preassigned().values()
+    ) -> impl Iterator<Item = AssignmentRef<'a, Fixed, T, C>> + '_ {
+        self.problem.preassigned().values().map(|a| a.as_ref())
     }
 
     #[inline]
@@ -365,12 +365,12 @@ where
     #[inline]
     pub fn iter_movable_assignments(
         &self,
-    ) -> impl Iterator<Item = &Assignment<'a, Movable, T, C>> + '_ {
+    ) -> impl Iterator<Item = &AssignmentRef<'a, Movable, T, C>> + '_ {
         self.committed.values()
     }
 
     #[inline]
-    pub fn iter_committed(&self) -> impl Iterator<Item = &Assignment<'a, Movable, T, C>> {
+    pub fn iter_committed(&self) -> impl Iterator<Item = &AssignmentRef<'a, Movable, T, C>> {
         self.committed.values()
     }
 
@@ -419,8 +419,8 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssignmentLedgerOverlay<'brand, 'a, 'l, T, C>
 where
-    T: PrimInt + Signed + 'static,
-    C: PrimInt + Signed + 'static,
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
 {
     ledger: &'l AssignmentLedger<'a, T, C>,
     staged_commits: BTreeMap<MovableRequestId, BrandedMovableAssignment<'brand, 'a, T, C>>,
@@ -490,7 +490,7 @@ where
             return Err(StageError::AlreadyCommittedInBase(id));
         }
 
-        let asg = Assignment::borrowed(req, start_position, start_time);
+        let asg = AssignmentRef::new(req, start_position, start_time);
 
         if let Some(existing) = self.staged_commits.get(&id) {
             if existing.assignment == asg {
@@ -528,7 +528,7 @@ where
                 .committed()
                 .get(&id)
                 .ok_or(StageError::NotCommittedInBase(id))?;
-            base.clone()
+            *base
         };
         self.staged_uncommits.insert(id, ma_ref.handle());
         Ok(BrandedMovableAssignment::new(asg))
@@ -539,7 +539,7 @@ where
     pub fn move_assignment(
         &mut self,
         old: &'brand BrandedMovableAssignment<'brand, 'a, T, C>,
-        new_asg: Assignment<'a, Movable, T, C>,
+        new_asg: AssignmentRef<'a, Movable, T, C>,
     ) -> Result<BrandedMovableAssignment<'brand, 'a, T, C>, StageError>
     where
         'l: 'a,
@@ -570,7 +570,7 @@ where
     #[inline]
     pub fn iter_fixed_assignments(
         &'_ self,
-    ) -> impl Iterator<Item = &'_ Assignment<'_, Fixed, T, C>> + '_ {
+    ) -> impl Iterator<Item = AssignmentRef<'a, Fixed, T, C>> + '_ {
         self.ledger.iter_fixed_assignments()
     }
 
@@ -604,7 +604,7 @@ where
                 let id = ma.typed_id();
                 !self.staged_uncommits.contains_key(&id) && !self.staged_commits.contains_key(&id)
             })
-            .map(|ma| BrandedMovableAssignment::new(ma.clone()));
+            .map(|ma| BrandedMovableAssignment::new(*ma));
 
         let staged = self.staged_commits.values().cloned();
         base_visible.chain(staged)
@@ -627,6 +627,7 @@ where
             .ledger
             .iter_fixed_assignments()
             .map(AnyAssignmentRef::from);
+
         let base = self
             .ledger
             .iter_movable_assignments()
@@ -635,10 +636,12 @@ where
                 !self.staged_uncommits.contains_key(&id) && !self.staged_commits.contains_key(&id)
             })
             .map(AnyAssignmentRef::from);
+
         let staged = self
             .staged_commits
             .values()
             .map(|bma| AnyAssignmentRef::from(bma.assignment()));
+
         fixed.chain(base).chain(staged)
     }
 
@@ -708,7 +711,7 @@ mod ledger_overlay_tests {
     use dock_alloc_core::domain::{
         Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
     };
-    use dock_alloc_model::{ProblemBuilder, RequestId};
+    use dock_alloc_model::{Assignment, ProblemBuilder, RequestId};
 
     type Tm = i64;
     type Cm = i64;
@@ -761,8 +764,8 @@ mod ledger_overlay_tests {
         r: &'r Request<Movable, Tm, Cm>,
         pos: usize,
         time: i64,
-    ) -> Assignment<'r, Movable, Tm, Cm> {
-        Assignment::borrowed(r, SpacePosition::new(pos), TimePoint::new(time))
+    ) -> AssignmentRef<'r, Movable, Tm, Cm> {
+        AssignmentRef::new(r, SpacePosition::new(pos), TimePoint::new(time))
     }
 
     fn ids<I: Iterator<Item = RequestId>>(it: I) -> Vec<RequestId> {
@@ -790,7 +793,7 @@ mod ledger_overlay_tests {
         b.add_movable_request(r3.clone()).unwrap();
 
         let fixed_a =
-            Assignment::<Fixed, _, _>::owned(r_fixed.clone(), SpacePosition::new(60), 0.into());
+            Assignment::<Fixed, _, _>::new(r_fixed.clone(), SpacePosition::new(60), 0.into());
         b.add_preassigned(fixed_a).unwrap();
 
         let problem = b.build();
@@ -826,7 +829,7 @@ mod ledger_overlay_tests {
         b.add_movable_request(r1.clone()).unwrap();
         b.add_movable_request(r2.clone()).unwrap();
         b.add_movable_request(r3.clone()).unwrap();
-        b.add_preassigned(Assignment::<Fixed, _, _>::owned(
+        b.add_preassigned(Assignment::<Fixed, _, _>::new(
             r_fixed.clone(),
             SpacePosition::new(60),
             TimePoint::new(0),
@@ -868,7 +871,7 @@ mod ledger_overlay_tests {
 
         b.add_movable_request(r1.clone()).unwrap();
         b.add_movable_request(r2.clone()).unwrap();
-        b.add_preassigned(Assignment::<Fixed, _, _>::owned(
+        b.add_preassigned(Assignment::<Fixed, _, _>::new(
             r_fixed.clone(),
             SpacePosition::new(60),
             TimePoint::new(0),
@@ -1104,7 +1107,7 @@ mod ledger_overlay_tests {
 
         b.add_movable_request(r1.clone()).unwrap();
         b.add_movable_request(r2.clone()).unwrap();
-        b.add_preassigned(Assignment::<Fixed, _, _>::owned(
+        b.add_preassigned(Assignment::<Fixed, _, _>::new(
             r_fixed.clone(),
             SpacePosition::new(60),
             TimePoint::new(0),
