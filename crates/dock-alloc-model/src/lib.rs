@@ -54,8 +54,6 @@
 //! for time (`T`) and cost (`C`). This allows users to choose the precision and range required for their specific
 //! problem domain (e.g., `i64` for general use, or larger types for more complex scenarios).
 
-#![allow(dead_code)]
-
 use dock_alloc_core::domain::{
     Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
 };
@@ -88,6 +86,70 @@ impl Display for RequestId {
 impl From<u64> for RequestId {
     fn from(value: u64) -> Self {
         RequestId(value)
+    }
+}
+
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct MoveableRequestId(RequestId);
+
+impl MoveableRequestId {
+    pub fn new(id: RequestId) -> Self {
+        Self(id)
+    }
+
+    pub fn value(&self) -> RequestId {
+        self.0
+    }
+}
+
+impl Display for MoveableRequestId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Moveable({})", self.0)
+    }
+}
+
+impl From<RequestId> for MoveableRequestId {
+    fn from(value: RequestId) -> Self {
+        MoveableRequestId(value)
+    }
+}
+
+impl From<MoveableRequestId> for RequestId {
+    fn from(value: MoveableRequestId) -> Self {
+        value.0
+    }
+}
+
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct FixedRequestId(RequestId);
+
+impl FixedRequestId {
+    pub fn new(id: RequestId) -> Self {
+        Self(id)
+    }
+
+    pub fn value(&self) -> RequestId {
+        self.0
+    }
+}
+
+impl Display for FixedRequestId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Fixed({})", self.0)
+    }
+}
+
+impl From<RequestId> for FixedRequestId {
+    fn from(value: RequestId) -> Self {
+        FixedRequestId(value)
+    }
+}
+
+impl From<FixedRequestId> for RequestId {
+    fn from(value: FixedRequestId) -> Self {
+        value.0
     }
 }
 
@@ -536,6 +598,10 @@ where
     pub fn request(&self) -> &Request<T, C> {
         &self.0
     }
+
+    pub fn id(&self) -> MoveableRequestId {
+        self.0.id().into()
+    }
 }
 
 impl<T, C> Display for MoveableRequest<T, C>
@@ -565,6 +631,34 @@ where
 
     pub fn assignment(&self) -> &Assignment<'_, T, C> {
         &self.0
+    }
+
+    pub fn id(&self) -> FixedRequestId {
+        self.0.request().id().into()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct MoveableAssignment<'r, T = i64, C = i64>(Assignment<'r, T, C>)
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed;
+
+impl<'r, T, C> MoveableAssignment<'r, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    pub fn new(a: Assignment<'r, T, C>) -> Self {
+        Self(a)
+    }
+
+    pub fn assignment(&self) -> &Assignment<'_, T, C> {
+        &self.0
+    }
+
+    pub fn id(&self) -> MoveableRequestId {
+        self.0.request().id().into()
     }
 }
 
@@ -704,20 +798,20 @@ impl std::error::Error for AssignmentExceedsQuayError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PreassignedOverlapError {
-    a: RequestId,
-    b: RequestId,
+    a: FixedRequestId,
+    b: FixedRequestId,
 }
 
 impl PreassignedOverlapError {
-    pub fn new(a: RequestId, b: RequestId) -> Self {
+    pub fn new(a: FixedRequestId, b: FixedRequestId) -> Self {
         PreassignedOverlapError { a, b }
     }
 
-    pub fn request_a(&self) -> RequestId {
+    pub fn request_a(&self) -> FixedRequestId {
         self.a
     }
 
-    pub fn request_b(&self) -> RequestId {
+    pub fn request_b(&self) -> FixedRequestId {
         self.b
     }
 }
@@ -768,8 +862,8 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    unassigned: HashMap<RequestId, MoveableRequest<T, C>>,
-    preassigned: HashMap<RequestId, FixedAssignment<'p, T, C>>,
+    unassigned: HashMap<MoveableRequestId, MoveableRequest<T, C>>,
+    preassigned: HashMap<FixedRequestId, FixedAssignment<'p, T, C>>,
     quay_length: SpaceLength,
 }
 
@@ -803,8 +897,8 @@ where
 {
     #[inline]
     fn new(
-        unassigned: HashMap<RequestId, MoveableRequest<T, C>>,
-        preassigned: HashMap<RequestId, FixedAssignment<'p, T, C>>,
+        unassigned: HashMap<MoveableRequestId, MoveableRequest<T, C>>,
+        preassigned: HashMap<FixedRequestId, FixedAssignment<'p, T, C>>,
         quay_length: SpaceLength,
     ) -> Self {
         Self {
@@ -815,12 +909,12 @@ where
     }
 
     #[inline]
-    pub fn unassigned(&self) -> &HashMap<RequestId, MoveableRequest<T, C>> {
+    pub fn unassigned(&self) -> &HashMap<MoveableRequestId, MoveableRequest<T, C>> {
         &self.unassigned
     }
 
     #[inline]
-    pub fn preassigned(&self) -> &HashMap<RequestId, FixedAssignment<'_, T, C>> {
+    pub fn preassigned(&self) -> &HashMap<FixedRequestId, FixedAssignment<'_, T, C>> {
         &self.preassigned
     }
 
@@ -867,8 +961,8 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    unassigned: HashMap<RequestId, MoveableRequest<T, C>>,
-    preassigned: HashMap<RequestId, FixedAssignment<'p, T, C>>,
+    unassigned: HashMap<MoveableRequestId, MoveableRequest<T, C>>,
+    preassigned: HashMap<FixedRequestId, FixedAssignment<'p, T, C>>,
     quay_length: SpaceLength,
 }
 
@@ -895,10 +989,11 @@ where
         request: Request<T, C>,
     ) -> Result<&mut Self, ProblemBuildError<T>> {
         let id = request.id();
-        if self.unassigned.contains_key(&id) || self.preassigned.contains_key(&id) {
+        if self.unassigned.contains_key(&id.into()) || self.preassigned.contains_key(&id.into()) {
             return Err(ProblemBuildError::DuplicateRequestId(id));
         }
-        self.unassigned.insert(id, MoveableRequest::new(request));
+        self.unassigned
+            .insert(id.into(), MoveableRequest::new(request));
         Ok(self)
     }
 
@@ -919,7 +1014,7 @@ where
         let r = a.request();
         let id = r.id();
 
-        if self.unassigned.contains_key(&id) || self.preassigned.contains_key(&id) {
+        if self.unassigned.contains_key(&id.into()) || self.preassigned.contains_key(&id.into()) {
             return Err(ProblemBuildError::DuplicateRequestId(id));
         }
 
@@ -949,12 +1044,12 @@ where
             let (ot, os) = Self::assignment_spans(other_fixed.assignment());
             if tspan.intersects(&ot) && sspan.intersects(&os) {
                 return Err(ProblemBuildError::PreassignedOverlap(
-                    PreassignedOverlapError::new(id, other_id),
+                    PreassignedOverlapError::new(id.into(), other_id),
                 ));
             }
         }
 
-        self.preassigned.insert(id, fixed);
+        self.preassigned.insert(id.into(), fixed);
         Ok(self)
     }
 

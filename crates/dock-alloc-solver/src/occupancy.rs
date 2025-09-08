@@ -35,7 +35,6 @@ use std::iter::{Copied, FusedIterator, Peekable};
 use std::marker::PhantomData;
 use std::ops::Bound::{Excluded, Unbounded};
 
-#[allow(dead_code)]
 pub struct BrandedFreeSlot<'brand, T>
 where
     T: PrimInt + Signed,
@@ -44,13 +43,48 @@ where
     _brand: Brand<'brand>,
 }
 
-#[allow(dead_code)]
+impl<'brand, T> BrandedFreeSlot<'brand, T>
+where
+    T: PrimInt + Signed,
+{
+    #[inline]
+    fn new(slot: FreeSlot<T>) -> Self {
+        Self {
+            slot,
+            _brand: Brand::default(),
+        }
+    }
+
+    #[inline]
+    pub fn slot(&self) -> &FreeSlot<T> {
+        &self.slot
+    }
+}
+
 pub struct BrandedFreeRegion<'brand, T>
 where
     T: PrimInt + Signed,
 {
     region: SpaceTimeRectangle<T>,
     _brand: Brand<'brand>,
+}
+
+impl<'brand, T> BrandedFreeRegion<'brand, T>
+where
+    T: PrimInt + Signed,
+{
+    #[inline]
+    fn new(region: SpaceTimeRectangle<T>) -> Self {
+        Self {
+            region,
+            _brand: Brand::default(),
+        }
+    }
+
+    #[inline]
+    pub fn region(&self) -> &SpaceTimeRectangle<T> {
+        &self.region
+    }
 }
 
 /// A trait for querying the occupancy state of a quay at different points in time.
@@ -454,6 +488,14 @@ where
     {
         FeasibleRegionIter::new(self, window, duration, required_space, space_window)
     }
+
+    pub fn with_overlay<F, R>(&self, f: F) -> R
+    where
+        F: for<'brand> FnOnce(&mut BerthOccupancyOverlay<'brand, '_, T, Q>) -> R,
+    {
+        let mut overlay = BerthOccupancyOverlay::new(self);
+        f(&mut overlay)
+    }
 }
 
 impl<T, Q> BerthOccupancy<T, Q>
@@ -546,15 +588,12 @@ where
     _brand: PhantomData<&'brand ()>,
 }
 
-/// An iterator over free runs that may be from the base `BerthOccupancy` or owned by an overlay.
 #[derive(Clone)]
 pub enum OverlayRunsIter<I>
 where
     I: Iterator<Item = SpaceInterval>,
 {
-    /// An iterator over runs from the underlying `BerthOccupancy`.
     Base(I),
-    /// An iterator over runs that have been modified by the overlay and are now owned.
     Owned(std::vec::IntoIter<SpaceInterval>),
 }
 
@@ -656,7 +695,6 @@ where
 
 type SpaceIntervalSet = IntervalSet<SpacePosition>;
 
-/// A helper struct to merge two sorted key streams from the overlay maps.
 #[derive(Clone, Debug)]
 struct KeysUnion<'a, T: PrimInt + Signed> {
     free_keys:
@@ -709,7 +747,7 @@ where
     Q: QuayRead,
 {
     /// Creates a new, empty overlay for a given `BerthOccupancy`.
-    pub fn new(berth_occupancy: &'a BerthOccupancy<T, Q>) -> Self {
+    pub(crate) fn new(berth_occupancy: &'a BerthOccupancy<T, Q>) -> Self {
         Self {
             berth_occupancy,
             free_by_time: BTreeMap::new(),
@@ -957,11 +995,12 @@ where
         duration: TimeDelta<T>,
         required_space: SpaceLength,
         space_window: SpaceInterval,
-    ) -> impl Iterator<Item = FreeSlot<T>> + 'a
+    ) -> impl Iterator<Item = BrandedFreeSlot<'brand, T>> + 'a
     where
         T: Copy,
     {
         FreeSlotIter::new(self, time_window, duration, required_space, space_window)
+            .map(|slot| BrandedFreeSlot::new(slot))
     }
 
     /// Returns an iterator over all feasible `SpaceTimeRectangle` regions, considering the overlay.
@@ -972,11 +1011,12 @@ where
         duration: TimeDelta<T>,
         required_space: SpaceLength,
         space_window: SpaceInterval,
-    ) -> impl Iterator<Item = SpaceTimeRectangle<T>> + 'a
+    ) -> impl Iterator<Item = BrandedFreeRegion<'brand, T>> + 'a
     where
         T: Copy,
     {
         FeasibleRegionIter::new(self, window, duration, required_space, space_window)
+            .map(|region| BrandedFreeRegion::new(region))
     }
 
     /// Finds the next timeline key after a given time point, considering both base and overlay keys.
@@ -2182,8 +2222,11 @@ mod tests {
             .iter_free_slots(ti(5, 9), TimeDelta::new(3), len(2), si(0, 10))
             .map(|f| {
                 (
-                    f.start_time().value(),
-                    (f.space().start().value(), f.space().end().value()),
+                    f.slot().start_time().value(),
+                    (
+                        f.slot().space().start().value(),
+                        f.slot().space().end().value(),
+                    ),
                 )
             })
             .collect();
@@ -2226,7 +2269,7 @@ mod tests {
         // Duration 2 forces candidate starts at 0 and 7 (overlay key)
         let items: Vec<_> = ov
             .iter_free_slots(ti(0, 10), TimeDelta::new(2), len(1), si(0, 10))
-            .map(|f| f.start_time().value())
+            .map(|f| f.slot().start_time().value())
             .collect();
         let mut unique_items: Vec<_> = items;
         unique_items.sort();
@@ -2271,9 +2314,9 @@ mod tests {
             .collect();
 
         assert!(
-            items.iter().any(|f| f.start_time().value() == 5
-                && f.space().start().value() <= 2
-                && f.space().end().value() >= 6),
+            items.iter().any(|f| f.slot().start_time().value() == 5
+                && f.slot().space().start().value() <= 2
+                && f.slot().space().end().value() >= 6),
             "Expected overlay free at `start` to apply to the initial slice"
         );
     }
@@ -2345,9 +2388,12 @@ mod tests {
     ) -> BTreeMap<(T, T), BTreeSet<(usize, usize)>> {
         let mut out: BTreeMap<(T, T), Vec<SpaceInterval>> = BTreeMap::new();
         for r in ov.iter_free_regions(window, duration, required, bounds) {
-            out.entry((r.time().start().value(), r.time().end().value()))
-                .or_default()
-                .push(r.space());
+            out.entry((
+                r.region().time().start().value(),
+                r.region().time().end().value(),
+            ))
+            .or_default()
+            .push(r.region().space());
         }
         out.into_iter()
             .map(|(k, v)| (k, set_from_intervals(v)))
@@ -2392,8 +2438,8 @@ mod tests {
         }
         let tw = TimeInterval::new(s, s + duration);
         ov.iter_free_slots(tw, duration, required, bounds)
-            .filter(|fs| fs.start_time() == s)
-            .map(|fs| iv_to_tuple(fs.space()))
+            .filter(|fs| fs.slot().start_time() == s)
+            .map(|fs| iv_to_tuple(fs.slot().space()))
             .collect()
     }
 
