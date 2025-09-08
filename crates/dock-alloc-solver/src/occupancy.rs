@@ -553,14 +553,13 @@ where
     fn try_from(problem: &Problem<T, C>) -> Result<Self, Self::Error> {
         let mut berth_occupancy = BerthOccupancy::<T, Q>::new(problem.quay_length());
         for fixed_assignment in problem.preassigned().values() {
-            let assignment = fixed_assignment.assignment();
-            let request = assignment.request();
+            let request = fixed_assignment.request();
             let length = request.length();
             let processing_duration = request.processing_duration();
-            let start_time = assignment.start_time();
+            let start_time = fixed_assignment.start_time();
             let end_time = start_time + processing_duration;
             let time_interval = TimeInterval::new(start_time, end_time);
-            let start_position = assignment.start_position();
+            let start_position = fixed_assignment.start_position();
             let end_position = SpacePosition::new(start_position.value() + length.value());
             let space_interval = SpaceInterval::new(start_position, end_position);
             let rect = SpaceTimeRectangle::new(space_interval, time_interval);
