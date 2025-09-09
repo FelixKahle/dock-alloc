@@ -26,7 +26,7 @@ use crate::{
         prelude::BerthOccupancy,
         quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError},
     },
-    domain::{SpaceTimeRectangle, Version},
+    domain::SpaceTimeRectangle,
     state::{
         commit::LedgerOverlayCommit,
         ledger::AssignmentLedger,
@@ -68,63 +68,52 @@ impl<'bo, T: PrimInt + Signed> FreeSlot<'bo, T> {
     }
 }
 
-pub struct ProposeCtx<'p, T, C, Q>
+pub struct ProposeCtx<'pp, 'pl, 'pb, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
     Q: QuayRead,
 {
-    ledger: &'p AssignmentLedger<'p, T, C>,
-    berth: &'p BerthOccupancy<T, Q>,
-    problem: &'p Problem<T, C>,
-    stamp: Version,
+    ledger: &'pl AssignmentLedger<'pp, T, C>,
+    berth: &'pb BerthOccupancy<T, Q>,
+    problem: &'pp Problem<T, C>,
 }
 
-impl<'p, T, C, Q> ProposeCtx<'p, T, C, Q>
+impl<'pp, 'pl, 'pb, T, C, Q> ProposeCtx<'pp, 'pl, 'pb, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
     Q: QuayRead,
 {
-    #[inline]
     pub fn new(
-        ledger: &'p AssignmentLedger<'p, T, C>,
-        berth: &'p BerthOccupancy<T, Q>,
-        problem: &'p Problem<T, C>,
-        stamp: Version,
+        ledger: &'pl AssignmentLedger<'pp, T, C>,
+        berth: &'pb BerthOccupancy<T, Q>,
+        problem: &'pp Problem<T, C>,
     ) -> Self {
         Self {
             ledger,
             berth,
             problem,
-            stamp,
         }
     }
 
     #[inline]
-    pub fn ledger(&self) -> &'p AssignmentLedger<'p, T, C> {
+    pub fn ledger(&self) -> &'pl AssignmentLedger<'pp, T, C> {
         self.ledger
     }
-
     #[inline]
-    pub fn berth(&self) -> &'p BerthOccupancy<T, Q> {
+    pub fn berth(&self) -> &'pb BerthOccupancy<T, Q> {
         self.berth
     }
-
     #[inline]
-    pub fn problem(&self) -> &'p Problem<T, C> {
+    pub fn problem(&self) -> &'pp Problem<T, C> {
         self.problem
     }
 
-    #[inline]
-    pub fn stamp(&self) -> Version {
-        self.stamp
-    }
-
-    #[inline]
+    // Note the distinct lifetimes in PlanBuilder now: 'pp (problem), 'pb (berth), 'al (ledger ref)
     pub fn with_builder<F, R>(&self, f: F) -> R
     where
-        F: for<'brand, 'bo, 'al> FnOnce(PlanBuilder<'brand, 'bo, 'p, 'al, T, C, Q>) -> R,
+        F: for<'brand, 'bo, 'al> FnOnce(PlanBuilder<'brand, 'bo, 'pp, 'pb, 'al, T, C, Q>) -> R,
     {
         let alov = AssignmentLedgerOverlay::new(self.ledger());
         let bov = BerthOccupancyOverlay::new(self.berth());
@@ -247,98 +236,96 @@ impl Display for ProposeError {
 
 impl std::error::Error for ProposeError {}
 
-pub struct PlanBuilder<'brand, 'bo, 'p, 'al, T, C, Q>
+pub struct PlanBuilder<'brand, 'bo, 'pp, 'pb, 'al, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
     Q: QuayRead,
 {
-    problem: &'p Problem<T, C>,
-    assignment_overlay: AssignmentLedgerOverlay<'brand, 'p, 'al, T, C>,
-    berth_overlay: BerthOccupancyOverlay<'bo, 'p, T, Q>,
+    problem: &'pp Problem<T, C>,
+    assignment_overlay: AssignmentLedgerOverlay<'brand, 'pp, 'al, T, C>,
+    berth_overlay: BerthOccupancyOverlay<'bo, 'pb, T, Q>,
 }
 
-pub struct Explorer<'brand, 'bo, 'p, 'al, 'pb, T, C, Q>
+pub struct Explorer<'brand, 'bo, 'pp, 'pb, 'al, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
     Q: QuayRead,
 {
-    builder: &'pb PlanBuilder<'brand, 'bo, 'p, 'al, T, C, Q>,
+    assignment_overlay: AssignmentLedgerOverlay<'brand, 'pp, 'al, T, C>,
+    berth_overlay: BerthOccupancyOverlay<'bo, 'pb, T, Q>,
 }
 
-impl<'brand, 'bo, 'p, 'al, 'pb, T, C, Q> Explorer<'brand, 'bo, 'p, 'al, 'pb, T, C, Q>
+impl<'brand, 'bo, 'pp, 'pb, 'al, T, C, Q> Explorer<'brand, 'bo, 'pp, 'pb, 'al, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
     Q: QuayRead,
 {
-    #[allow(dead_code)]
-    #[inline]
-    fn new(builder: &'pb PlanBuilder<'brand, 'bo, 'p, 'al, T, C, Q>) -> Self {
-        Self { builder }
+    fn new(builder: &PlanBuilder<'brand, 'bo, 'pp, 'pb, 'al, T, C, Q>) -> Self {
+        Self {
+            assignment_overlay: builder.assignment_overlay.clone(),
+            berth_overlay: builder.berth_overlay.clone(),
+        }
     }
 
     #[inline]
     pub fn iter_fixed_handles(&self) -> impl Iterator<Item = BrandedFixedRequestId<'brand>> + '_ {
-        self.builder.assignment_overlay.iter_fixed_handles()
+        self.assignment_overlay.iter_fixed_handles()
     }
 
     #[inline]
     pub fn iter_fixed_assignments(
         &self,
     ) -> impl Iterator<Item = AssignmentRef<'_, Fixed, T, C>> + '_ {
-        self.builder.assignment_overlay.iter_fixed_assignments()
+        self.assignment_overlay.iter_fixed_assignments()
     }
 
     #[inline]
     pub fn iter_movable_handles(
         &self,
     ) -> impl Iterator<Item = BrandedMovableRequestId<'brand>> + '_ {
-        self.builder.assignment_overlay.iter_movable_handles()
+        self.assignment_overlay.iter_movable_handles()
     }
 
     #[inline]
     pub fn iter_movable_assignments(
         &self,
-    ) -> impl Iterator<Item = BrandedMovableAssignment<'brand, 'p, T, C>> + '_
-    where
-        'al: 'p,
-    {
-        self.builder.assignment_overlay.iter_movable_assignments()
+    ) -> impl Iterator<Item = BrandedMovableAssignment<'brand, 'pp, T, C>> + '_ {
+        self.assignment_overlay.iter_movable_assignments()
     }
 
     #[inline]
     pub fn iter_unassigned_requests(
         &self,
-    ) -> impl Iterator<Item = BrandedMovableRequest<'brand, 'p, T, C>> + '_ {
-        self.builder.assignment_overlay.iter_unassigned_requests()
+    ) -> impl Iterator<Item = BrandedMovableRequest<'brand, 'pp, T, C>> + '_ {
+        self.assignment_overlay.iter_unassigned_requests()
     }
 
     #[inline]
     pub fn iter_assigned_requests(
         &self,
-    ) -> impl Iterator<Item = BrandedMovableRequest<'brand, 'p, T, C>> + '_ {
-        self.builder.assignment_overlay.iter_assigned_requests()
+    ) -> impl Iterator<Item = BrandedMovableRequest<'brand, 'pp, T, C>> + '_ {
+        self.assignment_overlay.iter_assigned_requests()
     }
 
     #[inline]
     pub fn iter_assignments(&self) -> impl Iterator<Item = AnyAssignmentRef<'_, T, C>> + '_ {
-        self.builder.assignment_overlay.iter_assignments()
+        self.assignment_overlay.iter_assignments()
     }
 
     /// Slots are branded by the **berth** brand `'bo`.
     pub fn iter_slots_for_request(
         &self,
-        request: &BrandedMovableRequest<'brand, 'p, T, C>,
+        request: &BrandedMovableRequest<'brand, 'pp, T, C>,
     ) -> impl Iterator<Item = FreeSlot<'bo, T>> + '_ {
         let time_search_window = request.feasible_time_window();
         let space_search_window = request.feasible_space_window();
         let processing_duration = request.processing_duration();
         let length = request.length();
 
-        self.builder
-            .berth_overlay
+        self.berth_overlay
             .iter_free_slots(
                 time_search_window,
                 processing_duration,
@@ -356,7 +343,7 @@ where
 
     pub fn iter_slots_for_request_within(
         &self,
-        request: &BrandedMovableRequest<'brand, 'p, T, C>,
+        request: &BrandedMovableRequest<'brand, 'pp, T, C>,
         time_search_window: TimeInterval<T>,
         space_search_window: SpaceInterval,
     ) -> impl Iterator<Item = FreeSlot<'bo, T>> + '_ {
@@ -369,8 +356,7 @@ where
             .and_then(|twin| s_opt.map(|swin| (twin, swin)))
             .filter(|(twin, swin)| twin.duration() >= proc && swin.measure() >= len)
             .map(move |(twin, swin)| {
-                self.builder
-                    .berth_overlay
+                self.berth_overlay
                     .iter_free_slots(twin, proc, len, swin)
                     .map(move |slot| {
                         let time = TimeInterval::new(
@@ -385,16 +371,16 @@ where
     }
 }
 
-impl<'brand, 'bo, 'p, 'al, T, C, Q> PlanBuilder<'brand, 'bo, 'p, 'al, T, C, Q>
+impl<'brand, 'bo, 'pp, 'pb, 'al, T, C, Q> PlanBuilder<'brand, 'bo, 'pp, 'pb, 'al, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
     Q: QuayRead,
 {
     fn new(
-        problem: &'p Problem<T, C>,
-        assignment_overlay: AssignmentLedgerOverlay<'brand, 'p, 'al, T, C>,
-        berth_overlay: BerthOccupancyOverlay<'bo, 'p, T, Q>,
+        problem: &'pp Problem<T, C>,
+        assignment_overlay: AssignmentLedgerOverlay<'brand, 'pp, 'al, T, C>,
+        berth_overlay: BerthOccupancyOverlay<'bo, 'pb, T, Q>,
     ) -> Self {
         Self {
             problem,
@@ -404,22 +390,22 @@ where
     }
 
     #[inline]
-    pub fn problem(&self) -> &'p Problem<T, C> {
+    pub fn problem(&self) -> &'pp Problem<T, C> {
         self.problem
     }
 
     #[inline]
-    pub fn with_explorer<'pb, F, R>(&'pb self, f: F) -> R
+    pub fn with_explorer<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&Explorer<'brand, 'bo, 'p, 'al, 'pb, T, C, Q>) -> R,
+        F: FnOnce(&Explorer<'brand, 'bo, 'pp, 'pb, 'al, T, C, Q>) -> R,
     {
-        let explorer = Explorer { builder: self };
-        f(&explorer)
+        let ex = Explorer::new(self);
+        f(&ex)
     }
 
     pub fn propose_unassign(
         &mut self,
-        assignment: &'brand BrandedMovableAssignment<'brand, 'p, T, C>,
+        assignment: &'brand BrandedMovableAssignment<'brand, 'pp, T, C>,
     ) -> Result<FreeSlot<'bo, T>, ProposeError> {
         let a = assignment.assignment();
         let proc = a.request().processing_duration();
@@ -437,9 +423,9 @@ where
 
     pub fn propose_assign(
         &mut self,
-        req: &BrandedMovableRequest<'brand, 'p, T, C>,
+        req: &BrandedMovableRequest<'brand, 'pp, T, C>,
         slot: FreeSlot<'bo, T>,
-    ) -> Result<BrandedMovableAssignment<'brand, 'p, T, C>, ProposeError> {
+    ) -> Result<BrandedMovableAssignment<'brand, 'pp, T, C>, ProposeError> {
         let a = AssignmentRef::new(req.request(), slot.space().start(), slot.time().start());
         let rect: SpaceTimeRectangle<T> = a.into();
 
@@ -453,9 +439,108 @@ where
         Ok(ma)
     }
 
-    pub fn build(self) -> Plan<'p, T, C> {
+    pub fn build(self) -> Plan<'pp, T, C> {
         let berth_commit = self.berth_overlay.into_commit();
         let ledger_commit = self.assignment_overlay.into_commit();
         Plan::new(berth_commit, ledger_commit)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::berth::prelude::BooleanVecQuay;
+    use dock_alloc_core::domain::{
+        Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
+    };
+    use dock_alloc_model::{Movable, ProblemBuilder, Request, RequestId};
+    use rayon::prelude::*;
+
+    type Tm = i64;
+    type Cm = i64;
+
+    fn req_movable_ok(
+        id: u64,
+        len: usize,
+        proc_t: i64,
+        t0: i64,
+        t1: i64,
+        s0: usize,
+        s1: usize,
+    ) -> Request<Movable, Tm, Cm> {
+        Request::<Movable, _, _>::new(
+            RequestId::new(id),
+            SpaceLength::new(len),
+            TimeDelta::new(proc_t),
+            SpacePosition::new(s0),
+            Cost::new(1),
+            Cost::new(1),
+            TimeInterval::new(TimePoint::new(t0), TimePoint::new(t1)),
+            SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
+        )
+        .expect("valid movable request")
+    }
+
+    #[test]
+    fn collect_plans_in_parallel_with_rayon() {
+        let n = 8usize;
+        let quay_len = 200usize;
+
+        let mut pb = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(quay_len));
+        for i in 0..n {
+            let base = i * 20;
+            pb.add_movable_request(req_movable_ok(
+                (i as u64) + 1,
+                10,
+                5,
+                0,
+                100,
+                base,
+                base + 20,
+            ))
+            .unwrap();
+        }
+        let problem = pb.build();
+
+        let mut ledger = AssignmentLedger::from(&problem);
+        let mut berth: BerthOccupancy<Tm, BooleanVecQuay> =
+            BerthOccupancy::new(problem.quay_length());
+
+        let mut ids: Vec<_> = problem.movables().keys().cloned().collect();
+        ids.sort_by_key(|id| id.value());
+
+        let plans = ids
+            .par_iter()
+            .map(|mid| {
+                let alov = AssignmentLedgerOverlay::new(&ledger);
+                let bov = BerthOccupancyOverlay::new(&berth);
+
+                let mut b = PlanBuilder::new(&problem, alov, bov);
+                let (req, slot) = b.with_explorer(|ex| {
+                    let req = ex
+                        .iter_unassigned_requests()
+                        .find(|r| r.id() == *mid)
+                        .expect("request visible in overlay");
+                    let slot = ex
+                        .iter_slots_for_request(&req)
+                        .next()
+                        .expect("at least one feasible slot");
+                    (req, slot)
+                });
+                let _ = b.propose_assign(&req, slot).expect("stage assign");
+                b.build()
+            })
+            .collect::<Vec<_>>();
+
+        for p in &plans {
+            assert_eq!(p.ledger_commit().operations().len(), 1);
+        }
+        for p in plans {
+            ledger
+                .apply(p.ledger_commit())
+                .expect("apply ledger commit");
+            berth.apply(p.berth_commit()).expect("apply berth commit");
+        }
+        assert_eq!(ledger.iter_movable_assignments().count(), ids.len());
     }
 }
