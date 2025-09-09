@@ -19,8 +19,45 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-pub mod berth;
-pub mod container;
-pub mod domain;
-pub mod framework;
-pub mod ledger;
+use dock_alloc_core::domain::{SpaceInterval, TimePoint};
+use num_traits::{PrimInt, Signed};
+
+pub trait SliceView<T: PrimInt + Signed> {
+    type FreeRunsIter<'s>: Iterator<Item = SpaceInterval> + 's
+    where
+        Self: 's;
+
+    fn pred(&self, time_point: TimePoint<T>) -> Option<TimePoint<T>>;
+    fn next_key_after(&self, after: TimePoint<T>) -> Option<TimePoint<T>>;
+    fn has_key_at(&self, time_point: TimePoint<T>) -> bool;
+    fn free_runs_at(&self, time_point: TimePoint<T>) -> Self::FreeRunsIter<'_>;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TimeSliceRef<'a, T, Q>
+where
+    T: PrimInt + Signed,
+{
+    time: TimePoint<T>,
+    quay: &'a Q,
+}
+
+impl<'a, T, Q> TimeSliceRef<'a, T, Q>
+where
+    T: PrimInt + Signed,
+{
+    #[inline]
+    pub fn new(time: TimePoint<T>, quay: &'a Q) -> Self {
+        Self { time, quay }
+    }
+
+    #[inline]
+    pub fn time(&self) -> TimePoint<T> {
+        self.time
+    }
+
+    #[inline]
+    pub fn quay(&self) -> &'a Q {
+        self.quay
+    }
+}

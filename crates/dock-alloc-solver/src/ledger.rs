@@ -19,13 +19,219 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use dock_alloc_core::domain::{SpacePosition, TimePoint};
+use dock_alloc_core::{
+    domain::{Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint},
+    marker::Brand,
+};
 use dock_alloc_model::{
     AnyAssignmentRef, AssignmentRef, Fixed, FixedRequestId, Movable, MovableRequestId, Problem,
     Request, RequestId, SolutionRef,
 };
 use num_traits::{PrimInt, Signed};
 use std::collections::{BTreeMap, HashMap};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BrandedMovableRequestId<'brand> {
+    id: MovableRequestId,
+    _brand: Brand<'brand>,
+}
+
+impl<'brand> BrandedMovableRequestId<'brand> {
+    #[inline]
+    fn new(id: MovableRequestId) -> Self {
+        Self {
+            id,
+            _brand: Brand::new(),
+        }
+    }
+
+    #[inline]
+    pub fn id(self) -> MovableRequestId {
+        self.id
+    }
+}
+
+impl<'brand> std::fmt::Display for BrandedMovableRequestId<'brand> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MovableHandle({})", self.id)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BrandedFixedRequestId<'brand> {
+    id: FixedRequestId,
+    _brand: Brand<'brand>,
+}
+
+impl<'brand> BrandedFixedRequestId<'brand> {
+    #[inline]
+    fn new(id: FixedRequestId) -> Self {
+        Self {
+            id,
+            _brand: Brand::new(),
+        }
+    }
+
+    #[inline]
+    pub fn id(self) -> FixedRequestId {
+        self.id
+    }
+}
+
+impl<'brand> std::fmt::Display for BrandedFixedRequestId<'brand> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FixedHandle({})", self.id)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct BrandedMovableRequest<'brand, 'a, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    inner: &'a Request<Movable, T, C>,
+    _brand: Brand<'brand>,
+}
+
+impl<'brand, 'a, T, C> BrandedMovableRequest<'brand, 'a, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    #[inline]
+    fn new(inner: &'a Request<Movable, T, C>) -> Self {
+        Self {
+            inner,
+            _brand: Brand::new(),
+        }
+    }
+
+    #[inline]
+    pub fn length(&self) -> SpaceLength {
+        self.inner.length()
+    }
+
+    #[inline]
+    pub fn arrival_time(&self) -> TimePoint<T> {
+        self.inner.arrival_time()
+    }
+
+    #[inline]
+    pub fn processing_duration(&self) -> TimeDelta<T> {
+        self.inner.processing_duration()
+    }
+
+    #[inline]
+    pub fn target_position(&self) -> SpacePosition {
+        self.inner.target_position()
+    }
+
+    #[inline]
+    pub fn cost_per_delay(&self) -> Cost<C> {
+        self.inner.cost_per_delay()
+    }
+
+    #[inline]
+    pub fn cost_per_position_deviation(&self) -> Cost<C> {
+        self.inner.cost_per_position_deviation()
+    }
+
+    #[inline]
+    pub fn feasible_time_window(&self) -> TimeInterval<T> {
+        self.inner.feasible_time_window()
+    }
+
+    #[inline]
+    pub fn feasible_space_window(&self) -> SpaceInterval {
+        self.inner.feasible_space_window()
+    }
+
+    #[inline]
+    pub fn request(&self) -> &'a Request<Movable, T, C> {
+        self.inner
+    }
+
+    #[inline]
+    pub fn id(&self) -> MovableRequestId {
+        self.inner.typed_id()
+    }
+
+    #[inline]
+    pub fn handle(&self) -> BrandedMovableRequestId<'brand> {
+        BrandedMovableRequestId::new(self.id())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct BrandedMovableAssignment<'brand, 'a, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    assignment: AssignmentRef<'a, Movable, T, C>,
+    _brand: Brand<'brand>,
+}
+
+impl<'brand, 'a, T, C> BrandedMovableAssignment<'brand, 'a, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    #[inline]
+    fn new(assignment: AssignmentRef<'a, Movable, T, C>) -> Self {
+        Self {
+            assignment,
+            _brand: Brand::new(),
+        }
+    }
+
+    #[inline]
+    pub fn assignment(&self) -> AssignmentRef<'a, Movable, T, C> {
+        self.assignment
+    }
+
+    #[inline]
+    pub fn start_position(&self) -> SpacePosition {
+        self.assignment.start_position()
+    }
+
+    #[inline]
+    pub fn start_time(&self) -> TimePoint<T> {
+        self.assignment.start_time()
+    }
+
+    #[inline]
+    pub fn length(&self) -> SpaceLength {
+        self.assignment.request().length()
+    }
+
+    #[inline]
+    pub fn processing_duration(&self) -> TimeDelta<T> {
+        self.assignment.request().processing_duration()
+    }
+
+    #[inline]
+    pub fn id(&self) -> MovableRequestId {
+        self.assignment().typed_id()
+    }
+
+    #[inline]
+    pub fn handle(&self) -> BrandedMovableRequestId<'brand> {
+        BrandedMovableRequestId::new(self.id())
+    }
+}
+
+impl<'brand, 'a, T, C> From<BrandedMovableAssignment<'brand, 'a, T, C>>
+    for AssignmentRef<'a, Movable, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    fn from(val: BrandedMovableAssignment<'brand, 'a, T, C>) -> Self {
+        val.assignment
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssignmentLedger<'a, T: PrimInt + Signed, C: PrimInt + Signed> {
@@ -117,7 +323,7 @@ where
     }
 
     #[inline]
-    pub fn apply(&mut self, overlay: AssignmentLedgerOverlay<'a, '_, T, C>) {
+    pub fn apply<'brand>(&mut self, overlay: AssignmentLedgerOverlay<'brand, 'a, '_, T, C>) {
         // Ensure the overlay was created from this ledger
         debug_assert!(
             std::ptr::eq(self as *const _, overlay.ledger as *const _),
@@ -130,13 +336,14 @@ where
             }
         }
 
-        for (id, asg) in overlay.staged_commits.into_iter() {
+        for (id, bma) in overlay.staged_commits.into_iter() {
+            let asg: AssignmentRef<'a, Movable, T, C> = bma.into();
             let _prev = self.committed.insert(id, asg);
         }
     }
 
     #[inline]
-    pub fn iter_fixed_ids(&self) -> impl Iterator<Item = &FixedRequestId> + '_ {
+    pub fn iter_fixed_handles(&self) -> impl Iterator<Item = &FixedRequestId> + '_ {
         self.problem.preassigned().keys()
     }
 
@@ -148,7 +355,7 @@ where
     }
 
     #[inline]
-    pub fn iter_movable_ids(&self) -> impl Iterator<Item = &MovableRequestId> + '_ {
+    pub fn iter_movable_handles(&self) -> impl Iterator<Item = &MovableRequestId> + '_ {
         self.committed.keys()
     }
 
@@ -186,21 +393,20 @@ where
             .problem
             .preassigned()
             .values()
-            .map(|a| a.as_ref())
             .map(AnyAssignmentRef::from);
-        let movable_iter = self.committed.values().copied().map(AnyAssignmentRef::from);
+        let movable_iter = self.committed.values().map(AnyAssignmentRef::from);
         fixed_iter.chain(movable_iter)
     }
 
     #[inline]
-    pub fn overlay(&self) -> AssignmentLedgerOverlay<'a, '_, T, C> {
+    pub fn overlay(&self) -> AssignmentLedgerOverlay<'_, 'a, '_, T, C> {
         AssignmentLedgerOverlay::new(self)
     }
 
     #[inline]
     pub fn with_overlay<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&AssignmentLedgerOverlay<'a, '_, T, C>) -> R,
+        F: for<'brand> FnOnce(&AssignmentLedgerOverlay<'brand, 'a, '_, T, C>) -> R,
     {
         let overlay = AssignmentLedgerOverlay::new(self);
         f(&overlay)
@@ -208,14 +414,15 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AssignmentLedgerOverlay<'a, 'l, T, C>
+pub struct AssignmentLedgerOverlay<'brand, 'a, 'l, T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
     ledger: &'l AssignmentLedger<'a, T, C>,
-    staged_commits: BTreeMap<MovableRequestId, AssignmentRef<'a, Movable, T, C>>,
-    staged_uncommits: BTreeMap<MovableRequestId, MovableRequestId>,
+    staged_commits: BTreeMap<MovableRequestId, BrandedMovableAssignment<'brand, 'a, T, C>>,
+    staged_uncommits: BTreeMap<MovableRequestId, BrandedMovableRequestId<'brand>>,
+    _brand: Brand<'brand>,
 }
 
 /// Errors that can occur during overlay staging operations.
@@ -252,7 +459,7 @@ impl std::fmt::Display for StageError {
 
 impl std::error::Error for StageError {}
 
-impl<'a, 'l, T, C> AssignmentLedgerOverlay<'a, 'l, T, C>
+impl<'brand, 'a, 'l, T, C> AssignmentLedgerOverlay<'brand, 'a, 'l, T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
@@ -262,12 +469,8 @@ where
             ledger,
             staged_commits: BTreeMap::new(),
             staged_uncommits: BTreeMap::new(),
+            _brand: Brand::new(),
         }
-    }
-
-    #[inline]
-    pub fn ledger(&self) -> &'l AssignmentLedger<'a, T, C> {
-        self.ledger
     }
 
     pub fn commit_assignment(
@@ -275,7 +478,7 @@ where
         req: &'a Request<Movable, T, C>,
         start_time: TimePoint<T>,
         start_position: SpacePosition,
-    ) -> Result<AssignmentRef<'a, Movable, T, C>, StageError> {
+    ) -> Result<BrandedMovableAssignment<'brand, 'a, T, C>, StageError> {
         let id = req.typed_id();
 
         let base_has = self.ledger.committed().contains_key(&id);
@@ -287,26 +490,24 @@ where
         let asg = AssignmentRef::new(req, start_position, start_time);
 
         if let Some(existing) = self.staged_commits.get(&id) {
-            if *existing == asg {
-                return Ok(*existing);
+            if existing.assignment == asg {
+                return Ok(existing.clone());
             }
             return Err(StageError::AlreadyStagedCommit(id));
         }
 
         self.staged_uncommits.remove(&id);
-        self.staged_commits.insert(id, asg);
-        Ok(asg)
+        let new_bma = BrandedMovableAssignment::new(asg);
+        self.staged_commits.insert(id, new_bma.clone());
+        Ok(new_bma)
     }
 
     #[inline]
     pub fn uncommit_assignment(
         &mut self,
-        ma_ref: &AssignmentRef<'a, Movable, T, C>,
-    ) -> Result<AssignmentRef<'a, Movable, T, C>, StageError>
-    where
-        'l: 'a,
-    {
-        let id = ma_ref.typed_id();
+        ma_ref: &'brand BrandedMovableAssignment<'brand, 'a, T, C>,
+    ) -> Result<BrandedMovableAssignment<'brand, 'a, T, C>, StageError> {
+        let id = ma_ref.id();
         if let Some(staged) = self.staged_commits.remove(&id) {
             return Ok(staged);
         }
@@ -323,23 +524,20 @@ where
                 .ok_or(StageError::NotCommittedInBase(id))?;
             *base
         };
-        self.staged_uncommits.insert(id, id);
-        Ok(asg)
+        self.staged_uncommits.insert(id, ma_ref.handle());
+        Ok(BrandedMovableAssignment::new(asg))
     }
 
     /// Move an existing movable assignment to a new placement in the overlay.
     #[inline]
     pub fn move_assignment(
         &mut self,
-        old: &AssignmentRef<'a, Movable, T, C>,
+        old: &'brand BrandedMovableAssignment<'brand, 'a, T, C>,
         new_asg: AssignmentRef<'a, Movable, T, C>,
-    ) -> Result<AssignmentRef<'a, Movable, T, C>, StageError>
-    where
-        'l: 'a,
-    {
+    ) -> Result<BrandedMovableAssignment<'brand, 'a, T, C>, StageError> {
         debug_assert_eq!(
             old.id(),
-            new_asg.id(),
+            new_asg.typed_id(),
             "move_assignment(): request id mismatch"
         );
 
@@ -354,8 +552,10 @@ where
     }
 
     #[inline]
-    pub fn iter_fixed_ids(&self) -> impl Iterator<Item = &FixedRequestId> + '_ {
-        self.ledger.iter_fixed_ids()
+    pub fn iter_fixed_handles(&self) -> impl Iterator<Item = BrandedFixedRequestId<'brand>> + '_ {
+        self.ledger
+            .iter_fixed_handles()
+            .map(|id| BrandedFixedRequestId::new(*id))
     }
 
     #[inline]
@@ -366,18 +566,25 @@ where
     }
 
     #[inline]
-    pub fn iter_movable_ids(&self) -> impl Iterator<Item = &MovableRequestId> + '_ {
-        let base_visible = self.ledger.iter_movable_ids().filter(move |id| {
-            !self.staged_uncommits.contains_key(id) && !self.staged_commits.contains_key(id)
-        });
+    pub fn iter_movable_handles(
+        &self,
+    ) -> impl Iterator<Item = BrandedMovableRequestId<'brand>> + '_ {
+        let base_visible = self
+            .ledger
+            .iter_committed()
+            .filter(move |ma| {
+                let id = ma.typed_id();
+                !self.staged_uncommits.contains_key(&id) && !self.staged_commits.contains_key(&id)
+            })
+            .map(|ma| BrandedMovableRequestId::new(ma.typed_id()));
 
-        let staged = self.staged_commits.keys();
+        let staged = self.staged_commits.values().map(|ma| ma.handle());
         base_visible.chain(staged)
     }
 
     pub fn iter_movable_assignments(
         &self,
-    ) -> impl Iterator<Item = AssignmentRef<'a, Movable, T, C>> + '_ {
+    ) -> impl Iterator<Item = BrandedMovableAssignment<'brand, 'a, T, C>> + '_ {
         let base_visible = self
             .ledger
             .iter_movable_assignments()
@@ -385,18 +592,24 @@ where
                 let id = ma.typed_id();
                 !self.staged_uncommits.contains_key(&id) && !self.staged_commits.contains_key(&id)
             })
-            .copied();
+            .map(|ma| BrandedMovableAssignment::new(*ma));
 
-        let staged = self.staged_commits.values().copied();
+        let staged = self.staged_commits.values().cloned();
         base_visible.chain(staged)
     }
 
     #[inline]
-    pub fn iter_staged_commits(&self) -> impl Iterator<Item = &AssignmentRef<'a, Movable, T, C>> {
+    pub fn iter_staged_commits(
+        &self,
+    ) -> impl Iterator<Item = &BrandedMovableAssignment<'brand, 'a, T, C>> {
         self.staged_commits.values()
     }
 
     #[inline]
+    pub fn iter_staged_uncommits(&self) -> impl Iterator<Item = &BrandedMovableRequestId<'brand>> {
+        self.staged_uncommits.values()
+    }
+
     pub fn iter_assignments(&'_ self) -> impl Iterator<Item = AnyAssignmentRef<'_, T, C>> + '_ {
         let fixed = self
             .ledger
@@ -410,34 +623,48 @@ where
                 let id = ma.typed_id();
                 !self.staged_uncommits.contains_key(&id) && !self.staged_commits.contains_key(&id)
             })
-            .copied()
             .map(AnyAssignmentRef::from);
 
         let staged = self
             .staged_commits
             .values()
-            .copied()
-            .map(AnyAssignmentRef::from);
+            .map(|bma| AnyAssignmentRef::from(bma.assignment()));
+
         fixed.chain(base).chain(staged)
     }
 
-    pub fn iter_unassigned_requests(&self) -> impl Iterator<Item = &Request<Movable, T, C>> + '_ {
-        self.ledger.problem.movables().values().filter(move |req| {
-            let id = req.typed_id();
-            let base_has = self.ledger.committed.contains_key(&id);
-            let staged_commit = self.staged_commits.contains_key(&id);
-            let tombstoned = self.staged_uncommits.contains_key(&id);
+    pub fn iter_unassigned_requests(
+        &self,
+    ) -> impl Iterator<Item = BrandedMovableRequest<'brand, 'a, T, C>> + '_ {
+        self.ledger
+            .problem
+            .movables()
+            .values()
+            .filter(move |req| {
+                let id = req.typed_id();
+                let base_has = self.ledger.committed.contains_key(&id);
+                let staged_commit = self.staged_commits.contains_key(&id);
+                let tombstoned = self.staged_uncommits.contains_key(&id);
 
-            (!base_has || tombstoned) && !staged_commit
-        })
+                (!base_has || tombstoned) && !staged_commit
+            })
+            .map(|req| BrandedMovableRequest::<'brand, 'a, T, C>::new(req))
     }
 
-    pub fn iter_assigned_requests(&self) -> impl Iterator<Item = &Request<Movable, T, C>> + '_ {
-        self.ledger.problem.movables().values().filter(move |req| {
-            let id = req.typed_id();
-            (self.ledger.committed.contains_key(&id) && !self.staged_uncommits.contains_key(&id))
-                || self.staged_commits.contains_key(&id)
-        })
+    pub fn iter_assigned_requests(
+        &self,
+    ) -> impl Iterator<Item = BrandedMovableRequest<'brand, 'a, T, C>> + '_ {
+        self.ledger
+            .problem
+            .movables()
+            .values()
+            .filter(move |req| {
+                let id = req.typed_id();
+                (self.ledger.committed.contains_key(&id)
+                    && !self.staged_uncommits.contains_key(&id))
+                    || self.staged_commits.contains_key(&id)
+            })
+            .map(|req| BrandedMovableRequest::<'brand, 'a, T, C>::new(req))
     }
 }
 
@@ -453,12 +680,13 @@ where
     }
 }
 
-impl<'p, 'l, T, C> From<&'l AssignmentLedgerOverlay<'p, 'l, T, C>> for SolutionRef<'l, T, C>
+impl<'brand, 'p, 'l, T, C> From<&'l AssignmentLedgerOverlay<'brand, 'p, 'l, T, C>>
+    for SolutionRef<'l, T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
 {
-    fn from(val: &'l AssignmentLedgerOverlay<'p, 'l, T, C>) -> Self {
+    fn from(val: &'l AssignmentLedgerOverlay<'brand, 'p, 'l, T, C>) -> Self {
         let decisions: HashMap<RequestId, AnyAssignmentRef<'l, T, C>> =
             val.iter_assignments().map(|a| (a.id(), a)).collect();
         SolutionRef::from_assignments(decisions)
@@ -560,11 +788,11 @@ mod ledger_overlay_tests {
         let ledger = AssignmentLedger::from(&problem);
 
         // fixed via handles (now &FixedRequestId -> RequestId)
-        let fixed_ids = ids(ledger.iter_fixed_ids().map(|h| (*h).into()));
+        let fixed_ids = ids(ledger.iter_fixed_handles().map(|h| (*h).into()));
         assert_eq!(fixed_ids, vec![RequestId::new(10)]);
         assert_eq!(ledger.iter_fixed_assignments().count(), 1);
 
-        assert_eq!(ledger.iter_movable_ids().count(), 0);
+        assert_eq!(ledger.iter_movable_handles().count(), 0);
         assert_eq!(ledger.iter_movable_assignments().count(), 0);
 
         // &Request<Movable> -> RequestId directly
@@ -606,7 +834,7 @@ mod ledger_overlay_tests {
             .expect("commit r1");
 
         // &MovableRequestId -> RequestId
-        let mov_ids = ids(ledger.iter_movable_ids().map(|h| (*h).into()));
+        let mov_ids = ids(ledger.iter_movable_handles().map(|h| (*h).into()));
         assert_eq!(mov_ids, vec![r1.id()]);
 
         let unassigned_ids = ids(ledger.iter_unassigned_requests().map(|r| r.id()));
@@ -652,28 +880,27 @@ mod ledger_overlay_tests {
 
         let mut ov = AssignmentLedgerOverlay::new(&ledger);
 
-        // Get the committed assignment for r1 from the ledger
-        let committed_r1 = *ledger
-            .committed
-            .get(&MovableRequestId::from(r1.id()))
-            .unwrap();
+        // Build a branded assignment for r1 (only the id matters for uncommit)
+        let branded_r1 = BrandedMovableAssignment::new(asg(&r1, 0, 0));
         let _ = ov
-            .uncommit_assignment(&committed_r1)
+            .uncommit_assignment(&branded_r1)
             .expect("stage uncommit r1");
 
         // overlay iterators use branded requests; get RequestId via .request().id()
-        let unassigned_ids = ids(ov.iter_unassigned_requests().map(|mr| mr.id()));
+        let unassigned_ids = ids(ov.iter_unassigned_requests().map(|mr| mr.request().id()));
         assert!(unassigned_ids.contains(&r1.id()));
 
-        let assigned_ids = ids(ov.iter_assigned_requests().map(|mr| mr.id()));
+        let assigned_ids = ids(ov.iter_assigned_requests().map(|mr| mr.request().id()));
         assert!(assigned_ids.contains(&r2.id()));
         assert!(!assigned_ids.contains(&r1.id()));
 
-        // Check that r1 is staged for uncommit
-        assert!(
-            ov.staged_uncommits
-                .contains_key(&MovableRequestId::from(r1.id()))
-        );
+        // overlay handles are branded; convert to RequestId
+        let visible_movable = ids(ov.iter_movable_handles().map(|h| h.id().into()));
+        assert_eq!(visible_movable, vec![r2.id()]);
+
+        // staged tombstone set contains r1
+        let staged_uncommit = ids(ov.iter_staged_uncommits().map(|h| h.id().into()));
+        assert_eq!(staged_uncommit, vec![r1.id()]);
         assert_eq!(ov.iter_staged_commits().count(), 0);
     }
 
@@ -705,15 +932,15 @@ mod ledger_overlay_tests {
             .expect("stage commit r2");
 
         // unassigned in overlay should be {r3}
-        let unassigned_ids = ids(ov.iter_unassigned_requests().map(|mr| mr.id()));
+        let unassigned_ids = ids(ov.iter_unassigned_requests().map(|mr| mr.request().id()));
         assert_eq!(unassigned_ids, vec![r3.id()]);
 
         // assigned in overlay includes r1 (base) and r2 (staged)
-        let assigned_ids = ids(ov.iter_assigned_requests().map(|mr| mr.id()));
+        let assigned_ids = ids(ov.iter_assigned_requests().map(|mr| mr.request().id()));
         assert_eq!(assigned_ids, vec![r1.id(), r2.id()]);
 
         // visible movables in overlay: r1 + r2
-        let mov_ids = ids(ov.iter_movable_assignments().map(|a| a.id()));
+        let mov_ids = ids(ov.iter_movable_handles().map(|h| h.id().into()));
         assert_eq!(mov_ids, vec![r1.id(), r2.id()]);
     }
 
@@ -735,32 +962,33 @@ mod ledger_overlay_tests {
 
         let mut ov = AssignmentLedgerOverlay::new(&ledger);
 
-        // Get the committed assignment for r1 from the ledger to drive the move
-        let committed_r1 = *ledger
-            .committed
-            .get(&MovableRequestId::from(r1.id()))
-            .unwrap();
+        // Construct branded "old" for r1 to drive the move
+        let base_bma = BrandedMovableAssignment::new(asg(&r1, 0, 0));
 
         let new_asg = asg(&r1, 30, 10);
         let staged_ma = ov
-            .move_assignment(&committed_r1, new_asg.clone())
+            .move_assignment(&base_bma, new_asg.clone())
             .expect("stage move r1");
 
         // r1 is assigned in overlay (via staged commit)
-        let unassigned_ids = ids(ov.iter_unassigned_requests().map(|mr| mr.id()));
+        let unassigned_ids = ids(ov.iter_unassigned_requests().map(|mr| mr.request().id()));
         assert!(!unassigned_ids.contains(&r1.id()));
 
-        let assigned_ids = ids(ov.iter_assigned_requests().map(|mr| mr.id()));
+        let assigned_ids = ids(ov.iter_assigned_requests().map(|mr| mr.request().id()));
         assert!(assigned_ids.contains(&r1.id()));
 
         // net effect: no tombstone remains, only the new staged commit
-        assert!(ov.staged_uncommits.is_empty());
-        let staged_commit = ids(ov.iter_staged_commits().map(|ma| ma.id()));
+        let staged_uncommit = ids(ov.iter_staged_uncommits().map(|h| h.id().into()));
+        assert_eq!(staged_uncommit, Vec::<RequestId>::new());
+        let staged_commit = ids(ov.iter_staged_commits().map(|ma| ma.id().into()));
         assert_eq!(staged_commit, vec![r1.id()]);
 
         // staged assignment matches new position/time
-        assert_eq!(staged_ma.start_position(), SpacePosition::new(30));
-        assert_eq!(staged_ma.start_time(), TimePoint::new(10));
+        assert_eq!(
+            staged_ma.assignment().start_position(),
+            SpacePosition::new(30)
+        );
+        assert_eq!(staged_ma.assignment().start_time(), TimePoint::new(10));
     }
 
     #[test]
@@ -803,8 +1031,8 @@ mod ledger_overlay_tests {
         let problem = b.build();
         let ledger = AssignmentLedger::from(&problem);
 
-        // Dummy assignment for r1 (not present in base)
-        let dummy_ma = asg(&r1, 0, 0);
+        // Dummy branded assignment for r1 (not present in base)
+        let dummy_ma = BrandedMovableAssignment::new(asg(&r1, 0, 0));
 
         let mut ov = AssignmentLedgerOverlay::new(&ledger);
         let err = ov.uncommit_assignment(&dummy_ma).unwrap_err();
@@ -848,7 +1076,7 @@ mod ledger_overlay_tests {
         );
 
         // uncommit the staged id -> clears staged commit
-        let staged = *ov.iter_staged_commits().next().unwrap();
+        let staged = ov.iter_staged_commits().next().unwrap().clone();
         let _ = ov.uncommit_assignment(&staged).expect("stage uncommit");
 
         // second uncommit -> error (not in base, no staged)
