@@ -19,24 +19,43 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-pub mod berthocc;
-pub mod commit;
-pub mod domain;
-mod iter;
-pub mod operations;
-pub mod overlay;
-pub mod quay;
-pub mod slice;
+use crate::berth::operations::Operation;
+use num_traits::{PrimInt, Signed};
 
-pub mod prelude {
-    pub use super::berthocc::BerthOccupancy;
-    pub use super::commit::BerthOverlayCommit;
-    pub use super::domain::{FreeRegion, FreeSlot};
-    pub use super::operations::{FreeOperation, OccupyOperation, Operation};
-    pub use super::overlay::BerthOccupancyOverlay;
-    pub use super::quay::{
-        BTreeMapQuay, BitPackedQuay, BooleanVecQuay, Quay, QuayRead,
-        QuaySpaceIntervalOutOfBoundsError, QuayWrite,
-    };
-    pub use super::slice::{SliceView, TimeSliceRef};
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BerthOverlayCommit<T>
+where
+    T: PrimInt + Signed,
+{
+    operations: Vec<Operation<T>>,
+}
+
+impl<T> BerthOverlayCommit<T>
+where
+    T: PrimInt + Signed,
+{
+    pub fn new(operations: Vec<Operation<T>>) -> Self {
+        Self { operations }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            operations: Vec::with_capacity(capacity),
+        }
+    }
+
+    pub fn operations(&self) -> &[Operation<T>] {
+        &self.operations
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.operations.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use static_assertions::assert_impl_all;
+
+    assert_impl_all!(crate::berth::commit::BerthOverlayCommit<i64>: Send, Sync);
 }

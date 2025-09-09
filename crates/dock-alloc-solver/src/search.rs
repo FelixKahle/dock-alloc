@@ -20,18 +20,24 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use crate::{
-    domain::{SpaceTimeRectangle, Version},
-    ledger::{
-        AssignmentLedger, AssignmentLedgerOverlay, BrandedFixedRequestId, BrandedMovableAssignment,
-        BrandedMovableRequest, BrandedMovableRequestId, StageError,
+    berth::{
+        commit::BerthOverlayCommit,
+        overlay::BerthOccupancyOverlay,
+        prelude::BerthOccupancy,
+        quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError},
     },
-    occupancy::{BerthOccupancy, BerthOccupancyOverlay},
-    quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError, QuayWrite},
+    domain::{SpaceTimeRectangle, Version},
+    state::{
+        commit::LedgerOverlayCommit,
+        ledger::AssignmentLedger,
+        overlay::{
+            AssignmentLedgerOverlay, BrandedFixedRequestId, BrandedMovableAssignment,
+            BrandedMovableRequest, BrandedMovableRequestId, StageError,
+        },
+    },
 };
 use dock_alloc_core::domain::{SpaceInterval, TimeInterval};
-use dock_alloc_model::{
-    AnyAssignmentRef, AssignmentRef, Fixed, Kind, Movable, Problem, SolutionRef,
-};
+use dock_alloc_model::{AnyAssignmentRef, AssignmentRef, Fixed, Kind, Problem};
 use num_traits::{PrimInt, Signed};
 use std::{fmt::Display, marker::PhantomData};
 
@@ -175,139 +181,38 @@ where
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct UnassignOperation<'p, T, C>
-where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
-{
-    moveable: AssignmentRef<'p, Movable, T, C>,
-}
-
-impl<'p, T, C> UnassignOperation<'p, T, C>
-where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
-{
-    #[inline]
-    fn new(assignment: AssignmentRef<'p, Movable, T, C>) -> Self {
-        Self {
-            moveable: assignment,
-        }
-    }
-
-    #[inline]
-    pub fn moveable(&self) -> &AssignmentRef<'p, Movable, T, C> {
-        &self.moveable
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct AssignOperation<'p, T, C>
-where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
-{
-    assignment: AssignmentRef<'p, Movable, T, C>,
-}
-
-impl<'p, T, C> AssignOperation<'p, T, C>
-where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
-{
-    #[inline]
-    fn new(assignment: AssignmentRef<'p, Movable, T, C>) -> Self {
-        Self { assignment }
-    }
-
-    #[inline]
-    pub fn assignment(&self) -> &AssignmentRef<'p, Movable, T, C> {
-        &self.assignment
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Operation<'p, T, C>
-where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
-{
-    Unassign(UnassignOperation<'p, T, C>),
-    Assign(AssignOperation<'p, T, C>),
-}
-
-impl<'p, T, C> From<UnassignOperation<'p, T, C>> for Operation<'p, T, C>
-where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
-{
-    #[inline]
-    fn from(op: UnassignOperation<'p, T, C>) -> Self {
-        Operation::Unassign(op)
-    }
-}
-
-impl<'brand, 'p, T, C> From<AssignOperation<'p, T, C>> for Operation<'p, T, C>
-where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
-{
-    #[inline]
-    fn from(op: AssignOperation<'p, T, C>) -> Self {
-        Operation::Assign(op)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Plan<'brand, 'bo, 'p, 'al, T, C, Q>
+pub struct Plan<'p, T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
-    Q: QuayRead,
 {
-    operations: Vec<Operation<'p, T, C>>,
-    assignment_overlay: AssignmentLedgerOverlay<'brand, 'p, 'al, T, C>,
-    berth_overlay: BerthOccupancyOverlay<'bo, 'p, T, Q>,
+    berth_commit: BerthOverlayCommit<T>,
+    ledger_commit: LedgerOverlayCommit<'p, T, C>,
 }
 
-impl<'brand, 'bo, 'p, 'al, T, C, Q> Plan<'brand, 'bo, 'p, 'al, T, C, Q>
+impl<'p, T, C> Plan<'p, T, C>
 where
     T: PrimInt + Signed,
-    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
-    Q: QuayRead + QuayWrite,
+    C: PrimInt + Signed,
 {
     #[inline]
     fn new(
-        operations: Vec<Operation<'p, T, C>>,
-        assignment_overlay: AssignmentLedgerOverlay<'brand, 'p, 'al, T, C>,
-        berth_overlay: BerthOccupancyOverlay<'bo, 'p, T, Q>,
+        berth_commit: BerthOverlayCommit<T>,
+        ledger_commit: LedgerOverlayCommit<'p, T, C>,
     ) -> Self {
         Self {
-            operations,
-            assignment_overlay,
-            berth_overlay,
+            berth_commit,
+            ledger_commit,
         }
     }
 
-    #[inline]
-    pub fn operations(&self) -> &[Operation<'p, T, C>] {
-        &self.operations
+    pub fn berth_commit(&self) -> &BerthOverlayCommit<T> {
+        &self.berth_commit
     }
 
-    #[inline]
-    pub fn iter_operations(&self) -> impl DoubleEndedIterator<Item = &Operation<'p, T, C>> {
-        self.operations.iter()
-    }
-
-    pub fn commit(
-        self,
-        ledger: &mut AssignmentLedger<'p, T, C>,
-        berth: &mut BerthOccupancy<T, Q>,
-    ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
-        ledger.apply(self.assignment_overlay);
-        berth.apply(self.berth_overlay)?;
-        Ok(())
+    pub fn ledger_commit(&self) -> &LedgerOverlayCommit<'p, T, C> {
+        &self.ledger_commit
     }
 }
 
@@ -351,7 +256,6 @@ where
     problem: &'p Problem<T, C>,
     assignment_overlay: AssignmentLedgerOverlay<'brand, 'p, 'al, T, C>,
     berth_overlay: BerthOccupancyOverlay<'bo, 'p, T, Q>,
-    operations: Vec<Operation<'p, T, C>>,
 }
 
 pub struct Explorer<'brand, 'bo, 'p, 'al, 'pb, T, C, Q>
@@ -485,7 +389,7 @@ impl<'brand, 'bo, 'p, 'al, T, C, Q> PlanBuilder<'brand, 'bo, 'p, 'al, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
-    Q: QuayRead + QuayWrite,
+    Q: QuayRead,
 {
     fn new(
         problem: &'p Problem<T, C>,
@@ -496,7 +400,6 @@ where
             problem,
             assignment_overlay,
             berth_overlay,
-            operations: Vec::new(),
         }
     }
 
@@ -514,14 +417,6 @@ where
         f(&explorer)
     }
 
-    #[inline]
-    fn add_operation<O>(&mut self, op: O)
-    where
-        O: Into<Operation<'p, T, C>>,
-    {
-        self.operations.push(op.into());
-    }
-
     pub fn propose_unassign(
         &mut self,
         assignment: &'brand BrandedMovableAssignment<'brand, 'p, T, C>,
@@ -536,7 +431,6 @@ where
 
         self.assignment_overlay.uncommit_assignment(assignment)?;
         self.berth_overlay.free(&rect)?;
-        self.add_operation(UnassignOperation::new(assignment.assignment().clone()));
 
         Ok(free)
     }
@@ -555,8 +449,13 @@ where
             slot.space().start(),
         )?;
         self.berth_overlay.occupy(&rect)?;
-        self.add_operation(AssignOperation::new(a));
 
         Ok(ma)
+    }
+
+    pub fn build(self) -> Plan<'p, T, C> {
+        let berth_commit = self.berth_overlay.into_commit();
+        let ledger_commit = self.assignment_overlay.into_commit();
+        Plan::new(berth_commit, ledger_commit)
     }
 }

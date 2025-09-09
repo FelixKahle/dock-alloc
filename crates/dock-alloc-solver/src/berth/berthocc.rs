@@ -21,6 +21,7 @@
 
 use crate::{
     berth::{
+        commit::BerthOverlayCommit,
         domain::{FreeRegion, FreeSlot},
         iter::{FeasibleRegionIter, FreeSlotIter},
         overlay::BerthOccupancyOverlay,
@@ -151,7 +152,6 @@ where
     T: PrimInt + Signed,
     Q: QuayRead + Clone + PartialEq,
 {
-    /// Returns a `Slices` factory for creating iterators over a specified time range.
     #[inline]
     pub fn slices(&self, start: TimePoint<T>, end: TimePoint<T>) -> Slices<'_, T, Q> {
         Slices::new(self, start, end)
@@ -352,6 +352,23 @@ where
     ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
         self.apply_in(rect, |quay, space_interval| quay.free(space_interval))
     }
+
+    pub fn apply(
+        &mut self,
+        commit: &BerthOverlayCommit<T>,
+    ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
+        for op in commit.operations() {
+            match op {
+                crate::berth::operations::Operation::Occupy(occ) => {
+                    self.occupy(occ.rectangle())?;
+                }
+                crate::berth::operations::Operation::Free(free) => {
+                    self.free(free.rectangle())?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl<T, C, Q> TryFrom<&Problem<T, C>> for BerthOccupancy<T, Q>
@@ -383,7 +400,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::berth::quay::BooleanVecQuay;
+    use crate::berth::{
+        prelude::{FreeOperation, OccupyOperation, Operation},
+        quay::BooleanVecQuay,
+    };
 
     type T = i64;
     type BO = BerthOccupancy<T, BooleanVecQuay>;
@@ -809,5 +829,81 @@ mod tests {
         let b = BO::new(len(10));
         let bands = collect_bands(&b, ti(0, 4), TimeDelta::new(5), len(1), si(0, 10));
         assert!(bands.is_empty());
+    }
+
+    #[test]
+    fn test_apply_commit_applies_operations_and_updates_state() {
+        // Helpers from this tests module are available: tp, ti, si, rect, len
+
+        // Start with empty berth of length 10
+        let mut b = BO::new(len(10));
+        assert_eq!(b.time_event_count(), 1);
+        assert!(b.is_free(&rect(ti(0, 100), si(0, 10))).unwrap());
+
+        // Build a commit: Occupy [2,6)×[3,7) then Free [4,5)×[4,6).
+        let r_occ = rect(ti(2, 6), si(3, 7));
+        let r_free = rect(ti(4, 5), si(4, 6));
+
+        let ops = vec![
+            Operation::Occupy(OccupyOperation::new(r_occ)),
+            Operation::Free(FreeOperation::new(r_free)),
+        ];
+        let commit = BerthOverlayCommit::new(ops);
+
+        // Apply the commit to the base occupancy
+        b.apply(&commit).unwrap();
+
+        // After apply:
+        // - [2,6)×[3,7) is occupied EXCEPT the freed "hole" [4,5)×[4,6).
+        // Check regions inside the occupied band but outside the freed hole remain occupied:
+        assert!(b.is_occupied(&rect(ti(4, 5), si(3, 4))).unwrap()); // left strip
+        assert!(b.is_occupied(&rect(ti(4, 5), si(6, 7))).unwrap()); // right strip
+
+        // The freed hole must be free:
+        assert!(b.is_free(&rect(ti(4, 5), si(4, 6))).unwrap());
+
+        // Outside the occupied time band is still free:
+        assert!(b.is_free(&rect(ti(0, 2), si(0, 10))).unwrap());
+        assert!(b.is_free(&rect(ti(6, 10), si(0, 10))).unwrap());
+
+        // Sanity check: boundaries should include 0 (origin), 2, 4, 5, 6 -> total 5 time events.
+        assert_eq!(b.time_event_count(), 5);
+    }
+
+    #[test]
+    fn test_overlay_into_commit_and_apply_changes_state() {
+        // Base is fully free.
+        let mut b = BO::new(len(10));
+        assert!(b.is_free(&rect(ti(0, 100), si(0, 10))).unwrap());
+
+        // Build an overlay on top of the *immutable* base.
+        let mut ov = b.overlay();
+
+        // Record operations in the overlay (non-destructive to base):
+        // Occupy [2,6)×[3,7), then carve a free "hole" [4,5)×[4,6).
+        ov.occupy(&rect(ti(2, 6), si(3, 7))).unwrap();
+        ov.free(&rect(ti(4, 5), si(4, 6))).unwrap();
+
+        // Convert overlay to a commit and sanity-check its contents.
+        let commit = ov.into_commit();
+        assert_eq!(commit.operations().len(), 2);
+        assert!(matches!(commit.operations()[0], Operation::Occupy(_)));
+        assert!(matches!(commit.operations()[1], Operation::Free(_)));
+
+        // Base must still be unchanged before apply.
+        assert!(b.is_free(&rect(ti(2, 6), si(3, 7))).unwrap());
+
+        // Apply the commit to the base.
+        b.apply(&commit).unwrap();
+
+        // After apply:
+        // - [2,6)×[3,7) is occupied EXCEPT the freed "hole" [4,5)×[4,6).
+        assert!(b.is_occupied(&rect(ti(4, 5), si(3, 4))).unwrap()); // left strip remains occupied
+        assert!(b.is_occupied(&rect(ti(4, 5), si(6, 7))).unwrap()); // right strip remains occupied
+        assert!(b.is_free(&rect(ti(4, 5), si(4, 6))).unwrap()); // carved hole is free
+
+        // Outside the occupied time band remains free.
+        assert!(b.is_free(&rect(ti(0, 2), si(0, 10))).unwrap());
+        assert!(b.is_free(&rect(ti(6, 10), si(0, 10))).unwrap());
     }
 }

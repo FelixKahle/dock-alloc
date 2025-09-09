@@ -188,7 +188,6 @@ impl BTreeMapQuay {
         self.free.append(&mut tail_map);
     }
 
-    /// Split the free intervals to exclude the range `[split_start, split_end)`.
     #[inline]
     fn split(&mut self, split_start: SpacePosition, split_end: SpacePosition) {
         if split_start >= split_end {
@@ -238,11 +237,6 @@ impl BTreeMapQuay {
     }
 }
 
-/// Iterator over free intervals in a [`BTreeMapQuay`] that meet specific criteria.
-///
-/// This iterator is returned by [`BTreeMapQuay::iter_free_intervals`] and yields
-/// [`SpaceInterval`]s that are within the search range and meet the minimum length
-/// requirement.
 pub struct BTreeMapFreeIter<'a> {
     map_iter: std::collections::btree_map::Range<'a, SpacePosition, SpacePosition>,
     pending: Option<(SpacePosition, SpacePosition)>,

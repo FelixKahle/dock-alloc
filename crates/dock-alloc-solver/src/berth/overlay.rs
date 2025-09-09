@@ -22,6 +22,7 @@
 use crate::{
     berth::{
         berthocc::BerthOccupancy,
+        commit::BerthOverlayCommit,
         domain::{FreeRegion, FreeSlot},
         iter::{FeasibleRegionIter, FreeSlotIter, OverlayRunsIter, runs_cover_interval},
         operations::{FreeOperation, OccupyOperation, Operation},
@@ -542,6 +543,10 @@ where
             .into_iter()
             .flatten()
             .min()
+    }
+
+    pub fn into_commit(self) -> BerthOverlayCommit<T> {
+        BerthOverlayCommit::new(self.operations)
     }
 }
 

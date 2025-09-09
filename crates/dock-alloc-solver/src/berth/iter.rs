@@ -41,7 +41,7 @@ where
 {
     view: &'a V,
     duration: TimeDelta<T>,
-    time_window_end: TimePoint<T>,
+    latest_start: TimePoint<T>,
     last_candidate: Option<TimePoint<T>>,
     first_candidate: TimePoint<T>,
 }
@@ -52,10 +52,11 @@ where
     V: SliceView<T> + 'a,
 {
     fn new(view: &'a V, time_window: TimeInterval<T>, duration: TimeDelta<T>) -> Self {
+        let latest_start = time_window.end() - duration;
         Self {
             view,
             duration,
-            time_window_end: time_window.end(),
+            latest_start,
             last_candidate: None,
             first_candidate: time_window.start(),
         }
@@ -70,11 +71,11 @@ where
     type Item = TimePoint<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let end = self.time_window_end;
+        let latest = self.latest_start;
 
         if self.last_candidate.is_none() {
             let first = self.first_candidate;
-            if first + self.duration <= end {
+            if first <= latest {
                 self.last_candidate = Some(first);
                 return self.last_candidate;
             }
@@ -82,16 +83,20 @@ where
         }
 
         let last = self.last_candidate.unwrap();
+
         if let Some(tp) = self.view.next_key_after(last) {
-            if tp + self.duration <= end {
+            if tp <= latest {
                 self.last_candidate = Some(tp);
                 return self.last_candidate;
             }
-        } else if self.duration.is_zero() && last < end && self.view.has_key_at(end) {
-            self.last_candidate = Some(end);
+        } else if self.duration.is_zero()
+            && last < latest
+            && self.view.has_key_at(latest + self.duration)
+        {
+            // duration==0 => allow inclusive end if there is a key
+            self.last_candidate = Some(latest);
             return self.last_candidate;
         }
-
         None
     }
 }
@@ -192,6 +197,55 @@ where
     }
 }
 
+struct Keys<'v, T, V>
+where
+    T: PrimInt + Signed + Copy,
+    V: SliceView<T> + ?Sized + 'v,
+{
+    view: &'v V,
+    cursor: TimePoint<T>,
+    to: TimePoint<T>,
+    done: bool,
+    _phantom: std::marker::PhantomData<T>,
+}
+impl<'v, T, V> Keys<'v, T, V>
+where
+    T: PrimInt + Signed + Copy,
+    V: SliceView<T> + ?Sized + 'v,
+{
+    fn new(view: &'v V, from: TimePoint<T>, to: TimePoint<T>) -> Self {
+        Self {
+            view,
+            cursor: from,
+            to,
+            done: false,
+            _phantom: Default::default(),
+        }
+    }
+}
+impl<'v, T, V> Iterator for Keys<'v, T, V>
+where
+    T: PrimInt + Signed + Copy,
+    V: SliceView<T> + ?Sized + 'v,
+{
+    type Item = TimePoint<T>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+        if let Some(tp) = self.view.next_key_after(self.cursor) {
+            if tp >= self.to {
+                self.done = true;
+                return None;
+            }
+            self.cursor = tp;
+            return Some(tp);
+        }
+        self.done = true;
+        None
+    }
+}
+
 fn calculate_breakpoints<T, V>(
     view: &V,
     time_window: TimeInterval<T>,
@@ -203,107 +257,57 @@ where
 {
     let tw_start = time_window.start();
     let latest_start = time_window.end() - duration;
-
     if tw_start > latest_start {
         return Vec::new();
     }
 
-    let bps_left = collect_keys(view, tw_start, latest_start);
-    let shifted_left = tw_start + duration;
-    let shifted_right = latest_start + duration;
     let one = TimeDelta::new(T::one());
 
-    let bps_right: Vec<_> = collect_keys_left_inclusive(view, shifted_left, shifted_right)
-        .into_iter()
-        .map(|t| t - duration + one)
-        .filter(|&t| t > tw_start && t <= latest_start)
-        .collect();
+    // Left stream: keys in (tw_start, latest_start)
+    let mut left = Keys::<T, V>::new(view, tw_start, latest_start).peekable();
 
-    let mut out = Vec::with_capacity(2 + bps_left.len() + bps_right.len());
+    // Right stream: keys in [tw_start+duration, latest_start+duration), shifted to starts
+    let shifted_left = tw_start + duration;
+    let shifted_right = latest_start + duration;
+
+    let base_right = Keys::<T, V>::new(view, shifted_left, shifted_right);
+    let prefix = if view.has_key_at(shifted_left) {
+        Some(shifted_left)
+    } else {
+        None
+    };
+
+    let mut right = prefix
+        .into_iter() // 0 or 1 element
+        .chain(base_right) // same Chain<IntoIter<_>, Keys<...>> type regardless
+        .map(move |t| t - duration + one)
+        .filter(move |&t| t > tw_start && t <= latest_start)
+        .peekable();
+
+    let mut out = Vec::with_capacity(8);
     out.push(tw_start);
+    let mut last = Some(tw_start);
 
-    let mut i = 0usize;
-    let mut j = 0usize;
-    let mut last: Option<TimePoint<T>> = out.last().copied();
-
-    #[inline]
-    fn push_if_new<Tp>(out: &mut Vec<Tp>, last: &mut Option<Tp>, x: Tp)
-    where
-        Tp: PartialEq + Copy,
-    {
-        if Some(x) != *last {
-            out.push(x);
-            *last = Some(x);
-        }
-    }
-
-    while i < bps_left.len() && j < bps_right.len() {
-        let a = bps_left[i];
-        let b = bps_right[j];
-        if a <= b {
-            i += 1;
-            push_if_new(&mut out, &mut last, a);
+    while left.peek().is_some() || right.peek().is_some() {
+        let take_left = match (left.peek(), right.peek()) {
+            (Some(&a), Some(&b)) => a <= b,
+            (Some(_), None) => true,
+            (None, Some(_)) => false,
+            (None, None) => false,
+        };
+        let x = if take_left {
+            left.next().unwrap()
         } else {
-            j += 1;
-            push_if_new(&mut out, &mut last, b);
+            right.next().unwrap()
+        };
+        if last != Some(x) {
+            out.push(x);
+            last = Some(x);
         }
     }
 
-    while i < bps_left.len() {
-        let a = bps_left[i];
-        i += 1;
-        push_if_new(&mut out, &mut last, a);
-    }
-
-    while j < bps_right.len() {
-        let b = bps_right[j];
-        j += 1;
-        push_if_new(&mut out, &mut last, b);
-    }
-
-    if Some(latest_start) != last {
+    if last != Some(latest_start) {
         out.push(latest_start);
-    }
-    out
-}
-
-fn collect_keys_left_inclusive<T, V>(
-    view: &V,
-    from: TimePoint<T>,
-    to: TimePoint<T>,
-) -> Vec<TimePoint<T>>
-where
-    T: PrimInt + Signed + Copy,
-    V: SliceView<T>,
-{
-    let mut out = Vec::new();
-    if view.has_key_at(from) {
-        out.push(from);
-    }
-    let mut cursor = from;
-    while let Some(tp) = view.next_key_after(cursor) {
-        if tp >= to {
-            break;
-        }
-        out.push(tp);
-        cursor = tp;
-    }
-    out
-}
-
-fn collect_keys<T, V>(view: &V, from: TimePoint<T>, to: TimePoint<T>) -> Vec<TimePoint<T>>
-where
-    T: PrimInt + Signed + Copy,
-    V: SliceView<T>,
-{
-    let mut out = Vec::new();
-    let mut cursor = from;
-    while let Some(tp) = view.next_key_after(cursor) {
-        if tp >= to {
-            break;
-        }
-        out.push(tp);
-        cursor = tp;
     }
     out
 }
@@ -556,14 +560,15 @@ fn eroded_runs<'v, T, V>(
     T: PrimInt + Signed + Copy,
     V: SliceView<T> + ?Sized + 'v,
 {
-    let pred = match view.pred(start) {
-        Some(p) => p,
-        None => return,
+    let seed_tp = if view.has_key_at(start) {
+        start
+    } else if let Some(p) = view.pred(start) {
+        p
+    } else {
+        return;
     };
-    let seed_tp = if view.has_key_at(start) { start } else { pred };
 
     out_runs.seed_from_iter(runs_at(view, seed_tp, bounds, min_len));
-
     if out_runs.current().is_empty() {
         return;
     }
