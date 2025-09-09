@@ -19,7 +19,7 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use crate::state::{commit::LedgerOverlayCommit, overlay::AssignmentLedgerOverlay};
+use crate::registry::{commit::LedgerOverlayCommit, overlay::AssignmentLedgerOverlay};
 use dock_alloc_core::domain::{SpacePosition, TimePoint};
 use dock_alloc_model::{
     AnyAssignmentRef, AssignmentRef, Fixed, FixedRequestId, Movable, MovableRequestId, Problem,
@@ -177,7 +177,7 @@ where
     pub fn apply(&mut self, commit: &LedgerOverlayCommit<'a, T, C>) -> Result<(), LedgerError> {
         for op in commit.operations() {
             match op {
-                crate::state::operations::Operation::Assign(assign_op) => {
+                crate::registry::operations::Operation::Assign(assign_op) => {
                     let assignment = assign_op.assignment();
                     self.commit_assignment(
                         assignment.request(),
@@ -185,7 +185,7 @@ where
                         assignment.start_position(),
                     )?;
                 }
-                crate::state::operations::Operation::Unassign(unassign_op) => {
+                crate::registry::operations::Operation::Unassign(unassign_op) => {
                     let assignment = unassign_op.assignment();
                     self.uncommit_assignment(assignment)?;
                 }

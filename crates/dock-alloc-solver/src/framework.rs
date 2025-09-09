@@ -19,13 +19,11 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use dock_alloc_model::{OwnedSolution, Problem, SolutionRef};
-use num_traits::{PrimInt, Signed};
-
 use crate::{
-    berth::{berthocc::BerthOccupancy, quay::QuayRead},
-    ledger::AssignmentLedger,
+    berth::{prelude::BerthOccupancy, quay::QuayRead},
+    registry::ledger::AssignmentLedger,
 };
+use num_traits::{PrimInt, Signed};
 
 pub struct SearchState<'p, T, C, Q>
 where

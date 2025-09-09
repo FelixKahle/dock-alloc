@@ -417,6 +417,48 @@ impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> Assignment<K, T, C> {
     }
 
     #[inline]
+    pub fn waiting_time(&self) -> TimeDelta<T> {
+        (self.start_time() - self.request.arrival_time()).max(TimeDelta::zero())
+    }
+
+    #[inline]
+    pub fn waiting_cost(&self) -> Cost<C>
+    where
+        C: TryFrom<T>,
+    {
+        let waiting_time = self.waiting_time();
+        let scalar: C = C::try_from(waiting_time.value())
+            .ok()
+            .expect("waiting time does not fit in C");
+        self.request().cost_per_delay() * scalar
+    }
+
+    #[inline]
+    pub fn position_deviation(&self) -> SpaceLength {
+        (self.start_position() - self.request.target_position()).abs()
+    }
+
+    #[inline]
+    pub fn position_deviation_cost(&self) -> Cost<C>
+    where
+        C: TryFrom<usize>,
+    {
+        let deviation = self.position_deviation();
+        let scalar: C = C::try_from(deviation.value())
+            .ok()
+            .expect("deviation does not fit in C");
+        self.request().cost_per_position_deviation() * scalar
+    }
+
+    #[inline]
+    pub fn cost(&self) -> Cost<C>
+    where
+        C: TryFrom<T> + TryFrom<usize>,
+    {
+        self.waiting_cost() + self.position_deviation_cost()
+    }
+
+    #[inline]
     pub fn as_ref(&self) -> AssignmentRef<'_, K, T, C> {
         AssignmentRef::new(&self.request, self.start_position, self.start_time)
     }
@@ -485,6 +527,48 @@ impl<'a, K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> AssignmentRef<'a, K,
     #[inline]
     pub fn typed_id(&self) -> K::Id {
         self.request.typed_id()
+    }
+
+    #[inline]
+    pub fn waiting_time(&self) -> TimeDelta<T> {
+        (self.start_time() - self.request.arrival_time()).max(TimeDelta::zero())
+    }
+
+    #[inline]
+    pub fn waiting_cost(&self) -> Cost<C>
+    where
+        C: TryFrom<T>,
+    {
+        let waiting_time = self.waiting_time();
+        let scalar: C = C::try_from(waiting_time.value())
+            .ok()
+            .expect("waiting time does not fit in C");
+        self.request().cost_per_delay() * scalar
+    }
+
+    #[inline]
+    pub fn position_deviation(&self) -> SpaceLength {
+        (self.start_position() - self.request.target_position()).abs()
+    }
+
+    #[inline]
+    pub fn position_deviation_cost(&self) -> Cost<C>
+    where
+        C: TryFrom<usize>,
+    {
+        let deviation = self.position_deviation();
+        let scalar: C = C::try_from(deviation.value())
+            .ok()
+            .expect("deviation does not fit in C");
+        self.request().cost_per_position_deviation() * scalar
+    }
+
+    #[inline]
+    pub fn cost(&self) -> Cost<C>
+    where
+        C: TryFrom<T> + TryFrom<usize>,
+    {
+        self.waiting_cost() + self.position_deviation_cost()
     }
 
     #[inline]

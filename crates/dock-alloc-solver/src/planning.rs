@@ -22,51 +22,25 @@
 use crate::{
     berth::{
         commit::BerthOverlayCommit,
-        overlay::BerthOccupancyOverlay,
+        overlay::{BerthOccupancyOverlay, BrandedFreeRegion, BrandedFreeSlot},
         prelude::BerthOccupancy,
         quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError},
     },
     domain::SpaceTimeRectangle,
-    state::{
+    registry::{
         commit::LedgerOverlayCommit,
         ledger::AssignmentLedger,
+        operations::Operation,
         overlay::{
             AssignmentLedgerOverlay, BrandedFixedRequestId, BrandedMovableAssignment,
             BrandedMovableRequest, BrandedMovableRequestId, StageError,
         },
     },
 };
-use dock_alloc_core::domain::{SpaceInterval, TimeInterval};
+use dock_alloc_core::domain::{Cost, SpaceInterval, SpaceLength, TimeDelta, TimeInterval};
 use dock_alloc_model::{AnyAssignmentRef, AssignmentRef, Fixed, Kind, Problem};
 use num_traits::{PrimInt, Signed};
-use std::{fmt::Display, marker::PhantomData};
-
-#[derive(Clone, Debug, PartialEq, Eq, Copy)]
-pub struct FreeSlot<'bo, T: PrimInt + Signed> {
-    space: SpaceInterval,
-    time: TimeInterval<T>,
-    _brand: PhantomData<&'bo ()>,
-}
-
-impl<'bo, T: PrimInt + Signed> FreeSlot<'bo, T> {
-    fn new(space: SpaceInterval, time: TimeInterval<T>) -> Self {
-        Self {
-            space,
-            time,
-            _brand: PhantomData,
-        }
-    }
-
-    #[inline]
-    pub fn space(&self) -> SpaceInterval {
-        self.space
-    }
-
-    #[inline]
-    pub fn time(&self) -> TimeInterval<T> {
-        self.time
-    }
-}
+use std::fmt::Display;
 
 pub struct ProposeCtx<'pp, 'pl, 'pb, T, C, Q>
 where
@@ -110,7 +84,6 @@ where
         self.problem
     }
 
-    // Note the distinct lifetimes in PlanBuilder now: 'pp (problem), 'pb (berth), 'al (ledger ref)
     pub fn with_builder<F, R>(&self, f: F) -> R
     where
         F: for<'brand, 'bo, 'al> FnOnce(PlanBuilder<'brand, 'bo, 'pp, 'pb, 'al, T, C, Q>) -> R,
@@ -171,11 +144,53 @@ where
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlanEval<T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    delta_cost: Cost<C>,
+    delta_wait: TimeDelta<T>,
+    delta_dev: SpaceLength,
+}
+
+impl<T, C> PlanEval<T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    #[inline]
+    fn new(delta_cost: Cost<C>, delta_wait: TimeDelta<T>, delta_dev: SpaceLength) -> Self {
+        Self {
+            delta_cost,
+            delta_wait,
+            delta_dev,
+        }
+    }
+
+    #[inline]
+    pub fn delta_cost(&self) -> Cost<C> {
+        self.delta_cost
+    }
+
+    #[inline]
+    pub fn delta_wait(&self) -> TimeDelta<T> {
+        self.delta_wait
+    }
+
+    #[inline]
+    pub fn delta_dev(&self) -> SpaceLength {
+        self.delta_dev
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plan<'p, T, C>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
+    eval: PlanEval<T, C>,
     berth_commit: BerthOverlayCommit<T>,
     ledger_commit: LedgerOverlayCommit<'p, T, C>,
 }
@@ -187,10 +202,12 @@ where
 {
     #[inline]
     fn new(
+        eval: PlanEval<T, C>,
         berth_commit: BerthOverlayCommit<T>,
         ledger_commit: LedgerOverlayCommit<'p, T, C>,
     ) -> Self {
         Self {
+            eval,
             berth_commit,
             ledger_commit,
         }
@@ -247,26 +264,26 @@ where
     berth_overlay: BerthOccupancyOverlay<'bo, 'pb, T, Q>,
 }
 
-pub struct Explorer<'brand, 'bo, 'pp, 'pb, 'al, T, C, Q>
+pub struct Explorer<'brand, 'bo, 'pp, 'pb, 'al, 'bl, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
     Q: QuayRead,
 {
-    assignment_overlay: AssignmentLedgerOverlay<'brand, 'pp, 'al, T, C>,
-    berth_overlay: BerthOccupancyOverlay<'bo, 'pb, T, Q>,
+    assignment_overlay: &'bl AssignmentLedgerOverlay<'brand, 'pp, 'al, T, C>,
+    berth_overlay: &'bl BerthOccupancyOverlay<'bo, 'pb, T, Q>,
 }
 
-impl<'brand, 'bo, 'pp, 'pb, 'al, T, C, Q> Explorer<'brand, 'bo, 'pp, 'pb, 'al, T, C, Q>
+impl<'brand, 'bo, 'pp, 'pb, 'al, 'bl, T, C, Q> Explorer<'brand, 'bo, 'pp, 'pb, 'al, 'bl, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
     Q: QuayRead,
 {
-    fn new(builder: &PlanBuilder<'brand, 'bo, 'pp, 'pb, 'al, T, C, Q>) -> Self {
+    fn new(builder: &'bl PlanBuilder<'brand, 'bo, 'pp, 'pb, 'al, T, C, Q>) -> Self {
         Self {
-            assignment_overlay: builder.assignment_overlay.clone(),
-            berth_overlay: builder.berth_overlay.clone(),
+            assignment_overlay: &builder.assignment_overlay,
+            berth_overlay: &builder.berth_overlay,
         }
     }
 
@@ -315,30 +332,38 @@ where
         self.assignment_overlay.iter_assignments()
     }
 
-    /// Slots are branded by the **berth** brand `'bo`.
     pub fn iter_slots_for_request(
         &self,
-        request: &BrandedMovableRequest<'brand, 'pp, T, C>,
-    ) -> impl Iterator<Item = FreeSlot<'bo, T>> + '_ {
+        request: &BrandedMovableRequest<'bo, 'pp, T, C>,
+    ) -> impl Iterator<Item = BrandedFreeSlot<'bo, T>> + '_ {
         let time_search_window = request.feasible_time_window();
         let space_search_window = request.feasible_space_window();
         let processing_duration = request.processing_duration();
         let length = request.length();
 
-        self.berth_overlay
-            .iter_free_slots(
-                time_search_window,
-                processing_duration,
-                length,
-                space_search_window,
-            )
-            .map(move |slot| {
-                let time_interval = TimeInterval::new(
-                    slot.slot().start_time(),
-                    slot.slot().start_time() + processing_duration,
-                );
-                FreeSlot::new(slot.slot().space(), time_interval)
-            })
+        self.berth_overlay.iter_free_slots(
+            time_search_window,
+            processing_duration,
+            length,
+            space_search_window,
+        )
+    }
+
+    pub fn iter_regions_for_request(
+        &self,
+        request: &BrandedMovableRequest<'bo, 'pp, T, C>,
+    ) -> impl Iterator<Item = BrandedFreeRegion<'bo, T>> + '_ {
+        let time_search_window = request.feasible_time_window();
+        let space_search_window = request.feasible_space_window();
+        let processing_duration = request.processing_duration();
+        let length = request.length();
+
+        self.berth_overlay.iter_free_regions(
+            time_search_window,
+            processing_duration,
+            length,
+            space_search_window,
+        )
     }
 
     pub fn iter_slots_for_request_within(
@@ -346,7 +371,7 @@ where
         request: &BrandedMovableRequest<'brand, 'pp, T, C>,
         time_search_window: TimeInterval<T>,
         space_search_window: SpaceInterval,
-    ) -> impl Iterator<Item = FreeSlot<'bo, T>> + '_ {
+    ) -> impl Iterator<Item = BrandedFreeSlot<'bo, T>> + '_ {
         let proc = request.processing_duration();
         let len = request.length();
         let t_opt = time_search_window.intersection(&request.feasible_time_window());
@@ -355,17 +380,26 @@ where
         t_opt
             .and_then(|twin| s_opt.map(|swin| (twin, swin)))
             .filter(|(twin, swin)| twin.duration() >= proc && swin.measure() >= len)
-            .map(move |(twin, swin)| {
-                self.berth_overlay
-                    .iter_free_slots(twin, proc, len, swin)
-                    .map(move |slot| {
-                        let time = TimeInterval::new(
-                            slot.slot().start_time(),
-                            slot.slot().start_time() + proc,
-                        );
-                        FreeSlot::new(slot.slot().space(), time)
-                    })
-            })
+            .map(move |(twin, swin)| self.berth_overlay.iter_free_slots(twin, proc, len, swin))
+            .into_iter()
+            .flatten()
+    }
+
+    pub fn iter_regions_for_request_within(
+        &self,
+        request: &BrandedMovableRequest<'brand, 'pp, T, C>,
+        time_search_window: TimeInterval<T>,
+        space_search_window: SpaceInterval,
+    ) -> impl Iterator<Item = BrandedFreeRegion<'bo, T>> + '_ {
+        let proc = request.processing_duration();
+        let len = request.length();
+        let t_opt = time_search_window.intersection(&request.feasible_time_window());
+        let s_opt = space_search_window.intersection(&request.feasible_space_window());
+
+        t_opt
+            .and_then(|twin| s_opt.map(|swin| (twin, swin)))
+            .filter(|(twin, swin)| twin.duration() >= proc && swin.measure() >= len)
+            .map(move |(twin, swin)| self.berth_overlay.iter_free_regions(twin, proc, len, swin))
             .into_iter()
             .flatten()
     }
@@ -397,7 +431,7 @@ where
     #[inline]
     pub fn with_explorer<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&Explorer<'brand, 'bo, 'pp, 'pb, 'al, T, C, Q>) -> R,
+        F: FnOnce(&Explorer<'brand, 'bo, 'pp, 'pb, 'al, '_, T, C, Q>) -> R,
     {
         let ex = Explorer::new(self);
         f(&ex)
@@ -406,17 +440,12 @@ where
     pub fn propose_unassign(
         &mut self,
         assignment: &'brand BrandedMovableAssignment<'brand, 'pp, T, C>,
-    ) -> Result<FreeSlot<'bo, T>, ProposeError> {
+    ) -> Result<BrandedFreeRegion<'bo, T>, ProposeError> {
         let a = assignment.assignment();
-        let proc = a.request().processing_duration();
-        let time = TimeInterval::new(a.start_time(), a.start_time() + proc);
-        let len = a.request().length();
-        let space = SpaceInterval::new(a.start_position(), a.start_position() + len);
-        let free: FreeSlot<'bo, T> = FreeSlot::new(space, time);
         let rect: SpaceTimeRectangle<T> = a.into();
 
         self.assignment_overlay.uncommit_assignment(assignment)?;
-        self.berth_overlay.free(&rect)?;
+        let free = self.berth_overlay.free(&rect)?;
 
         Ok(free)
     }
@@ -424,25 +453,61 @@ where
     pub fn propose_assign(
         &mut self,
         req: &BrandedMovableRequest<'brand, 'pp, T, C>,
-        slot: FreeSlot<'bo, T>,
+        slot: BrandedFreeSlot<'bo, T>,
     ) -> Result<BrandedMovableAssignment<'brand, 'pp, T, C>, ProposeError> {
-        let a = AssignmentRef::new(req.request(), slot.space().start(), slot.time().start());
+        let a = AssignmentRef::new(
+            req.request(),
+            slot.slot().space().start(),
+            slot.slot().start_time(),
+        );
         let rect: SpaceTimeRectangle<T> = a.into();
 
         let ma = self.assignment_overlay.commit_assignment(
             req.request(),
-            slot.time().start(),
-            slot.space().start(),
+            slot.slot().start_time(),
+            slot.slot().space().start(),
         )?;
         self.berth_overlay.occupy(&rect)?;
 
         Ok(ma)
     }
 
-    pub fn build(self) -> Plan<'pp, T, C> {
+    pub fn build(self) -> Plan<'pp, T, C>
+    where
+        C: TryFrom<T> + TryFrom<usize>,
+    {
         let berth_commit = self.berth_overlay.into_commit();
         let ledger_commit = self.assignment_overlay.into_commit();
-        Plan::new(berth_commit, ledger_commit)
+
+        let mut delta_cost = Cost::<C>::new(C::zero());
+        let mut delta_wait = TimeDelta::<T>::new(T::zero());
+        let mut delta_dev = SpaceLength::new(0);
+
+        for op in ledger_commit.operations() {
+            match op {
+                Operation::Assign(assign) => {
+                    let c = assign.assignment().cost();
+                    let w = assign.assignment().waiting_time();
+                    let d = assign.assignment().position_deviation();
+
+                    delta_cost += c;
+                    delta_wait += w;
+                    delta_dev += d;
+                }
+                Operation::Unassign(unassign) => {
+                    let c = unassign.assignment().cost();
+                    let w = unassign.assignment().waiting_time();
+                    let d = unassign.assignment().position_deviation();
+
+                    delta_cost -= c;
+                    delta_wait -= w;
+                    delta_dev -= d;
+                }
+            }
+        }
+
+        let eval = PlanEval::new(delta_cost, delta_wait, delta_dev);
+        Plan::new(eval, berth_commit, ledger_commit)
     }
 }
 

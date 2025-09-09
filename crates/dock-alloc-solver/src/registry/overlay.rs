@@ -31,7 +31,7 @@ use dock_alloc_model::{
 };
 use num_traits::{PrimInt, Signed};
 
-use crate::state::{
+use crate::registry::{
     commit::LedgerOverlayCommit,
     ledger::AssignmentLedger,
     operations::{AssignOperation, Operation, UnassignOperation},
@@ -555,7 +555,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::ledger::AssignmentLedger;
+    use crate::registry::ledger::AssignmentLedger;
     use dock_alloc_core::domain::{
         Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
     };

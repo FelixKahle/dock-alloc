@@ -367,7 +367,7 @@ where
     pub fn free(
         &mut self,
         rect: &SpaceTimeRectangle<T>,
-    ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
+    ) -> Result<BrandedFreeRegion<'brand, T>, QuaySpaceIntervalOutOfBoundsError> {
         if !self.berth().space_within_quay(rect.space()) {
             return Err(QuaySpaceIntervalOutOfBoundsError::new(
                 rect.space(),
@@ -397,7 +397,7 @@ where
         self.operations
             .push(Operation::Free(FreeOperation::new(*rect)));
 
-        Ok(())
+        Ok(BrandedFreeRegion::new(FreeRegion::new(*rect)))
     }
 
     /// Creates an iterator that merges keys from the base timeline and the overlay maps.

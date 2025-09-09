@@ -19,7 +19,7 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use crate::state::operations::Operation;
+use crate::registry::operations::Operation;
 use num_traits::{PrimInt, Signed};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,5 +59,5 @@ where
 mod tests {
     use static_assertions::assert_impl_all;
 
-    assert_impl_all!(crate::state::commit::LedgerOverlayCommit<'static, i64, i64>: Send, Sync);
+    assert_impl_all!(crate::registry::commit::LedgerOverlayCommit<'static, i64, i64>: Send, Sync);
 }
