@@ -34,7 +34,7 @@ use crate::{
 use dock_alloc_core::domain::{
     SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
 };
-use dock_alloc_model::Problem;
+use dock_alloc_model::model::Problem;
 use num_traits::{PrimInt, Signed, Zero};
 use std::ops::Bound::Excluded;
 

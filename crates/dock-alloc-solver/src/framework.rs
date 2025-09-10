@@ -29,9 +29,9 @@ use crate::{
     registry::ledger::{AssignmentLedger, LedgerError},
 };
 use dock_alloc_core::domain::{SpaceInterval, SpacePosition, TimeInterval};
-use dock_alloc_model::{
+use dock_alloc_model::model::{
     AssignmentExceedsQuayError, AssignmentOutsideSpaceWindowError,
-    AssignmentOutsideTimeWindowError, AssignmentRef, Problem, RequestId, SolutionRef,
+    AssignmentOutsideTimeWindowError, AssignmentRef, Kind, Problem, RequestId, SolutionRef,
 };
 use num_traits::{PrimInt, Signed, Zero};
 use std::fmt::{Debug, Display};
@@ -265,7 +265,7 @@ impl<T: PrimInt + Signed> Item<T> {
 
 fn rect_for_assignment<K, T, C>(a: AssignmentRef<'_, K, T, C>) -> SpaceTimeRectangle<T>
 where
-    K: dock_alloc_model::Kind,
+    K: Kind,
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
@@ -334,11 +334,7 @@ where
         let mut items: Vec<Item<T>> = Vec::new();
 
         for fa in state.problem().iter_fixed_assignments() {
-            let aref = dock_alloc_model::AssignmentRef::new(
-                fa.request(),
-                fa.start_position(),
-                fa.start_time(),
-            );
+            let aref = AssignmentRef::new(fa.request(), fa.start_position(), fa.start_time());
             items.push(Item::new(
                 fa.id(),
                 rect_for_assignment(aref),
@@ -348,11 +344,7 @@ where
         }
 
         for ma in state.ledger().iter_movable_assignments() {
-            let aref = dock_alloc_model::AssignmentRef::new(
-                ma.request(),
-                ma.start_position(),
-                ma.start_time(),
-            );
+            let aref = AssignmentRef::new(ma.request(), ma.start_position(), ma.start_time());
             items.push(Item::new(
                 ma.id(),
                 rect_for_assignment(aref),

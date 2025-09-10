@@ -25,7 +25,7 @@ use dock_alloc_core::{
     domain::{Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint},
     marker::Brand,
 };
-use dock_alloc_model::{
+use dock_alloc_model::model::{
     AnyAssignmentRef, AssignmentRef, Fixed, FixedRequestId, Movable, MovableRequestId, Request,
     RequestId, SolutionRef,
 };
@@ -547,7 +547,7 @@ mod tests {
     use dock_alloc_core::domain::{
         Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
     };
-    use dock_alloc_model::{
+    use dock_alloc_model::model::{
         Assignment, AssignmentRef, Fixed, Movable, MovableRequestId, ProblemBuilder, Request,
         RequestId,
     };

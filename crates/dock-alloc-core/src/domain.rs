@@ -2611,6 +2611,27 @@ impl<T: Copy> Cost<T> {
     {
         Cost(self.0.saturating_sub(&other.0))
     }
+
+    pub fn saturating_mul(self, factor: T) -> Self
+    where
+        T: SaturatingMul<Output = T> + Copy,
+    {
+        Cost(self.0.saturating_mul(&factor))
+    }
+
+    pub fn ratio<D>(self, divisor: Cost<T>) -> Option<D>
+    where
+        T: Copy + Zero + Into<D>,
+        D: Copy + std::ops::Div<Output = D>,
+    {
+        if divisor.0.is_zero() {
+            None
+        } else {
+            let dividend: D = self.0.into();
+            let divisor_val: D = divisor.0.into();
+            Some(dividend / divisor_val)
+        }
+    }
 }
 
 impl<T: Copy + Display> Display for Cost<T> {

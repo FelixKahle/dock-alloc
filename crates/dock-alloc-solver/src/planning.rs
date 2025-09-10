@@ -38,7 +38,7 @@ use crate::{
     },
 };
 use dock_alloc_core::domain::{Cost, SpaceInterval, SpaceLength, TimeDelta, TimeInterval};
-use dock_alloc_model::{AnyAssignmentRef, AssignmentRef, Fixed, Kind, Problem};
+use dock_alloc_model::model::{AnyAssignmentRef, AssignmentRef, Fixed, Kind, Problem};
 use num_traits::{PrimInt, Signed};
 use std::fmt::Display;
 
@@ -518,7 +518,7 @@ mod tests {
     use dock_alloc_core::domain::{
         Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
     };
-    use dock_alloc_model::{Movable, ProblemBuilder, Request, RequestId};
+    use dock_alloc_model::model::{Movable, ProblemBuilder, Request, RequestId};
     use rayon::prelude::*;
 
     type Tm = i64;
