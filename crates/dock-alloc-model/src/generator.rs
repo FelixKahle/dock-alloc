@@ -1227,11 +1227,10 @@ where
         if clamped_duration_value < self.config.min_processing.value() {
             clamped_duration_value = self.config.min_processing.value();
         }
-        if let Some(max_processing) = self.config.max_processing {
-            if clamped_duration_value > max_processing.value() {
+        if let Some(max_processing) = self.config.max_processing
+            && clamped_duration_value > max_processing.value() {
                 clamped_duration_value = max_processing.value();
             }
-        }
         TimeDelta::new(clamped_duration_value)
     }
 

@@ -21,12 +21,13 @@
 
 use crate::{
     berth::{
+        berthocc::BerthApplyValidationError,
         prelude::BerthOccupancy,
         quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError, QuayWrite},
     },
     domain::SpaceTimeRectangle,
     planning::Plan,
-    registry::ledger::{AssignmentLedger, LedgerError},
+    registry::ledger::{AssignmentLedger, LedgerApplyValidationError, LedgerError},
 };
 use dock_alloc_core::{
     space::{SpaceInterval, SpacePosition},
@@ -57,6 +58,17 @@ impl From<LedgerError> for SolverStateApplyError {
     }
 }
 
+impl std::fmt::Display for SolverStateApplyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SolverStateApplyError::Quay(e) => write!(f, "Quay error: {}", e),
+            SolverStateApplyError::LedgerError(e) => write!(f, "Ledger error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for SolverStateApplyError {}
+
 pub struct SolverState<'p, T, C, Q>
 where
     T: PrimInt + Signed,
@@ -74,6 +86,7 @@ where
     C: PrimInt + Signed,
     Q: QuayRead,
 {
+    #[inline]
     pub fn new(
         problem: &'p Problem<T, C>,
         ledger: AssignmentLedger<'p, T, C>,
@@ -86,14 +99,17 @@ where
         }
     }
 
+    #[inline]
     pub fn ledger(&self) -> &AssignmentLedger<'p, T, C> {
         &self.ledger
     }
 
+    #[inline]
     pub fn berth(&self) -> &BerthOccupancy<T, Q> {
         &self.berth
     }
 
+    #[inline]
     pub fn problem(&self) -> &'p Problem<T, C> {
         self.problem
     }
@@ -320,7 +336,7 @@ where
     }
 
     fn validate(state: &SolverState<'p, T, C, Q>) -> Result<(), FeasibleStateError<T>> {
-        let committed = state.ledger().committed(); // HashMap<MovableRequestId, _>
+        let committed = state.ledger().committed();
         let mut missing: Vec<RequestId> = Vec::new();
 
         for &mid in state.problem().movables().keys() {
@@ -451,15 +467,47 @@ where
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FeasibleSolverStateApplyError<T: PrimInt + Signed> {
+    Berth(BerthApplyValidationError<T>),
+    Ledger(LedgerApplyValidationError<T>),
+}
+
+impl<T: PrimInt + Signed + Display + Debug> std::fmt::Display for FeasibleSolverStateApplyError<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FeasibleSolverStateApplyError::Berth(e) => write!(f, "Berth error: {}", e),
+            FeasibleSolverStateApplyError::Ledger(e) => write!(f, "Ledger error: {}", e),
+        }
+    }
+}
+
+impl<T: PrimInt + Signed> From<BerthApplyValidationError<T>> for FeasibleSolverStateApplyError<T> {
+    fn from(value: BerthApplyValidationError<T>) -> Self {
+        FeasibleSolverStateApplyError::Berth(value)
+    }
+}
+
+impl<T: PrimInt + Signed> From<LedgerApplyValidationError<T>> for FeasibleSolverStateApplyError<T> {
+    fn from(value: LedgerApplyValidationError<T>) -> Self {
+        FeasibleSolverStateApplyError::Ledger(value)
+    }
+}
+
+impl<T: PrimInt + Signed + Display + Debug> std::error::Error for FeasibleSolverStateApplyError<T> {}
+
 impl<'p, T, C, Q> FeasibleSolverState<'p, T, C, Q>
 where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
     Q: QuayRead + QuayWrite,
 {
-    pub fn apply_plan(&mut self, plan: &'p Plan<T, C>) -> Result<(), SolverStateApplyError> {
-        self.ledger.apply(plan.ledger_commit())?;
-        self.berth.apply(plan.berth_commit())?;
+    pub fn apply_plan_validated(
+        &mut self,
+        plan: &'p Plan<T, C>,
+    ) -> Result<(), FeasibleSolverStateApplyError<T>> {
+        self.ledger.apply_validated(plan.ledger_commit())?;
+        self.berth.apply_validated(plan.berth_commit())?;
         Ok(())
     }
 }

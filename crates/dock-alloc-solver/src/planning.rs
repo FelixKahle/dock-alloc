@@ -284,6 +284,7 @@ where
     C: PrimInt + Signed,
     Q: QuayRead,
 {
+    #[inline]
     fn new(builder: &'bl PlanBuilder<'brand, 'bo, 'pp, 'pb, 'al, T, C, Q>) -> Self {
         Self {
             assignment_overlay: &builder.assignment_overlay,

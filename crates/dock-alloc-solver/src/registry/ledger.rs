@@ -22,10 +22,14 @@
 use crate::registry::{
     commit::LedgerOverlayCommit, operations::Operation, overlay::AssignmentLedgerOverlay,
 };
-use dock_alloc_core::{space::SpacePosition, time::TimePoint};
+use dock_alloc_core::{
+    space::{SpaceInterval, SpacePosition},
+    time::{TimeInterval, TimePoint},
+};
 use dock_alloc_model::model::{
-    AnyAssignmentRef, AssignmentRef, Fixed, FixedRequestId, Movable, MovableRequestId, Problem,
-    Request, RequestId, SolutionRef,
+    AnyAssignmentRef, AssignmentOutsideSpaceWindowError, AssignmentOutsideTimeWindowError,
+    AssignmentRef, Fixed, FixedRequestId, Movable, MovableRequestId, Problem, Request, RequestId,
+    SolutionRef,
 };
 use num_traits::{PrimInt, Signed};
 use std::collections::HashMap;
@@ -68,6 +72,28 @@ impl std::fmt::Display for LedgerError {
 }
 
 impl std::error::Error for LedgerError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LedgerApplyValidationError<T: PrimInt + Signed> {
+    Ledger(LedgerError),
+    AssignmentOutsideTimeWindow(AssignmentOutsideTimeWindowError<T>),
+    AssignmentOutsideSpaceWindow(AssignmentOutsideSpaceWindowError),
+}
+
+impl<T: PrimInt + Signed + std::fmt::Display> std::fmt::Display for LedgerApplyValidationError<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LedgerApplyValidationError::Ledger(e) => write!(f, "{e}"),
+            LedgerApplyValidationError::AssignmentOutsideTimeWindow(e) => write!(f, "{e}"),
+            LedgerApplyValidationError::AssignmentOutsideSpaceWindow(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<T: PrimInt + Signed + std::fmt::Display + std::fmt::Debug> std::error::Error
+    for LedgerApplyValidationError<T>
+{
+}
 
 impl<'a, T, C> AssignmentLedger<'a, T, C>
 where
@@ -210,8 +236,73 @@ where
     }
 
     #[inline]
+    pub fn push_operation_validated(
+        &mut self,
+        op: Operation<'a, T, C>,
+    ) -> Result<(), LedgerApplyValidationError<T>> {
+        match op {
+            Operation::Assign(assign_op) => {
+                let assignment = assign_op.assignment();
+                Self::validate_assignment_in_request_windows(assignment)?;
+                self.commit_assignment(
+                    assignment.request(),
+                    assignment.start_time(),
+                    assignment.start_position(),
+                )
+                .map_err(LedgerApplyValidationError::Ledger)?;
+            }
+            Operation::Unassign(unassign_op) => {
+                let assignment = unassign_op.assignment();
+                self.uncommit_assignment(assignment)
+                    .map_err(LedgerApplyValidationError::Ledger)?;
+            }
+        }
+        Ok(())
+    }
+
+    #[inline]
+    pub fn apply_validated(
+        &mut self,
+        commit: &LedgerOverlayCommit<'a, T, C>,
+    ) -> Result<(), LedgerApplyValidationError<T>> {
+        for op in commit.operations() {
+            self.push_operation_validated(op.clone())?;
+        }
+        Ok(())
+    }
+
+    #[inline]
     pub fn overlay(&self) -> AssignmentLedgerOverlay<'_, 'a, '_, T, C> {
         AssignmentLedgerOverlay::new(self)
+    }
+
+    #[inline]
+    fn validate_assignment_in_request_windows(
+        assignment: &AssignmentRef<'a, Movable, T, C>,
+    ) -> Result<(), LedgerApplyValidationError<T>> {
+        let r = assignment.request();
+
+        let t0 = assignment.start_time();
+        let t1 = t0 + r.processing_duration();
+        let t_iv = TimeInterval::new(t0, t1);
+
+        let s0 = assignment.start_position();
+        let s1 = SpacePosition::new(s0.value() + r.length().value());
+        let s_iv = SpaceInterval::new(s0, s1);
+
+        let tw = r.feasible_time_window();
+        if !tw.contains_interval(&t_iv) {
+            return Err(LedgerApplyValidationError::AssignmentOutsideTimeWindow(
+                dock_alloc_model::model::AssignmentOutsideTimeWindowError::new(r.id(), tw, t_iv),
+            ));
+        }
+        let sw = r.feasible_space_window();
+        if !sw.contains_interval(&s_iv) {
+            return Err(LedgerApplyValidationError::AssignmentOutsideSpaceWindow(
+                dock_alloc_model::model::AssignmentOutsideSpaceWindowError::new(r.id(), sw, s_iv),
+            ));
+        }
+        Ok(())
     }
 }
 

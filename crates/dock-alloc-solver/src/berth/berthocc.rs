@@ -25,6 +25,7 @@ use crate::{
         domain::{FreeRegion, FreeSlot},
         iter::{FeasibleRegionIter, FreeSlotIter},
         overlay::BerthOccupancyOverlay,
+        prelude::Operation,
         quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError, QuayWrite},
         slice::{SliceView, TimeSliceRef},
     },
@@ -38,6 +39,25 @@ use dock_alloc_core::{
 use dock_alloc_model::model::Problem;
 use num_traits::{PrimInt, Signed, Zero};
 use std::ops::Bound::Excluded;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BerthApplyValidationError<T: PrimInt + Signed> {
+    Quay(QuaySpaceIntervalOutOfBoundsError),
+    NotFree(SpaceTimeRectangle<T>),
+}
+
+impl<T: PrimInt + Signed + std::fmt::Display> std::fmt::Display for BerthApplyValidationError<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BerthApplyValidationError::Quay(e) => write!(f, "{}", e),
+            BerthApplyValidationError::NotFree(r) => write!(f, "Rectangle {} is not free", r),
+        }
+    }
+}
+impl<T: PrimInt + Signed + std::fmt::Display + std::fmt::Debug> std::error::Error
+    for BerthApplyValidationError<T>
+{
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Slices<'a, T, Q>
@@ -357,13 +377,13 @@ where
     #[inline]
     pub fn push_operation(
         &mut self,
-        op: &crate::berth::operations::Operation<T>,
+        op: &Operation<T>,
     ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
         match op {
-            crate::berth::operations::Operation::Occupy(occ) => {
+            Operation::Occupy(occ) => {
                 self.occupy(occ.rectangle())?;
             }
-            crate::berth::operations::Operation::Free(free) => {
+            Operation::Free(free) => {
                 self.free(free.rectangle())?;
             }
         }
@@ -377,6 +397,30 @@ where
     ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
         for op in commit.operations() {
             self.push_operation(op)?;
+        }
+        Ok(())
+    }
+
+    #[inline]
+    pub fn apply_validated(
+        &mut self,
+        commit: &crate::berth::commit::BerthOverlayCommit<T>,
+    ) -> Result<(), BerthApplyValidationError<T>> {
+        for op in commit.operations() {
+            match op {
+                Operation::Occupy(occ) => {
+                    let rect = occ.rectangle();
+                    match self.is_free(rect) {
+                        Ok(true) => self.occupy(rect).map_err(BerthApplyValidationError::Quay)?,
+                        Ok(false) => return Err(BerthApplyValidationError::NotFree(*rect)),
+                        Err(e) => return Err(BerthApplyValidationError::Quay(e)),
+                    }
+                }
+                Operation::Free(fr) => {
+                    self.free(fr.rectangle())
+                        .map_err(BerthApplyValidationError::Quay)?;
+                }
+            }
         }
         Ok(())
     }
