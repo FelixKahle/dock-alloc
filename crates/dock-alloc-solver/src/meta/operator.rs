@@ -19,10 +19,22 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-pub mod berth;
-pub mod container;
-pub mod domain;
-pub mod framework;
-pub mod greedy;
-pub mod meta;
-pub mod registry;
+use crate::{
+    berth::quay::QuayRead,
+    framework::planning::{Plan, PlanningContext},
+};
+use num_traits::{PrimInt, Signed};
+
+pub trait Operator {
+    const NAME: &'static str;
+
+    fn propose<'p, 'al, 'bo, T, C, Q>(
+        &self,
+        iteration: usize,
+        ctx: PlanningContext<'p, 'al, 'bo, T, C, Q>,
+    ) -> Plan<'p, T, C>
+    where
+        T: PrimInt + Signed,
+        C: PrimInt + Signed,
+        Q: QuayRead;
+}

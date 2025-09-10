@@ -36,6 +36,7 @@ impl RequestId {
     pub const fn new(id: u64) -> Self {
         RequestId(id)
     }
+
     #[inline]
     pub const fn value(self) -> u64 {
         self.0
@@ -47,6 +48,7 @@ impl Display for RequestId {
         write!(f, "RequestId({})", self.0)
     }
 }
+
 impl From<u64> for RequestId {
     fn from(value: u64) -> Self {
         RequestId(value)
@@ -62,6 +64,7 @@ impl MovableRequestId {
     pub fn new(id: RequestId) -> Self {
         Self(id)
     }
+
     #[inline]
     pub fn value(self) -> RequestId {
         self.0
@@ -72,11 +75,13 @@ impl Display for MovableRequestId {
         write!(f, "Movable({})", self.0)
     }
 }
+
 impl From<RequestId> for MovableRequestId {
     fn from(value: RequestId) -> Self {
         MovableRequestId(value)
     }
 }
+
 impl From<MovableRequestId> for RequestId {
     fn from(value: MovableRequestId) -> Self {
         value.0
@@ -102,11 +107,13 @@ impl Display for FixedRequestId {
         write!(f, "Fixed({})", self.0)
     }
 }
+
 impl From<RequestId> for FixedRequestId {
     fn from(value: RequestId) -> Self {
         FixedRequestId(value)
     }
 }
+
 impl From<FixedRequestId> for RequestId {
     fn from(value: FixedRequestId) -> Self {
         value.0

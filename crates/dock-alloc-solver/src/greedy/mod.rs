@@ -22,7 +22,7 @@
 use crate::{
     berth::quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError, QuayWrite},
     framework::{
-        planning::ProposeCtx,
+        planning::PlanningContext,
         state::{ConstructiveSolver, FeasibleSolverState, Solver, SolverState},
     },
 };
@@ -98,7 +98,7 @@ where
 
         while let Some(t) = events.pop_first() {
             let t_next_opt = events.first().copied();
-            let ctx = ProposeCtx::new(state.ledger(), state.berth(), problem);
+            let ctx = PlanningContext::new(state.ledger(), state.berth(), problem);
             let (plan_opt, departures) = ctx.with_builder(|mut b| {
                 let mut ready_order = b.with_explorer(|ex| {
                     ex.iter_unassigned_requests()
