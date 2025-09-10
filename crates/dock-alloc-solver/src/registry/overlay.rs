@@ -527,18 +527,6 @@ where
     }
 }
 
-impl<'a, 'l, T, C> From<&'l AssignmentLedger<'a, T, C>> for SolutionRef<'l, T, C>
-where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
-{
-    fn from(val: &'l AssignmentLedger<'a, T, C>) -> Self {
-        let decisions: HashMap<RequestId, AnyAssignmentRef<'l, T, C>> =
-            val.iter_assignments().map(|a| (a.id(), a)).collect();
-        SolutionRef::from_assignments(decisions)
-    }
-}
-
 impl<'brand, 'p, 'l, T, C> From<&'l AssignmentLedgerOverlay<'brand, 'p, 'l, T, C>>
     for SolutionRef<'l, T, C>
 where
@@ -632,7 +620,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_uncommit_makes_request_unassigned_in_overlay_view() {
+    fn test_overlay_uncommit_makes_request_unassigned_in_overlay_view() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
         let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
         let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 100);
@@ -686,7 +674,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_commit_hides_request_from_unassigned_in_overlay_view() {
+    fn test_overlay_commit_hides_request_from_unassigned_in_overlay_view() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
         let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
         let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 100);
@@ -726,7 +714,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_move_same_id_tombstones_then_readds_with_new_assignment() {
+    fn test_overlay_move_same_id_tombstones_then_readds_with_new_assignment() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
         let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
 
@@ -773,7 +761,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_commit_conflict_when_already_in_base() {
+    fn test_overlay_commit_conflict_when_already_in_base() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
         let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
         b.add_movable_request(r1.clone()).unwrap();
@@ -804,7 +792,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_uncommit_conflict_when_not_in_base() {
+    fn test_overlay_uncommit_conflict_when_not_in_base() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
         let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
         b.add_movable_request(r1.clone()).unwrap();
@@ -823,7 +811,7 @@ mod tests {
     }
 
     #[test]
-    fn overlay_double_stage_rules() {
+    fn test_overlay_double_stage_rules() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
         let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
         b.add_movable_request(r1.clone()).unwrap();
@@ -868,7 +856,7 @@ mod tests {
     }
 
     #[test]
-    fn into_solution_from_ledger_and_overlay() {
+    fn test_into_solution_from_ledger_and_overlay() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
         let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
         let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 100);

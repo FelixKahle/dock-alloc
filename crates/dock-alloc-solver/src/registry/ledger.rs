@@ -23,7 +23,7 @@ use crate::registry::{commit::LedgerOverlayCommit, overlay::AssignmentLedgerOver
 use dock_alloc_core::domain::{SpacePosition, TimePoint};
 use dock_alloc_model::{
     AnyAssignmentRef, AssignmentRef, Fixed, FixedRequestId, Movable, MovableRequestId, Problem,
-    Request,
+    Request, RequestId, SolutionRef,
 };
 use num_traits::{PrimInt, Signed};
 use std::collections::HashMap;
@@ -89,7 +89,14 @@ where
         &self.committed
     }
 
-    /// Primary commit: by movable request and placement.
+    #[inline]
+    pub fn get_moveable_assignment(
+        &self,
+        id: &MovableRequestId,
+    ) -> Option<&AssignmentRef<'a, Movable, T, C>> {
+        self.committed.get(id)
+    }
+
     #[inline]
     pub fn commit_assignment(
         &mut self,
@@ -197,6 +204,40 @@ where
     #[inline]
     pub fn overlay(&self) -> AssignmentLedgerOverlay<'_, 'a, '_, T, C> {
         AssignmentLedgerOverlay::new(self)
+    }
+}
+
+impl<'a, 'l, T, C> From<&'l AssignmentLedger<'a, T, C>> for SolutionRef<'l, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
+{
+    fn from(val: &'l AssignmentLedger<'a, T, C>) -> Self {
+        let decisions: HashMap<RequestId, AnyAssignmentRef<'l, T, C>> =
+            val.iter_assignments().map(|a| (a.id(), a)).collect();
+        SolutionRef::from_assignments(decisions)
+    }
+}
+
+impl<'a, T, C> From<AssignmentLedger<'a, T, C>> for SolutionRef<'a, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
+{
+    fn from(val: AssignmentLedger<'a, T, C>) -> Self {
+        let decisions: HashMap<RequestId, AnyAssignmentRef<'a, T, C>> = {
+            let mut decisions = HashMap::new();
+            for assignment in val.problem().iter_fixed_assignments() {
+                let assignment_ref = AnyAssignmentRef::from(assignment.as_ref());
+                decisions.insert(assignment_ref.id(), assignment_ref);
+            }
+            for assignment in val.committed().values() {
+                let assignment_ref = AnyAssignmentRef::from(*assignment);
+                decisions.insert(assignment_ref.id(), assignment_ref);
+            }
+            decisions
+        };
+        SolutionRef::from_assignments(decisions)
     }
 }
 

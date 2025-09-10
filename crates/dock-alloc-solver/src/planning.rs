@@ -547,7 +547,7 @@ mod tests {
     }
 
     #[test]
-    fn collect_plans_in_parallel_with_rayon() {
+    fn test_collect_plans_in_parallel_with_rayon() {
         let n = 8usize;
         let quay_len = 200usize;
 

@@ -258,9 +258,11 @@ impl<T> IntervalSet<T> {
 
         // Fallback condition: If the new interval is "way before" the last one,
         // a simple tail merge is incorrect. `insert_and_coalesce` handles this.
-        if self.intervals.last().is_some_and(|last_interval| {
-            interval.end() <= last_interval.start()
-        }) {
+        if self
+            .intervals
+            .last()
+            .is_some_and(|last_interval| interval.end() <= last_interval.start())
+        {
             self.insert_and_coalesce(interval);
             return;
         }
@@ -803,12 +805,13 @@ impl<T> IntervalSet<T> {
         T: Ord + Copy,
     {
         if let Some(last_interval) = destination_vec.last_mut()
-            && last_interval.end() >= next_interval.start() {
-                // Merge with the last interval if they overlap or are adjacent.
-                let merged_end = last_interval.end().max(next_interval.end());
-                *last_interval = Interval::new(last_interval.start(), merged_end);
-                return;
-            }
+            && last_interval.end() >= next_interval.start()
+        {
+            // Merge with the last interval if they overlap or are adjacent.
+            let merged_end = last_interval.end().max(next_interval.end());
+            *last_interval = Interval::new(last_interval.start(), merged_end);
+            return;
+        }
         // Otherwise, just append.
         destination_vec.push(next_interval);
     }
@@ -999,7 +1002,7 @@ mod tests {
     }
 
     #[test]
-    fn push_disjoint_tail_fast_path() {
+    fn test_push_disjoint_tail_fast_path() {
         let mut s = SetI::new();
         s.append_and_coalesce_tail(iv(1, 3));
         s.append_and_coalesce_tail(iv(3, 5)); // merges -> [1,5)
@@ -1038,7 +1041,7 @@ mod tests {
     }
 
     #[test]
-    fn overlaps_query() {
+    fn test_overlaps_query() {
         let s = SetI::from_vec(vec![iv(1, 3), iv(5, 6), iv(8, 10)]);
         assert!(s.overlaps(iv(2, 4))); // overlaps [1,3)
         assert!(s.overlaps(iv(9, 12))); // overlaps [8,10)

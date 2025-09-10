@@ -1001,7 +1001,7 @@ mod tests {
                 type Q = $Q;
 
                 #[test]
-                fn new_initially_occupied() {
+                fn test_new_initially_occupied() {
                     let total = SpaceLength::new(10);
                     let quay = Q::new(total, false);
                     assert_runs(&quay, total, &[]);

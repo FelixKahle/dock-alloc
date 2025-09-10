@@ -476,6 +476,23 @@ impl<T: PrimInt> TimePoint<T> {
         TimePoint(value)
     }
 
+    /// Creates a new `TimePoint` with a value of zero.
+    ///
+    /// This is useful for representing the start of a timeline or epoch.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimePoint;
+    ///
+    /// let tp: TimePoint<i32> = TimePoint::zero();
+    /// assert_eq!(tp.value(), 0);
+    /// ```
+    #[inline]
+    pub fn zero() -> Self {
+        TimePoint::new(T::zero())
+    }
+
     /// Returns the inner value of the `TimePoint`.
     ///
     /// Extracts the primitive integer value from the `TimePoint` wrapper.
@@ -3324,14 +3341,14 @@ mod tests {
     }
 
     #[test]
-    fn i64_point_plus_i64_delta() {
+    fn test_i64_point_plus_i64_delta() {
         let t = TimePoint64::new(10);
         let dt = TimeDelta64::new(-3);
         assert_eq!((t + dt).value(), 7);
     }
 
     #[test]
-    fn i64_point_minus_point_gives_i64_delta() {
+    fn test_i64_point_minus_point_gives_i64_delta() {
         let a = TimePoint64::new(5);
         let b = TimePoint64::new(12);
         let dt: TimeDelta64 = b - a;

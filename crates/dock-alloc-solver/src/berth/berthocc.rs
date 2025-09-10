@@ -479,7 +479,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_time_or_space_is_noop() {
+    fn test_empty_time_or_space_is_noop() {
         let mut b = BO::new(len(10));
 
         // Empty time
