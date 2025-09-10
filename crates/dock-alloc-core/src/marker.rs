@@ -19,8 +19,41 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-pub mod domain;
-pub mod iter;
-pub mod marker;
-pub mod mem;
-pub mod primitives;
+/// A marker type to create a lifetime dependency without actually storing a reference.
+///
+/// This is useful to create types that are generic over a lifetime without actually
+/// storing a reference with that lifetime.
+/// This is a zero-cost abstraction, as the compiler optimizes away the
+/// `PhantomData` field.
+#[repr(transparent)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Brand<'x>(std::marker::PhantomData<fn(&'x ()) -> &'x ()>);
+
+impl<'x> Brand<'x> {
+    /// Create a new `Brand` instance.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::marker::Brand;
+    ///
+    /// let brand: Brand<'static> = Brand::new();
+    /// ```
+    #[inline(always)]
+    pub const fn new() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+
+impl<'x> From<()> for Brand<'x> {
+    #[inline(always)]
+    fn from(_: ()) -> Self {
+        Self::new()
+    }
+}
+
+impl<'x> std::fmt::Display for Brand<'x> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Brand")
+    }
+}

@@ -32,7 +32,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::hash::Hash;
 use std::iter::FusedIterator;
-use std::ops::{Add, Div, Sub};
+use std::ops::{Add, Div, RangeBounds, Sub};
 
 /// A half-open interval `[start, end)`.
 ///
@@ -220,6 +220,63 @@ impl<T> Interval<T> {
         other.start_inclusive >= self.start_inclusive && other.end_exclusive <= self.end_exclusive
     }
 
+    /// Checks if this interval precedes another interval.
+    ///
+    /// An interval precedes another if its end is less than or equal to
+    /// the other interval's start, meaning they either don't overlap or
+    /// touch exactly at one point.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::primitives::Interval;
+    ///
+    /// let a = Interval::new(1, 5);
+    /// let b = Interval::new(5, 10); // b starts where a ends
+    /// assert!(a.precedes(&b));      // a precedes b
+    ///
+    /// let c = Interval::new(6, 10); // c starts after a ends
+    /// assert!(a.precedes(&c));      // a precedes c
+    ///
+    /// let d = Interval::new(4, 8);  // d overlaps with a
+    /// assert!(!a.precedes(&d));     // a does not precede d
+    /// ```
+    #[inline]
+    pub fn precedes(&self, other: &Self) -> bool
+    where
+        T: PartialOrd + Copy,
+    {
+        self.end() <= other.start()
+    }
+
+    /// Checks if this interval strictly precedes another interval.
+    ///
+    /// An interval strictly precedes another if its end is less than
+    /// the other interval's start, meaning there is a gap between them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::primitives::Interval;
+    ///
+    /// let a = Interval::new(1, 5);
+    /// let b = Interval::new(5, 10); // b starts where a ends
+    /// assert!(!a.strictly_precedes(&b)); // a doesn't strictly precede b
+    ///
+    /// let c = Interval::new(6, 10); // c starts after a ends
+    /// assert!(a.strictly_precedes(&c));  // a strictly precedes c
+    ///
+    /// let d = Interval::new(4, 8);  // d overlaps with a
+    /// assert!(!a.strictly_precedes(&d)); // a doesn't strictly precede d
+    /// ```
+    #[inline]
+    pub fn strictly_precedes(&self, other: &Self) -> bool
+    where
+        T: PartialOrd + Copy,
+    {
+        self.end() < other.start()
+    }
+
     /// Checks if this interval intersects with another interval.
     ///
     /// This method checks if there is any overlap between the
@@ -356,6 +413,67 @@ impl<T> Interval<T> {
         self.clamp(other)
     }
 
+    /// Returns the union of this interval with another interval, if they overlap or are adjacent.
+    ///
+    /// This method returns an `Option<Interval<T>>` that represents the union of the two intervals.
+    /// If the intervals do not overlap or are not adjacent, it returns `None`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::primitives::Interval;
+    ///
+    /// let a = Interval::new(1, 5);
+    /// let b = Interval::new(4, 7);
+    /// assert_eq!(a.union(&b), Some(Interval::new(1, 7))); // union exists
+    /// let c = Interval::new(6, 8);
+    /// assert_eq!(a.union(&c), None); // no union
+    /// let d = Interval::new(5, 10);
+    /// assert_eq!(a.union(&d), Some(Interval::new(1, 10))); // adjacent intervals
+    /// let e = Interval::new(1, 5);
+    /// assert_eq!(a.union(&e), Some(Interval::new(1, 5))); // union with itself
+    /// ```
+    #[inline]
+    pub fn union(&self, other: &Self) -> Option<Self>
+    where
+        T: PartialOrd + Copy,
+    {
+        // If exactly one side is empty, return the non-empty interval.
+        // If both are empty, fall through to the existing overlap/adjacency checks
+        // to preserve previous semantics (only unify if they coincide/are adjacent).
+        if self.is_empty() && !other.is_empty() {
+            return Some(Self {
+                start_inclusive: other.start_inclusive,
+                end_exclusive: other.end_exclusive,
+            });
+        }
+        if other.is_empty() && !self.is_empty() {
+            return Some(Self {
+                start_inclusive: self.start_inclusive,
+                end_exclusive: self.end_exclusive,
+            });
+        }
+
+        if self.intersects(other) || self.end() == other.start() || other.end() == self.start() {
+            let start = if self.start_inclusive < other.start_inclusive {
+                self.start_inclusive
+            } else {
+                other.start_inclusive
+            };
+            let end = if self.end_exclusive > other.end_exclusive {
+                self.end_exclusive
+            } else {
+                other.end_exclusive
+            };
+            Some(Self {
+                start_inclusive: start,
+                end_exclusive: end,
+            })
+        } else {
+            None
+        }
+    }
+
     /// Clamps this interval to the bounds of another interval.
     ///
     /// This method returns an `Option<Interval<T>>` that represents the intersection of the two intervals.
@@ -412,9 +530,9 @@ impl<T> Interval<T> {
     /// assert_eq!(empty_interval.length(), 0); // length is 0 for empty
     /// ```
     #[inline]
-    pub fn length(&self) -> T
+    pub fn length<D>(&self) -> D
     where
-        T: Sub<Output = T> + Copy,
+        T: Copy + Sub<Output = D>,
     {
         self.end_exclusive - self.start_inclusive
     }
@@ -436,9 +554,10 @@ impl<T> Interval<T> {
     /// assert_eq!(empty_interval.midpoint(), 5); // midpoint is 5 for empty interval
     /// ```
     #[inline]
-    pub fn midpoint(&self) -> T
+    pub fn midpoint<D>(&self) -> T
     where
-        T: FromPrimitive + Copy + Sub<Output = T> + Div<T, Output = T> + Add<T, Output = T>,
+        T: FromPrimitive + Copy + Sub<Output = D> + Div<T, Output = T> + Add<T, Output = T>,
+        D: FromPrimitive + Div<T, Output = T>,
     {
         self.start_inclusive + (self.end_exclusive - self.start_inclusive) / T::from_u8(2).unwrap()
     }
@@ -497,6 +616,31 @@ impl<T> Interval<T> {
         T: Copy + PartialOrd + Add<T, Output = T> + Zero,
     {
         IntervalIter::new(self, step)
+    }
+}
+
+impl<T: Default> Default for Interval<T> {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            start_inclusive: T::default(),
+            end_exclusive: T::default(),
+        }
+    }
+}
+
+impl<T> RangeBounds<T> for Interval<T>
+where
+    T: PartialOrd + Copy,
+{
+    #[inline]
+    fn start_bound(&self) -> std::ops::Bound<&T> {
+        std::ops::Bound::Included(&self.start_inclusive)
+    }
+
+    #[inline]
+    fn end_bound(&self) -> std::ops::Bound<&T> {
+        std::ops::Bound::Excluded(&self.end_exclusive)
     }
 }
 
@@ -923,6 +1067,58 @@ mod tests {
         let i = Interval::new(1i32, 5i32);
         let v: Vec<_> = i.iter(1).collect();
         assert_eq!(v, vec![1, 2, 3, 4]); // half-open
+    }
+
+    #[test]
+    fn test_union_overlap_merges() {
+        let a = Interval::new(1i32, 5i32);
+        let b = Interval::new(3i32, 8i32);
+        assert_eq!(a.union(&b), Some(Interval::new(1, 8)));
+        assert_eq!(b.union(&a), Some(Interval::new(1, 8)));
+    }
+
+    #[test]
+    fn test_union_adjacent_merges_half_open() {
+        let a = Interval::new(1i32, 5i32);
+        let b = Interval::new(5i32, 7i32);
+        // Adjacent half-open intervals should coalesce
+        assert_eq!(a.union(&b), Some(Interval::new(1, 7)));
+        assert_eq!(b.union(&a), Some(Interval::new(1, 7)));
+    }
+
+    #[test]
+    fn test_union_disjoint_returns_none() {
+        let a = Interval::new(1i32, 3i32);
+        let b = Interval::new(4i32, 6i32);
+        assert_eq!(a.union(&b), None);
+        assert_eq!(b.union(&a), None);
+    }
+
+    #[test]
+    fn test_union_with_empty_returns_other() {
+        let empty = Interval::new(2i32, 2i32);
+        let non_empty = Interval::new(1i32, 3i32);
+        // Empty behaves as identity for union
+        assert_eq!(empty.union(&non_empty), Some(non_empty));
+        assert_eq!(non_empty.union(&empty), Some(non_empty));
+    }
+
+    #[test]
+    fn test_union_both_empty_same_point_returns_empty() {
+        let a = Interval::new(5i32, 5i32);
+        let b = Interval::new(5i32, 5i32);
+        // Both empty at same anchor coalesce to the same empty interval
+        assert_eq!(a.union(&b), Some(Interval::new(5, 5)));
+        assert_eq!(b.union(&a), Some(Interval::new(5, 5)));
+    }
+
+    #[test]
+    fn test_union_both_empty_different_points_returns_none() {
+        let a = Interval::new(5i32, 5i32);
+        let b = Interval::new(6i32, 6i32);
+        // Disjoint empties cannot be unified
+        assert_eq!(a.union(&b), None);
+        assert_eq!(b.union(&a), None);
     }
 
     #[test]

@@ -57,6 +57,8 @@ use std::{
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
+pub trait DomainType: PrimInt + Signed {}
+
 /// Represents a point in time.
 ///
 /// A `TimePoint` is a wrapper around a primitive integer type that
@@ -76,6 +78,25 @@ use std::{
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TimePoint<T: PrimInt>(T);
+
+impl<T: PrimInt> Default for TimePoint<T> {
+    /// Creates a default `TimePoint` with a value of zero.
+    ///
+    /// This is useful for initializing a `TimePoint` to a known state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimePoint;
+    ///
+    /// let tp: TimePoint<i32> = TimePoint::default();
+    /// assert_eq!(tp.value(), 0);
+    /// ```
+    #[inline]
+    fn default() -> Self {
+        TimePoint(T::zero())
+    }
+}
 
 impl<T: PrimInt + Display> Display for TimePoint<T> {
     /// Formats the `TimePoint` as `TimePoint(value)`.
@@ -276,6 +297,35 @@ impl<T: PrimInt + Signed> TimeDelta<T> {
         self.0.is_zero()
     }
 
+    /// Clamps the `TimeDelta` between `min` and `max`.
+    ///
+    /// Returns `min` if `self < min`, `max` if `self > max`, otherwise returns `self`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `min > max`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimeDelta;
+    ///
+    /// let delta = TimeDelta::new(5);
+    /// let clamped = delta.clamp(TimeDelta::new(0), TimeDelta::new(10));
+    /// assert_eq!(clamped.value(), 5);
+    /// ```
+    #[inline]
+    pub fn clamp(self, min: TimeDelta<T>, max: TimeDelta<T>) -> TimeDelta<T> {
+        assert!(min <= max, "min must be <= max");
+        if self < min {
+            min
+        } else if self > max {
+            max
+        } else {
+            self
+        }
+    }
+
     /// Computes `self + rhs`, returning `None` if overflow occurred.
     ///
     /// Performs an addition that returns `None` instead of panicking if the result overflows.
@@ -424,6 +474,23 @@ impl<T: PrimInt> TimePoint<T> {
     #[inline]
     pub const fn new(value: T) -> Self {
         TimePoint(value)
+    }
+
+    /// Creates a new `TimePoint` with a value of zero.
+    ///
+    /// This is useful for representing the start of a timeline or epoch.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::TimePoint;
+    ///
+    /// let tp: TimePoint<i32> = TimePoint::zero();
+    /// assert_eq!(tp.value(), 0);
+    /// ```
+    #[inline]
+    pub fn zero() -> Self {
+        TimePoint::new(T::zero())
     }
 
     /// Returns the inner value of the `TimePoint`.
@@ -1563,30 +1630,22 @@ impl Sub<SpacePosition> for SpacePosition {
 
     /// Subtracts one `SpacePosition` from another, returning a `SpaceLength`.
     ///
-    /// This method takes another `SpacePosition` and subtracts it from the current instance,
-    /// returning a new `SpaceLength` that represents the difference between the two indices.
-    ///
-    /// # Panics
-    ///
-    /// This method will panic if an underflow occurs during the operation.
+    /// The result is the absolute (order-independent) distance between the two positions.
+    /// This operation never panics.
     ///
     /// # Examples
     ///
     /// ```
     /// use dock_alloc_core::domain::{SpacePosition, SpaceLength};
     ///
-    /// let pos1 = SpacePosition::new(10);
-    /// let pos2 = SpacePosition::new(5);
-    /// let length = pos1 - pos2;
-    /// assert_eq!(length.value(), 5);
+    /// let a = SpacePosition::new(10);
+    /// let b = SpacePosition::new(4);
+    /// assert_eq!(a - b, SpaceLength::new(6));
+    /// assert_eq!(b - a, SpaceLength::new(6)); // order-independent
     /// ```
     #[inline]
     fn sub(self, rhs: SpacePosition) -> Self::Output {
-        SpaceLength(
-            self.0
-                .checked_sub(rhs.0)
-                .expect("underflow in SpacePosition - SpacePosition"),
-        )
+        SpaceLength::new(self.value().abs_diff(rhs.value()))
     }
 }
 
@@ -1741,6 +1800,33 @@ impl SpaceLength {
     #[inline]
     pub const fn value(self) -> usize {
         self.0
+    }
+
+    /// Clamps the `SpaceLength` between a minimum and maximum value.
+    ///
+    /// Returns a new `SpaceLength` that is at least `min` and at most `max`.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if `min` is greater than `max`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dock_alloc_core::domain::SpaceLength;
+    ///
+    /// let len = SpaceLength::new(15);
+    /// let clamped = len.clamp(SpaceLength::new(10), SpaceLength::new(20));
+    /// assert_eq!(clamped.value(), 15);
+    /// let clamped_low = len.clamp(SpaceLength::new(20), SpaceLength::new(30));
+    /// assert_eq!(clamped_low.value(), 20);
+    /// let clamped_high = len.clamp(SpaceLength::new(5), SpaceLength::new(10));
+    /// assert_eq!(clamped_high.value(), 10);
+    /// ```
+    #[inline]
+    pub fn clamp(self, min: Self, max: Self) -> Self {
+        assert!(min <= max, "min must be <= max");
+        SpaceLength(self.0.clamp(min.0, max.0))
     }
 
     /// Computes `self + rhs`, returning `None` if overflow occurred.
@@ -3255,14 +3341,14 @@ mod tests {
     }
 
     #[test]
-    fn i64_point_plus_i64_delta() {
+    fn test_i64_point_plus_i64_delta() {
         let t = TimePoint64::new(10);
         let dt = TimeDelta64::new(-3);
         assert_eq!((t + dt).value(), 7);
     }
 
     #[test]
-    fn i64_point_minus_point_gives_i64_delta() {
+    fn test_i64_point_minus_point_gives_i64_delta() {
         let a = TimePoint64::new(5);
         let b = TimePoint64::new(12);
         let dt: TimeDelta64 = b - a;
@@ -3671,5 +3757,13 @@ mod tests {
     fn test_timedelta_division_truncates_toward_zero() {
         assert_eq!(TimeDelta::new(10_i32) / -3, TimeDelta::new(-3));
         assert_eq!(TimeDelta::new(-10_i32) / 3, TimeDelta::new(-3));
+    }
+
+    #[test]
+    fn test_space_position_sub_is_order_independent() {
+        let a = SpacePosition::new(4);
+        let b = SpacePosition::new(10);
+        assert_eq!(a - b, SpaceLength::new(6));
+        assert_eq!(b - a, SpaceLength::new(6));
     }
 }

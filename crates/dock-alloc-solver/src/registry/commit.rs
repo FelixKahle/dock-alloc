@@ -19,8 +19,45 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-pub mod domain;
-pub mod iter;
-pub mod marker;
-pub mod mem;
-pub mod primitives;
+use crate::registry::operations::Operation;
+use num_traits::{PrimInt, Signed};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LedgerOverlayCommit<'a, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    operations: Vec<Operation<'a, T, C>>,
+}
+
+impl<'a, T, C> LedgerOverlayCommit<'a, T, C>
+where
+    T: PrimInt + Signed,
+    C: PrimInt + Signed,
+{
+    pub fn new(operations: Vec<Operation<'a, T, C>>) -> Self {
+        Self { operations }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            operations: Vec::with_capacity(capacity),
+        }
+    }
+
+    pub fn operations(&self) -> &[Operation<'a, T, C>] {
+        &self.operations
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.operations.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use static_assertions::assert_impl_all;
+
+    assert_impl_all!(crate::registry::commit::LedgerOverlayCommit<'static, i64, i64>: Send, Sync);
+}
