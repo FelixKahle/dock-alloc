@@ -19,7 +19,7 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use dock_alloc_core::domain::{SpaceInterval, TimePoint};
+use dock_alloc_core::{space::SpaceInterval, time::TimePoint};
 use num_traits::{PrimInt, Signed};
 
 pub trait SliceView<T: PrimInt + Signed> {

@@ -19,17 +19,18 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE..
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-
 use dock_alloc_core::{
-    domain::{Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint},
+    cost::Cost,
     marker::Brand,
+    space::{SpaceInterval, SpaceLength, SpacePosition},
+    time::{TimeDelta, TimeInterval, TimePoint},
 };
 use dock_alloc_model::model::{
     AnyAssignmentRef, AssignmentRef, Fixed, FixedRequestId, Movable, MovableRequestId, Request,
     RequestId, SolutionRef,
 };
 use num_traits::{PrimInt, Signed};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::registry::{
     commit::LedgerOverlayCommit,
@@ -544,9 +545,6 @@ where
 mod tests {
     use super::*;
     use crate::registry::ledger::AssignmentLedger;
-    use dock_alloc_core::domain::{
-        Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
-    };
     use dock_alloc_model::model::{
         Assignment, AssignmentRef, Fixed, Movable, MovableRequestId, ProblemBuilder, Request,
         RequestId,

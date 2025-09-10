@@ -20,7 +20,7 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use crate::domain::SpaceTimeRectangle;
-use dock_alloc_core::domain::{SpaceInterval, TimePoint};
+use dock_alloc_core::{space::SpaceInterval, time::TimePoint};
 use num_traits::{PrimInt, Signed};
 use std::fmt::Display;
 

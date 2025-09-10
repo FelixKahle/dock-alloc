@@ -24,7 +24,7 @@ use crate::{
     framework::{ConstructiveSolver, FeasibleSolverState, Solver, SolverState},
     planning::ProposeCtx,
 };
-use dock_alloc_core::domain::{TimeInterval, TimePoint};
+use dock_alloc_core::time::{TimeInterval, TimePoint};
 use dock_alloc_model::model::{AssignmentRef, Problem, SolutionRef};
 use num_traits::{PrimInt, Signed};
 use std::{cmp::Reverse, collections::BTreeSet};
@@ -218,8 +218,10 @@ mod tests {
     use super::*;
     use crate::berth::prelude::BooleanVecQuay;
     use crate::framework::ConstructiveSolver;
-    use dock_alloc_core::domain::{
-        Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
+    use dock_alloc_core::{
+        cost::Cost,
+        space::{SpaceInterval, SpaceLength, SpacePosition},
+        time::TimeDelta,
     };
     use dock_alloc_model::{
         generator::{InstanceGenConfig, InstanceGenerator, SpaceWindowPolicy, TimeWindowPolicy},

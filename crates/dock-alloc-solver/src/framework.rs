@@ -28,7 +28,10 @@ use crate::{
     planning::Plan,
     registry::ledger::{AssignmentLedger, LedgerError},
 };
-use dock_alloc_core::domain::{SpaceInterval, SpacePosition, TimeInterval};
+use dock_alloc_core::{
+    space::{SpaceInterval, SpacePosition},
+    time::TimeInterval,
+};
 use dock_alloc_model::model::{
     AssignmentExceedsQuayError, AssignmentOutsideSpaceWindowError,
     AssignmentOutsideTimeWindowError, AssignmentRef, Kind, Problem, RequestId, SolutionRef,

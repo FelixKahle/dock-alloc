@@ -31,8 +31,9 @@ use crate::{
     container::timeline::Timeline,
     domain::SpaceTimeRectangle,
 };
-use dock_alloc_core::domain::{
-    SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
+use dock_alloc_core::{
+    space::{SpaceInterval, SpaceLength, SpacePosition},
+    time::{TimeDelta, TimeInterval, TimePoint},
 };
 use dock_alloc_model::model::Problem;
 use num_traits::{PrimInt, Signed, Zero};
@@ -353,19 +354,29 @@ where
         self.apply_in(rect, |quay, space_interval| quay.free(space_interval))
     }
 
+    #[inline]
+    pub fn push_operation(
+        &mut self,
+        op: &crate::berth::operations::Operation<T>,
+    ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
+        match op {
+            crate::berth::operations::Operation::Occupy(occ) => {
+                self.occupy(occ.rectangle())?;
+            }
+            crate::berth::operations::Operation::Free(free) => {
+                self.free(free.rectangle())?;
+            }
+        }
+        Ok(())
+    }
+
+    #[inline]
     pub fn apply(
         &mut self,
         commit: &BerthOverlayCommit<T>,
     ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
         for op in commit.operations() {
-            match op {
-                crate::berth::operations::Operation::Occupy(occ) => {
-                    self.occupy(occ.rectangle())?;
-                }
-                crate::berth::operations::Operation::Free(free) => {
-                    self.free(free.rectangle())?;
-                }
-            }
+            self.push_operation(op)?;
         }
         Ok(())
     }

@@ -19,7 +19,7 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use dock_alloc_core::domain::{SpaceInterval, SpaceLength, SpacePosition};
+use dock_alloc_core::space::{SpaceInterval, SpaceLength, SpacePosition};
 use std::{
     collections::BTreeMap,
     fmt::{Debug, Display},
@@ -873,7 +873,6 @@ impl QuayWrite for BitPackedQuay {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dock_alloc_core::domain::{SpaceInterval, SpaceLength, SpacePosition};
 
     fn interval(start: usize, end: usize) -> SpaceInterval {
         SpaceInterval::new(SpacePosition::new(start), SpacePosition::new(end))

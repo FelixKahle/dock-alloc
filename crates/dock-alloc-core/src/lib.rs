@@ -19,8 +19,10 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-pub mod domain;
+pub mod cost;
 pub mod iter;
 pub mod marker;
 pub mod mem;
 pub mod primitives;
+pub mod space;
+pub mod time;

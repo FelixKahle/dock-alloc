@@ -33,8 +33,9 @@ use crate::{
     domain::SpaceTimeRectangle,
 };
 use dock_alloc_core::{
-    domain::{SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint},
     marker::Brand,
+    space::{SpaceInterval, SpaceLength, SpacePosition},
+    time::{TimeDelta, TimeInterval, TimePoint},
 };
 use num_traits::{PrimInt, Signed};
 use std::ops::Bound::{Excluded, Unbounded};

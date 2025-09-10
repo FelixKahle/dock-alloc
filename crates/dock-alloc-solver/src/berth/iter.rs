@@ -27,9 +27,10 @@ use crate::{
     domain::SpaceTimeRectangle,
 };
 use dock_alloc_core::{
-    domain::{SpaceInterval, SpaceLength, TimeDelta, TimeInterval, TimePoint},
     iter::MaybeIter,
     mem::DoubleBuf,
+    space::{SpaceInterval, SpaceLength},
+    time::{TimeDelta, TimeInterval, TimePoint},
 };
 use num_traits::{One, PrimInt, Signed};
 use std::iter::FusedIterator;
@@ -630,36 +631,34 @@ impl<I> FusedIterator for OverlayRunsIter<I> where I: Iterator<Item = SpaceInter
 mod tests {
     use super::*;
     use crate::berth::{berthocc::BerthOccupancy, quay::BooleanVecQuay};
+    use dock_alloc_core::space::SpacePosition;
     use num_traits::Zero;
 
     type T = i64;
     type BO = BerthOccupancy<T, BooleanVecQuay>;
 
     #[inline]
-    fn pos(x: usize) -> dock_alloc_core::domain::SpacePosition {
-        dock_alloc_core::domain::SpacePosition::new(x)
+    fn pos(x: usize) -> SpacePosition {
+        SpacePosition::new(x)
     }
     #[inline]
-    fn len(x: usize) -> dock_alloc_core::domain::SpaceLength {
-        dock_alloc_core::domain::SpaceLength::new(x)
+    fn len(x: usize) -> SpaceLength {
+        SpaceLength::new(x)
     }
     #[inline]
-    fn si(a: usize, b: usize) -> dock_alloc_core::domain::SpaceInterval {
-        dock_alloc_core::domain::SpaceInterval::new(pos(a), pos(b))
+    fn si(a: usize, b: usize) -> SpaceInterval {
+        SpaceInterval::new(pos(a), pos(b))
     }
     #[inline]
-    fn tp(t: T) -> dock_alloc_core::domain::TimePoint<T> {
-        dock_alloc_core::domain::TimePoint::new(t)
+    fn tp(t: T) -> TimePoint<T> {
+        TimePoint::new(t)
     }
     #[inline]
-    fn ti(a: T, b: T) -> dock_alloc_core::domain::TimeInterval<T> {
-        dock_alloc_core::domain::TimeInterval::new(tp(a), tp(b))
+    fn ti(a: T, b: T) -> TimeInterval<T> {
+        TimeInterval::new(tp(a), tp(b))
     }
     #[inline]
-    fn rect(
-        tw: dock_alloc_core::domain::TimeInterval<T>,
-        si: dock_alloc_core::domain::SpaceInterval,
-    ) -> SpaceTimeRectangle<T> {
+    fn rect(tw: TimeInterval<T>, si: SpaceInterval) -> SpaceTimeRectangle<T> {
         SpaceTimeRectangle::new(si, tw)
     }
 

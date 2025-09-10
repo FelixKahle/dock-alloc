@@ -37,7 +37,11 @@ use crate::{
         },
     },
 };
-use dock_alloc_core::domain::{Cost, SpaceInterval, SpaceLength, TimeDelta, TimeInterval};
+use dock_alloc_core::{
+    cost::Cost,
+    space::{SpaceInterval, SpaceLength},
+    time::{TimeDelta, TimeInterval},
+};
 use dock_alloc_model::model::{AnyAssignmentRef, AssignmentRef, Fixed, Kind, Problem};
 use num_traits::{PrimInt, Signed};
 use std::fmt::Display;
@@ -515,9 +519,7 @@ where
 mod tests {
     use super::*;
     use crate::berth::prelude::BooleanVecQuay;
-    use dock_alloc_core::domain::{
-        Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
-    };
+    use dock_alloc_core::{space::SpacePosition, time::TimePoint};
     use dock_alloc_model::model::{Movable, ProblemBuilder, Request, RequestId};
     use rayon::prelude::*;
 

@@ -19,8 +19,10 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use crate::registry::{commit::LedgerOverlayCommit, overlay::AssignmentLedgerOverlay};
-use dock_alloc_core::domain::{SpacePosition, TimePoint};
+use crate::registry::{
+    commit::LedgerOverlayCommit, operations::Operation, overlay::AssignmentLedgerOverlay,
+};
+use dock_alloc_core::{space::SpacePosition, time::TimePoint};
 use dock_alloc_model::model::{
     AnyAssignmentRef, AssignmentRef, Fixed, FixedRequestId, Movable, MovableRequestId, Problem,
     Request, RequestId, SolutionRef,
@@ -181,22 +183,28 @@ where
     }
 
     #[inline]
+    pub fn push_operation(&mut self, op: Operation<'a, T, C>) -> Result<(), LedgerError> {
+        match op {
+            Operation::Assign(assign_op) => {
+                let assignment = assign_op.assignment();
+                self.commit_assignment(
+                    assignment.request(),
+                    assignment.start_time(),
+                    assignment.start_position(),
+                )?;
+            }
+            Operation::Unassign(unassign_op) => {
+                let assignment = unassign_op.assignment();
+                self.uncommit_assignment(assignment)?;
+            }
+        }
+        Ok(())
+    }
+
+    #[inline]
     pub fn apply(&mut self, commit: &LedgerOverlayCommit<'a, T, C>) -> Result<(), LedgerError> {
         for op in commit.operations() {
-            match op {
-                crate::registry::operations::Operation::Assign(assign_op) => {
-                    let assignment = assign_op.assignment();
-                    self.commit_assignment(
-                        assignment.request(),
-                        assignment.start_time(),
-                        assignment.start_position(),
-                    )?;
-                }
-                crate::registry::operations::Operation::Unassign(unassign_op) => {
-                    let assignment = unassign_op.assignment();
-                    self.uncommit_assignment(assignment)?;
-                }
-            }
+            self.push_operation(op.clone())?;
         }
         Ok(())
     }
@@ -244,8 +252,10 @@ where
 #[cfg(test)]
 mod ledger_overlay_tests {
     use super::*;
-    use dock_alloc_core::domain::{
-        Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
+    use dock_alloc_core::{
+        cost::Cost,
+        space::{SpaceInterval, SpaceLength},
+        time::{TimeDelta, TimeInterval},
     };
     use dock_alloc_model::model::{Assignment, ProblemBuilder, RequestId};
 

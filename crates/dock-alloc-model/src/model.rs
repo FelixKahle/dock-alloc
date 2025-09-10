@@ -19,9 +19,9 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use dock_alloc_core::domain::{
-    Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
-};
+use dock_alloc_core::cost::Cost;
+use dock_alloc_core::space::{SpaceInterval, SpaceLength, SpacePosition};
+use dock_alloc_core::time::{TimeDelta, TimeInterval, TimePoint};
 use num_traits::{PrimInt, Signed};
 use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
@@ -1616,7 +1616,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dock_alloc_core::domain::SpacePosition;
 
     type Tm = i64;
     type Cm = i64;

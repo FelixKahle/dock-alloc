@@ -20,8 +20,10 @@
 // THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use crate::model::{Assignment, Fixed, Movable, Problem, ProblemBuilder, Request, RequestId};
-use dock_alloc_core::domain::{
-    Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
+use dock_alloc_core::{
+    cost::Cost,
+    space::{SpaceInterval, SpaceLength, SpacePosition},
+    time::{TimeDelta, TimeInterval, TimePoint},
 };
 use num_traits::{NumCast, PrimInt, SaturatingAdd, SaturatingMul, Signed, ToPrimitive};
 use rand::{Rng, SeedableRng, rngs::SmallRng};
@@ -1405,7 +1407,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dock_alloc_core::domain::SpacePosition;
+    use dock_alloc_core::space::SpacePosition;
 
     type Tm = i64;
     type Cm = i64;
