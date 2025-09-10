@@ -25,7 +25,7 @@ use crate::{
     planning::ProposeCtx,
 };
 use dock_alloc_core::domain::{TimeInterval, TimePoint};
-use dock_alloc_model::Problem;
+use dock_alloc_model::model::{AssignmentRef, Problem, SolutionRef};
 use num_traits::{PrimInt, Signed};
 use std::{cmp::Reverse, collections::BTreeSet};
 
@@ -66,7 +66,7 @@ where
     fn solve<'p>(
         &self,
         problem: &'p Problem<T, C>,
-    ) -> Result<dock_alloc_model::SolutionRef<'p, T, C>, Self::SolveError> {
+    ) -> Result<SolutionRef<'p, T, C>, Self::SolveError> {
         let state: FeasibleSolverState<'p, T, C, Q> = self.build_state(problem)?;
         Ok(state.into())
     }
@@ -134,12 +134,9 @@ where
                             if slot.slot().start_time() != t {
                                 continue;
                             }
-                            let c = dock_alloc_model::AssignmentRef::new(
-                                req.request(),
-                                slot.slot().space().start(),
-                                t,
-                            )
-                            .cost();
+                            let c =
+                                AssignmentRef::new(req.request(), slot.slot().space().start(), t)
+                                    .cost();
 
                             if best_now_cost.is_none_or(|b| c < b) {
                                 best_now_cost = Some(c);
@@ -156,7 +153,7 @@ where
                                     if slot.slot().start_time() != tn {
                                         continue;
                                     }
-                                    let c = dock_alloc_model::AssignmentRef::new(
+                                    let c = AssignmentRef::new(
                                         req.request(),
                                         slot.slot().space().start(),
                                         tn,
@@ -224,7 +221,7 @@ mod tests {
     use dock_alloc_core::domain::{
         Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
     };
-    use dock_alloc_model::{Assignment, Fixed, Movable, ProblemBuilder, Request, RequestId};
+    use dock_alloc_model::model::{Assignment, Fixed, Movable, ProblemBuilder, Request, RequestId};
 
     type Tm = i64;
     type Cm = i64;
@@ -376,7 +373,7 @@ mod tests {
         type Tm = i64;
         type Cm = i64;
 
-        let mut pb = dock_alloc_model::ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(200));
+        let mut pb = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(200));
         let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 200, 0);
         let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 200, 50);
         pb.add_movable_request(r1.clone()).unwrap();
@@ -405,7 +402,7 @@ mod tests {
         type Cm = i64;
 
         // Quay fits only one length-10 ship.
-        let mut pb = dock_alloc_model::ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(10));
+        let mut pb = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(10));
 
         // Both must start at t=0 (proc=5; window [0,5)).
         let r1 = Request::<Movable, _, _>::new(

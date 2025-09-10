@@ -21,7 +21,7 @@
 
 use crate::registry::{commit::LedgerOverlayCommit, overlay::AssignmentLedgerOverlay};
 use dock_alloc_core::domain::{SpacePosition, TimePoint};
-use dock_alloc_model::{
+use dock_alloc_model::model::{
     AnyAssignmentRef, AssignmentRef, Fixed, FixedRequestId, Movable, MovableRequestId, Problem,
     Request, RequestId, SolutionRef,
 };
@@ -247,7 +247,7 @@ mod ledger_overlay_tests {
     use dock_alloc_core::domain::{
         Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
     };
-    use dock_alloc_model::{Assignment, ProblemBuilder, RequestId};
+    use dock_alloc_model::model::{Assignment, ProblemBuilder, RequestId};
 
     type Tm = i64;
     type Cm = i64;

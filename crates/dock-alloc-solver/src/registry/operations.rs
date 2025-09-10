@@ -21,7 +21,7 @@
 
 use std::fmt::Display;
 
-use dock_alloc_model::{AssignmentRef, Movable};
+use dock_alloc_model::model::{AssignmentRef, Movable};
 use num_traits::{PrimInt, Signed};
 
 #[repr(transparent)]
