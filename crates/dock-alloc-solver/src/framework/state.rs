@@ -26,7 +26,7 @@ use crate::{
         quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError, QuayWrite},
     },
     domain::SpaceTimeRectangle,
-    planning::Plan,
+    framework::planning::Plan,
     registry::ledger::{AssignmentLedger, LedgerApplyValidationError, LedgerError},
 };
 use dock_alloc_core::{

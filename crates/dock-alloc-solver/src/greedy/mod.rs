@@ -21,8 +21,10 @@
 
 use crate::{
     berth::quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError, QuayWrite},
-    framework::{ConstructiveSolver, FeasibleSolverState, Solver, SolverState},
-    planning::ProposeCtx,
+    framework::{
+        planning::ProposeCtx,
+        state::{ConstructiveSolver, FeasibleSolverState, Solver, SolverState},
+    },
 };
 use dock_alloc_core::time::{TimeInterval, TimePoint};
 use dock_alloc_model::model::{AssignmentRef, Problem, SolutionRef};
@@ -217,7 +219,7 @@ where
 mod tests {
     use super::*;
     use crate::berth::prelude::BooleanVecQuay;
-    use crate::framework::ConstructiveSolver;
+
     use dock_alloc_core::{
         cost::Cost,
         space::{SpaceInterval, SpaceLength, SpacePosition},
