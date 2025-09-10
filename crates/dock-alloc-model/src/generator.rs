@@ -23,7 +23,7 @@ use crate::model::{Assignment, Fixed, Movable, Problem, ProblemBuilder, Request,
 use dock_alloc_core::domain::{
     Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
 };
-use num_traits::{NumCast, PrimInt, Signed, ToPrimitive};
+use num_traits::{NumCast, PrimInt, SaturatingAdd, SaturatingMul, Signed, ToPrimitive};
 use rand::{Rng, SeedableRng, rngs::SmallRng};
 use rand_distr::{Distribution, Exp, Normal, Uniform, uniform::SampleUniform};
 use std::{
@@ -38,6 +38,16 @@ pub struct RelativeSpaceWindowPolicy {
     pub max: SpaceLength,
 }
 
+impl RelativeSpaceWindowPolicy {
+    pub fn new(frac_of_length: f64, min: SpaceLength, max: SpaceLength) -> Self {
+        Self {
+            frac_of_length,
+            min,
+            max,
+        }
+    }
+}
+
 impl Display for RelativeSpaceWindowPolicy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -49,26 +59,110 @@ impl Display for RelativeSpaceWindowPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum SpaceWindowPolicy {
-    FixedHalfwidth(SpaceLength),
+pub enum HalfwidthPolicy {
+    Fixed(SpaceLength),
     Relative(RelativeSpaceWindowPolicy),
-    MinMeasure(SpaceLength),
+}
+
+impl Display for HalfwidthPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HalfwidthPolicy::Fixed(hw) => write!(f, "HalfwidthPolicy::Fixed({})", hw),
+            HalfwidthPolicy::Relative(r) => write!(f, "HalfwidthPolicy::Relative({})", r),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SpaceWindowPolicy {
+    Halfwidth(HalfwidthPolicy),
     FullQuay,
+}
+
+impl SpaceWindowPolicy {
+    #[inline]
+    pub fn full_quay() -> Self {
+        Self::FullQuay
+    }
+    #[inline]
+    pub fn fixed(hw: SpaceLength) -> Self {
+        Self::Halfwidth(HalfwidthPolicy::Fixed(hw))
+    }
+
+    #[inline]
+    pub fn relative(frac: f64, min: SpaceLength, max: SpaceLength) -> Self {
+        Self::Halfwidth(HalfwidthPolicy::Relative(RelativeSpaceWindowPolicy::new(
+            frac, min, max,
+        )))
+    }
 }
 
 impl Display for SpaceWindowPolicy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SpaceWindowPolicy::FixedHalfwidth(hw) => {
-                write!(f, "SpaceWindowPolicy::FixedHalfwidth({})", hw)
+            SpaceWindowPolicy::Halfwidth(hw) => write!(f, "Halfwidth({})", hw),
+            SpaceWindowPolicy::FullQuay => write!(f, "FullQuay"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AroundArrivalTimeWindowPolicy<T: PrimInt + Signed> {
+    before: TimeDelta<T>,
+    after: TimeDelta<T>,
+}
+
+impl<T: PrimInt + Signed> AroundArrivalTimeWindowPolicy<T> {
+    pub fn new(before: TimeDelta<T>, after: TimeDelta<T>) -> Self {
+        Self { before, after }
+    }
+
+    #[inline]
+    pub fn before(&self) -> TimeDelta<T> {
+        self.before
+    }
+
+    #[inline]
+    pub fn after(&self) -> TimeDelta<T> {
+        self.after
+    }
+}
+
+impl<T: PrimInt + Signed + Display> Display for AroundArrivalTimeWindowPolicy<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "AroundArrivalTimeWindowPolicy {{ before: {}, after: {} }}",
+            self.before, self.after
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TimeWindowPolicy<T: PrimInt + Signed> {
+    FullHorizon,
+    AroundArrival(AroundArrivalTimeWindowPolicy<T>),
+}
+
+impl<T: PrimInt + Signed> TimeWindowPolicy<T> {
+    #[inline]
+    pub fn full_horizon() -> Self {
+        Self::FullHorizon
+    }
+
+    #[inline]
+    pub fn around_arrival(before: TimeDelta<T>, after: TimeDelta<T>) -> Self {
+        Self::AroundArrival(AroundArrivalTimeWindowPolicy::new(before, after))
+    }
+}
+
+impl<T: PrimInt + Signed + Display> Display for TimeWindowPolicy<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TimeWindowPolicy::FullHorizon => write!(f, "FullHorizon"),
+            TimeWindowPolicy::AroundArrival(p) => {
+                write!(f, "AroundArrival({})", p)
             }
-            SpaceWindowPolicy::Relative(r) => {
-                write!(f, "SpaceWindowPolicy::Relative({})", r)
-            }
-            SpaceWindowPolicy::MinMeasure(m) => {
-                write!(f, "SpaceWindowPolicy::MinMeasure({})", m)
-            }
-            SpaceWindowPolicy::FullQuay => write!(f, "SpaceWindowPolicy::FullQuay"),
         }
     }
 }
@@ -106,14 +200,19 @@ where
     /// usually higher costs (see cost ramp below).
     max_ship_length: SpaceLength,
 
-    /// Policy for how to construct **space windows** (allowed berth intervals)
-    /// around a target/assignment.
+    /// Policy for how to construct **space windows** (allowed berth intervals).
     ///
-    /// Options include full-quay windows, fixed half-width around a target,
-    /// a relative half-width based on ship length, or enforcing a minimum
-    /// measure (window length). The generator ensures the final window lies
-    /// within the quay and is large enough to hold the ship.
+    /// Supported:
+    /// - `FullQuay`: use the entire quay `[0, quay_length]`.
+    /// - `Halfwidth(HalfwidthPolicy)`: window derived from a half-width,
+    ///   either `Fixed(hw)` or `Relative { frac_of_length, min, max }`.
+    ///
+    /// The generator ensures the final window lies within the quay and can hold the ship.
     space_window_policy: SpaceWindowPolicy,
+
+    /// Policy for how to construct **time windows** (allowed time intervals)
+    /// for movable requests.
+    time_window_policy: TimeWindowPolicy<T>,
 
     /// Number of **movable** requests to generate.
     ///
@@ -213,17 +312,17 @@ where
     /// `span = effective_span`, we compute
     /// `ramp_factor = (cost_inc_num * dx) / (cost_inc_den * span)`.
     /// Each base cost is then scaled as `base + base * ramp_factor` (floored).
-    cost_inc_num: C,
+    cost_inc_num: Cost<C>,
 
     /// Denominator for the **length-based cost ramp**.
     ///
     /// Larger `cost_inc_den` means a gentler ramp; smaller means steeper.
-    cost_inc_den: C,
+    cost_inc_den: Cost<C>,
 
     /// Minimum allowed **final cost** after scaling.
     ///
     /// After applying the ramp to a base cost, we clamp it up to this floor.
-    min_cost_floor: C,
+    min_cost_floor: Cost<C>,
 
     /// How much of any **extra needed window length** to add on the **left**,
     /// expressed as an integer fraction numerator.
@@ -243,13 +342,13 @@ where
     ///
     /// The final cost for delay grows with ship length according to the
     /// integer ramp described above (and is floored by `min_cost_floor`).
-    base_cost_per_delay: C,
+    base_cost_per_delay: Cost<C>,
 
     /// **Base unit cost** per unit of **spatial deviation** (before ramp).
     ///
     /// Like delay cost, this is scaled by the same length-based ramp and
     /// then floored by `min_cost_floor`.
-    base_cost_per_dev: C,
+    base_cost_per_dev: Cost<C>,
 
     /// RNG seed for reproducible generation.
     ///
@@ -302,6 +401,7 @@ where
         min_length: SpaceLength,
         max_length: SpaceLength,
         space_window_policy: SpaceWindowPolicy,
+        time_window_policy: TimeWindowPolicy<T>,
         amount_movables: usize,
         amount_fixed: usize,
         horizon: TimePoint<T>,
@@ -316,13 +416,13 @@ where
         arrival_oversample_mult: usize,
         processing_sigma_floor: f64,
         length_span_epsilon: SpaceLength,
-        cost_inc_num: C,
-        cost_inc_den: C,
-        min_cost_floor: C,
+        cost_inc_num: Cost<C>,
+        cost_inc_den: Cost<C>,
+        min_cost_floor: Cost<C>,
         window_split_left_num: SpaceLength,
         window_split_den: SpaceLength,
-        base_cost_per_delay: C,
-        base_cost_per_dev: C,
+        base_cost_per_delay: Cost<C>,
+        base_cost_per_dev: Cost<C>,
         seed: u64,
     ) -> Result<Self, QuayTooShortError> {
         let ord = min_length
@@ -343,6 +443,7 @@ where
             min_ship_length: s,
             max_ship_length: e,
             space_window_policy,
+            time_window_policy,
             amount_movables,
             amount_fixed,
             horizon,
@@ -386,6 +487,11 @@ where
     #[inline]
     pub fn space_window_policy(&self) -> &SpaceWindowPolicy {
         &self.space_window_policy
+    }
+
+    #[inline]
+    pub fn time_window_policy(&self) -> &TimeWindowPolicy<T> {
+        &self.time_window_policy
     }
 
     #[inline]
@@ -453,7 +559,7 @@ where
             f,
             "InstanceGenConfig {{ \
              quay_length: {}, min_length: {}, max_length: {}, space_window_policy: {}, \
-             amount_movables: {}, amount_fixed: {}, horizon: {}, \
+             time_window_policy: {}, amount_movables: {}, amount_fixed: {}, horizon: {}, \
              lambda_per_time: {:.4}, processing_time_sigma: {:.4}, \
              min_processing: {}, max_processing: {}, time_slack: {}, fixed_gap: {}, \
              processing_mu_base: {}, processing_mu_span: {}, \
@@ -467,6 +573,7 @@ where
             self.min_ship_length,
             self.max_ship_length,
             self.space_window_policy,
+            self.time_window_policy,
             self.amount_movables,
             self.amount_fixed,
             self.horizon,
@@ -493,6 +600,404 @@ where
     }
 }
 
+/// Builder for `InstanceGenConfig`
+///
+/// Defaults chosen to be reasonable for experimentation; adjust as needed.
+/// Required before `build()`:
+/// - quay_length
+/// - min_length, max_length
+/// - horizon
+/// - space_window_policy
+/// - time_window_policy
+/// - amount_movables, amount_fixed
+pub struct InstanceGenConfigBuilder<T, C>
+where
+    T: PrimInt + Signed + NumCast + ToPrimitive,
+    C: PrimInt + Signed + NumCast + Copy,
+{
+    // Required
+    quay_length: Option<SpaceLength>,
+    min_length: Option<SpaceLength>,
+    max_length: Option<SpaceLength>,
+    horizon: Option<TimePoint<T>>,
+    space_window_policy: Option<SpaceWindowPolicy>,
+    time_window_policy: Option<TimeWindowPolicy<T>>,
+    amount_movables: Option<usize>,
+    amount_fixed: Option<usize>,
+
+    // Optional with defaults
+    lambda_per_time: f64,
+    processing_time_sigma: f64,
+    min_processing: TimeDelta<T>,
+    max_processing: Option<TimeDelta<T>>,
+    time_slack: TimeDelta<T>,
+    fixed_gap: TimeDelta<T>,
+    processing_mu_base: TimeDelta<T>,
+    processing_mu_span: TimeDelta<T>,
+    arrival_oversample_mult: usize,
+    processing_sigma_floor: f64,
+    length_span_epsilon: SpaceLength,
+    cost_inc_num: Cost<C>,
+    cost_inc_den: Cost<C>,
+    min_cost_floor: Cost<C>,
+    window_split_left_num: SpaceLength,
+    window_split_den: SpaceLength,
+    base_cost_per_delay: Cost<C>,
+    base_cost_per_dev: Cost<C>,
+    seed: u64,
+}
+
+impl<T, C> Default for InstanceGenConfigBuilder<T, C>
+where
+    T: PrimInt + Signed + NumCast + ToPrimitive,
+    C: PrimInt + Signed + NumCast + Copy,
+{
+    fn default() -> Self {
+        // Small helpers to construct generic numeric wrappers from i64
+        fn to_td<T: PrimInt + Signed + NumCast>(v: i64) -> TimeDelta<T> {
+            TimeDelta::new(NumCast::from(v).expect("NumCast<i64 -> T>"))
+        }
+        fn to_sl(v: usize) -> SpaceLength {
+            SpaceLength::new(v)
+        }
+        fn to_cost<C: PrimInt + Signed + NumCast + Copy>(v: i64) -> Cost<C> {
+            Cost::new(NumCast::from(v).expect("NumCast<i64 -> C>"))
+        }
+
+        let seed = rand::rng().random();
+
+        Self {
+            // required -> None
+            quay_length: None,
+            min_length: None,
+            max_length: None,
+            horizon: None,
+            space_window_policy: None,
+            time_window_policy: None,
+            amount_movables: None,
+            amount_fixed: None,
+
+            // optional defaults
+            lambda_per_time: 0.9,
+            processing_time_sigma: 2.5,
+            min_processing: to_td(4),
+            max_processing: Some(to_td(72)),
+            time_slack: to_td(12),
+            fixed_gap: to_td(2),
+            processing_mu_base: to_td(10),
+            processing_mu_span: to_td(20),
+            arrival_oversample_mult: 6,
+            processing_sigma_floor: 0.1,
+            length_span_epsilon: to_sl(1),
+            cost_inc_num: to_cost(1), // linear ramp up to +100% at max length when den=1
+            cost_inc_den: to_cost(1),
+            min_cost_floor: to_cost(1),
+            window_split_left_num: to_sl(1), // 50/50 split
+            window_split_den: to_sl(2),
+            base_cost_per_delay: to_cost(2),
+            base_cost_per_dev: to_cost(1),
+            seed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InstanceGenConfigBuildError {
+    QuayTooShort(QuayTooShortError),
+    MissingQuayLength,
+    MissingMinLength,
+    MissingMaxLength,
+    MissingHorizon,
+    MissingSpaceWindowPolicy,
+    MissingTimeWindowPolicy,
+    MissingAmountMovables,
+    MissingAmountFixed,
+}
+
+impl Display for InstanceGenConfigBuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InstanceGenConfigBuildError::QuayTooShort(e) => write!(f, "{}", e),
+            InstanceGenConfigBuildError::MissingQuayLength => write!(f, "Missing quay_length"),
+            InstanceGenConfigBuildError::MissingMinLength => write!(f, "Missing min_length"),
+            InstanceGenConfigBuildError::MissingMaxLength => write!(f, "Missing max_length"),
+            InstanceGenConfigBuildError::MissingHorizon => write!(f, "Missing horizon"),
+            InstanceGenConfigBuildError::MissingSpaceWindowPolicy => {
+                write!(f, "Missing space_window_policy")
+            }
+            InstanceGenConfigBuildError::MissingTimeWindowPolicy => {
+                write!(f, "Missing time_window_policy")
+            }
+            InstanceGenConfigBuildError::MissingAmountMovables => {
+                write!(f, "Missing amount_movables")
+            }
+            InstanceGenConfigBuildError::MissingAmountFixed => {
+                write!(f, "Missing amount_fixed")
+            }
+        }
+    }
+}
+
+impl From<QuayTooShortError> for InstanceGenConfigBuildError {
+    fn from(e: QuayTooShortError) -> Self {
+        InstanceGenConfigBuildError::QuayTooShort(e)
+    }
+}
+
+impl std::error::Error for InstanceGenConfigBuildError {}
+
+impl<T, C> InstanceGenConfigBuilder<T, C>
+where
+    T: PrimInt + Signed + NumCast + ToPrimitive,
+    C: PrimInt + Signed + NumCast + Copy,
+{
+    #[inline]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[inline]
+    pub fn quay_length(mut self, v: SpaceLength) -> Self {
+        self.quay_length = Some(v);
+        self
+    }
+
+    #[inline]
+    pub fn min_length(mut self, v: SpaceLength) -> Self {
+        self.min_length = Some(v);
+        self
+    }
+
+    #[inline]
+    pub fn max_length(mut self, v: SpaceLength) -> Self {
+        self.max_length = Some(v);
+        self
+    }
+
+    #[inline]
+    pub fn horizon(mut self, v: TimePoint<T>) -> Self {
+        self.horizon = Some(v);
+        self
+    }
+
+    #[inline]
+    pub fn space_policy_full_quay(mut self) -> Self {
+        self.space_window_policy = Some(SpaceWindowPolicy::full_quay());
+        self
+    }
+
+    #[inline]
+    pub fn space_policy_fixed(mut self, hw: SpaceLength) -> Self {
+        self.space_window_policy = Some(SpaceWindowPolicy::fixed(hw));
+        self
+    }
+
+    #[inline]
+    pub fn space_policy_relative(mut self, frac: f64, min: SpaceLength, max: SpaceLength) -> Self {
+        self.space_window_policy = Some(SpaceWindowPolicy::relative(frac, min, max));
+        self
+    }
+
+    #[inline]
+    pub fn time_policy_full_horizon(mut self) -> Self {
+        self.time_window_policy = Some(TimeWindowPolicy::full_horizon());
+        self
+    }
+
+    #[inline]
+    pub fn time_policy_around_arrival(mut self, before: TimeDelta<T>, after: TimeDelta<T>) -> Self {
+        self.time_window_policy = Some(TimeWindowPolicy::around_arrival(before, after));
+        self
+    }
+
+    #[inline]
+    pub fn amount_movables(mut self, v: usize) -> Self {
+        self.amount_movables = Some(v);
+        self
+    }
+
+    #[inline]
+    pub fn amount_fixed(mut self, v: usize) -> Self {
+        self.amount_fixed = Some(v);
+        self
+    }
+
+    #[inline]
+    pub fn lambda_per_time(mut self, v: f64) -> Self {
+        self.lambda_per_time = v;
+        self
+    }
+
+    #[inline]
+    pub fn processing_time_sigma(mut self, v: f64) -> Self {
+        self.processing_time_sigma = v;
+        self
+    }
+
+    #[inline]
+    pub fn min_processing(mut self, v: TimeDelta<T>) -> Self {
+        self.min_processing = v;
+        self
+    }
+
+    #[inline]
+    pub fn max_processing(mut self, v: Option<TimeDelta<T>>) -> Self {
+        self.max_processing = v;
+        self
+    }
+
+    #[inline]
+    pub fn time_slack(mut self, v: TimeDelta<T>) -> Self {
+        self.time_slack = v;
+        self
+    }
+
+    #[inline]
+    pub fn fixed_gap(mut self, v: TimeDelta<T>) -> Self {
+        self.fixed_gap = v;
+        self
+    }
+
+    #[inline]
+    pub fn processing_mu_base(mut self, v: TimeDelta<T>) -> Self {
+        self.processing_mu_base = v;
+        self
+    }
+
+    #[inline]
+    pub fn processing_mu_span(mut self, v: TimeDelta<T>) -> Self {
+        self.processing_mu_span = v;
+        self
+    }
+
+    #[inline]
+    pub fn arrival_oversample_mult(mut self, v: usize) -> Self {
+        self.arrival_oversample_mult = v;
+        self
+    }
+
+    #[inline]
+    pub fn processing_sigma_floor(mut self, v: f64) -> Self {
+        self.processing_sigma_floor = v;
+        self
+    }
+
+    #[inline]
+    pub fn length_span_epsilon(mut self, v: SpaceLength) -> Self {
+        self.length_span_epsilon = v;
+        self
+    }
+
+    #[inline]
+    pub fn cost_inc_num(mut self, v: Cost<C>) -> Self {
+        self.cost_inc_num = v;
+        self
+    }
+
+    #[inline]
+    pub fn cost_inc_den(mut self, v: Cost<C>) -> Self {
+        self.cost_inc_den = v;
+        self
+    }
+
+    #[inline]
+    pub fn min_cost_floor(mut self, v: Cost<C>) -> Self {
+        self.min_cost_floor = v;
+        self
+    }
+
+    #[inline]
+    pub fn window_split_left_num(mut self, v: SpaceLength) -> Self {
+        self.window_split_left_num = v;
+        self
+    }
+
+    #[inline]
+    pub fn window_split_den(mut self, v: SpaceLength) -> Self {
+        self.window_split_den = v;
+        self
+    }
+
+    #[inline]
+    pub fn base_cost_per_delay(mut self, v: Cost<C>) -> Self {
+        self.base_cost_per_delay = v;
+        self
+    }
+
+    #[inline]
+    pub fn base_cost_per_dev(mut self, v: Cost<C>) -> Self {
+        self.base_cost_per_dev = v;
+        self
+    }
+
+    pub fn random_seed(mut self) -> Self {
+        self.seed = rand::rng().random();
+        self
+    }
+
+    #[inline]
+    pub fn seed(mut self, v: u64) -> Self {
+        self.seed = v;
+        self
+    }
+
+    pub fn build(self) -> Result<InstanceGenConfig<T, C>, InstanceGenConfigBuildError> {
+        let quay_length = self
+            .quay_length
+            .ok_or(InstanceGenConfigBuildError::MissingQuayLength)?;
+        let min_length = self
+            .min_length
+            .ok_or(InstanceGenConfigBuildError::MissingMinLength)?;
+        let max_length = self
+            .max_length
+            .ok_or(InstanceGenConfigBuildError::MissingMaxLength)?;
+        let horizon = self
+            .horizon
+            .ok_or(InstanceGenConfigBuildError::MissingHorizon)?;
+        let space_window_policy = self
+            .space_window_policy
+            .ok_or(InstanceGenConfigBuildError::MissingSpaceWindowPolicy)?;
+        let time_window_policy = self
+            .time_window_policy
+            .ok_or(InstanceGenConfigBuildError::MissingTimeWindowPolicy)?;
+        let amount_movables = self
+            .amount_movables
+            .ok_or(InstanceGenConfigBuildError::MissingAmountMovables)?;
+        let amount_fixed = self
+            .amount_fixed
+            .ok_or(InstanceGenConfigBuildError::MissingAmountFixed)?;
+        Ok(InstanceGenConfig::new(
+            quay_length,
+            min_length,
+            max_length,
+            space_window_policy,
+            time_window_policy,
+            amount_movables,
+            amount_fixed,
+            horizon,
+            self.lambda_per_time,
+            self.processing_time_sigma,
+            self.min_processing,
+            self.max_processing,
+            self.time_slack,
+            self.fixed_gap,
+            self.processing_mu_base,
+            self.processing_mu_span,
+            self.arrival_oversample_mult,
+            self.processing_sigma_floor,
+            self.length_span_epsilon,
+            self.cost_inc_num,
+            self.cost_inc_den,
+            self.min_cost_floor,
+            self.window_split_left_num,
+            self.window_split_den,
+            self.base_cost_per_delay,
+            self.base_cost_per_dev,
+            self.seed,
+        )?)
+    }
+}
+
 pub struct InstanceGenerator<T, C>
 where
     T: PrimInt + Signed + NumCast + ToPrimitive + SampleUniform,
@@ -504,10 +1009,20 @@ where
     next_id: u64,
 }
 
+impl<T, C> From<InstanceGenConfig<T, C>> for InstanceGenerator<T, C>
+where
+    T: PrimInt + Signed + NumCast + ToPrimitive + Debug + SampleUniform,
+    C: PrimInt + Signed + NumCast + Copy + SaturatingAdd + SaturatingMul,
+{
+    fn from(cfg: InstanceGenConfig<T, C>) -> Self {
+        Self::new(cfg)
+    }
+}
+
 impl<T, C> InstanceGenerator<T, C>
 where
     T: PrimInt + Signed + NumCast + ToPrimitive + Debug + SampleUniform,
-    C: PrimInt + Signed + NumCast + Copy,
+    C: PrimInt + Signed + NumCast + Copy + SaturatingAdd + SaturatingMul,
 {
     pub fn new(cfg: InstanceGenConfig<T, C>) -> Self {
         let seed = cfg.seed();
@@ -540,6 +1055,26 @@ where
         self.quay_end() - length
     }
 
+    #[inline]
+    fn halfwidth_for(&self, length: SpaceLength) -> Option<SpaceLength> {
+        match &self.cfg.space_window_policy {
+            SpaceWindowPolicy::FullQuay => None,
+            SpaceWindowPolicy::Halfwidth(hp) => match hp {
+                HalfwidthPolicy::Fixed(hw) => Some(*hw),
+                HalfwidthPolicy::Relative(RelativeSpaceWindowPolicy {
+                    frac_of_length,
+                    min,
+                    max,
+                }) => {
+                    let length_f64: f64 = NumCast::from(length.value()).expect("usize->f64");
+                    let hw_len_f64 = (*frac_of_length * length_f64).round();
+                    let hw_len: usize = NumCast::from(hw_len_f64).expect("f64->usize");
+                    Some(SpaceLength::new(hw_len.clamp(min.value(), max.value())))
+                }
+            },
+        }
+    }
+
     pub fn generate(&mut self) -> Problem<T, C> {
         let total = self.cfg.amount_fixed + self.cfg.amount_movables;
         let arrivals = self.sample_arrivals(total);
@@ -554,8 +1089,13 @@ where
             builder.add_preassigned(asg).expect("This should not fail");
         }
 
-        for ix in self.cfg.amount_fixed..total {
-            let req = self.sample_movable(arrivals[ix]);
+        for time_point in arrivals
+            .iter()
+            .take(total)
+            .skip(self.cfg.amount_fixed)
+            .copied()
+        {
+            let req = self.sample_movable(time_point);
             builder.add_movable_request(req).unwrap();
         }
 
@@ -649,38 +1189,32 @@ where
         if v < self.cfg.min_processing.value() {
             v = self.cfg.min_processing.value();
         }
-        if let Some(maxp) = self.cfg.max_processing {
-            if v > maxp.value() {
-                v = maxp.value();
-            }
+        if let Some(maxp) = self.cfg.max_processing
+            && v > maxp.value()
+        {
+            v = maxp.value();
         }
         TimeDelta::new(v)
     }
 
     fn length_scaled_costs(&self, length: SpaceLength) -> (Cost<C>, Cost<C>) {
-        let l = length;
-        let l0 = self.cfg.min_ship_length;
-        let span = self.length_span();
-        let dx = l.saturating_sub(l0);
+        let length_delta = length.saturating_sub(self.cfg.min_ship_length);
+        let length_span = self.length_span();
+        let span_scalar: C = NumCast::from(length_span.value()).expect("span usize -> C");
+        let delta_scalar: C = NumCast::from(length_delta.value()).expect("delta usize -> C");
+        let increment_cost = self.cfg.cost_inc_num * delta_scalar;
+        let base_cost = self.cfg.cost_inc_den * span_scalar;
 
-        let span_c: C = NumCast::from(span.value()).expect("span usize -> C");
-        let dx_c: C = NumCast::from(dx.value()).expect("dx usize -> C");
-        let inc_num_c = self.cfg.cost_inc_num;
-        let inc_den_c = self.cfg.cost_inc_den;
+        let scaling_factor: C = increment_cost.ratio(base_cost).unwrap_or(C::zero());
 
-        let ramp_factor = (inc_num_c * dx_c) / (inc_den_c * span_c);
-
-        let scale_and_floor = |base: C| -> Cost<C> {
-            let mut val = base + base * ramp_factor;
-            if val < self.cfg.min_cost_floor {
-                val = self.cfg.min_cost_floor;
-            }
-            Cost::new(val)
+        let scale_cost = |base: Cost<C>| -> Cost<C> {
+            let scaled = base.saturating_add(base.saturating_mul(scaling_factor));
+            scaled.max(self.cfg.min_cost_floor)
         };
 
         (
-            scale_and_floor(self.cfg.base_cost_per_delay),
-            scale_and_floor(self.cfg.base_cost_per_dev),
+            scale_cost(self.cfg.base_cost_per_delay),
+            scale_cost(self.cfg.base_cost_per_dev),
         )
     }
 
@@ -694,39 +1228,6 @@ where
         SpaceLength::new(left_value)
     }
 
-    fn space_window_for_movable(
-        &self,
-        target: SpacePosition,
-        length: SpaceLength,
-    ) -> SpaceInterval {
-        match &self.cfg.space_window_policy {
-            SpaceWindowPolicy::FullQuay => {
-                SpaceInterval::new(SpacePosition::new(0), self.quay_end())
-            }
-
-            SpaceWindowPolicy::FixedHalfwidth(hw) => {
-                self.fixed_halfwidth_window(target, length, *hw)
-            }
-
-            SpaceWindowPolicy::Relative(RelativeSpaceWindowPolicy {
-                frac_of_length,
-                min,
-                max,
-            }) => {
-                let length_f64: f64 = NumCast::from(length.value()).expect("usize->f64");
-                let hw_len_f64 = (*frac_of_length * length_f64).round();
-                let hw_len: usize = NumCast::from(hw_len_f64).expect("f64->usize");
-                let hw = SpaceLength::new(hw_len.clamp(min.value(), max.value()));
-                self.fixed_halfwidth_window(target, length, hw)
-            }
-
-            SpaceWindowPolicy::MinMeasure(extra) => {
-                let want = SpaceLength::new(length.value() + extra.value());
-                self.min_measure_window(target, length, want)
-            }
-        }
-    }
-
     fn space_window_for_fixed_assignment(
         &self,
         start_pos: SpacePosition,
@@ -736,26 +1237,9 @@ where
             SpaceWindowPolicy::FullQuay => {
                 SpaceInterval::new(SpacePosition::new(0), self.quay_end())
             }
-
-            SpaceWindowPolicy::FixedHalfwidth(hw) => {
-                self.fixed_halfwidth_window_containing_run(start_pos, length, *hw)
-            }
-
-            SpaceWindowPolicy::Relative(RelativeSpaceWindowPolicy {
-                frac_of_length,
-                min,
-                max,
-            }) => {
-                let length_f64: f64 = NumCast::from(length.value()).expect("usize->f64");
-                let hw_len_f64 = (*frac_of_length * length_f64).round();
-                let hw_len: usize = NumCast::from(hw_len_f64).expect("f64->usize");
-                let hw = SpaceLength::new(hw_len.clamp(min.value(), max.value()));
+            SpaceWindowPolicy::Halfwidth(_) => {
+                let hw = self.halfwidth_for(length).expect("halfwidth required");
                 self.fixed_halfwidth_window_containing_run(start_pos, length, hw)
-            }
-
-            SpaceWindowPolicy::MinMeasure(extra) => {
-                let want = SpaceLength::new(length.value() + extra.value());
-                self.min_measure_window_containing_run(start_pos, length, want)
             }
         }
     }
@@ -787,27 +1271,6 @@ where
         SpaceInterval::new(lo, hi)
     }
 
-    fn min_measure_window(
-        &self,
-        target: SpacePosition,
-        length: SpaceLength,
-        min_measure: SpaceLength,
-    ) -> SpaceInterval {
-        let need = if min_measure > length {
-            min_measure
-        } else {
-            length
-        };
-        let quay_end = self.quay_end();
-
-        let add_l = self.split_left(need);
-        let lo = target.saturating_sub(add_l);
-        let hi = (lo + need).min(quay_end);
-        let lo = if (hi - lo) < need { hi - need } else { lo };
-
-        SpaceInterval::new(lo, hi)
-    }
-
     fn fixed_halfwidth_window_containing_run(
         &self,
         start_pos: SpacePosition,
@@ -825,30 +1288,6 @@ where
         SpaceInterval::new(lo, hi)
     }
 
-    fn min_measure_window_containing_run(
-        &self,
-        start_pos: SpacePosition,
-        length: SpaceLength,
-        min_measure: SpaceLength,
-    ) -> SpaceInterval {
-        let need = if min_measure > length {
-            min_measure
-        } else {
-            length
-        };
-        let quay_end = self.quay_end();
-
-        let extra = need - length;
-        let add_l = self.split_left(extra);
-
-        let lo = start_pos.saturating_sub(add_l);
-        let lo = if lo > start_pos { start_pos } else { lo };
-        let hi = (lo + need).min(quay_end);
-        let lo = if (hi - lo) < need { hi - need } else { lo };
-
-        SpaceInterval::new(lo, hi)
-    }
-
     #[inline]
     fn time_window_containing(&self, start: TimePoint<T>, proc: TimeDelta<T>) -> TimeInterval<T> {
         let mut end = start + proc + self.cfg.time_slack;
@@ -862,21 +1301,45 @@ where
         TimeInterval::new(start, end)
     }
 
-    #[inline]
+    fn space_window_for_movable(
+        &self,
+        target: SpacePosition,
+        length: SpaceLength,
+    ) -> SpaceInterval {
+        match &self.cfg.space_window_policy {
+            SpaceWindowPolicy::FullQuay => {
+                SpaceInterval::new(SpacePosition::new(0), self.quay_end())
+            }
+            SpaceWindowPolicy::Halfwidth(_) => {
+                let hw = self.halfwidth_for(length).expect("halfwidth required");
+                self.fixed_halfwidth_window(target, length, hw)
+            }
+        }
+    }
+
     fn time_window_from_arrival(
         &self,
         arrival: TimePoint<T>,
         proc: TimeDelta<T>,
     ) -> TimeInterval<T> {
-        let min_end = arrival + proc;
-        let mut end = min_end + self.cfg.time_slack;
-        if end > self.cfg.horizon {
-            end = self.cfg.horizon;
+        match &self.cfg.time_window_policy {
+            TimeWindowPolicy::FullHorizon => {
+                let latest_start = self.cfg.horizon.saturating_sub(proc);
+                TimeInterval::new(TimePoint::zero(), latest_start + proc)
+            }
+            TimeWindowPolicy::AroundArrival(policy) => {
+                let start = arrival.saturating_sub(policy.before());
+                let min_end = arrival + proc;
+                let mut end = min_end + policy.after();
+                if end > self.cfg.horizon {
+                    end = self.cfg.horizon;
+                }
+                if end < min_end {
+                    end = min_end;
+                }
+                TimeInterval::new(start, end)
+            }
         }
-        if end < min_end {
-            end = min_end;
-        }
-        TimeInterval::new(arrival, end)
     }
 
     fn sample_movable(&mut self, arrival: TimePoint<T>) -> Request<Movable, T, C> {
@@ -949,35 +1412,37 @@ mod tests {
 
     fn cfg_relative(seed: u64) -> InstanceGenConfig<Tm, Cm> {
         InstanceGenConfig::new(
-            SpaceLength::new(1_500), // quay_length
-            SpaceLength::new(80),    // min_length
-            SpaceLength::new(300),   // max_length
-            SpaceWindowPolicy::Relative(RelativeSpaceWindowPolicy {
-                frac_of_length: 0.75,
-                min: SpaceLength::new(60),
-                max: SpaceLength::new(250),
-            }),
-            25,                       // amount_movables
-            5,                        // amount_fixed
-            TimePoint::new(96),       // horizon
-            0.9,                      // lambda_per_time
-            2.5,                      // processing_time_sigma
-            TimeDelta::new(4),        // min_processing
-            Some(TimeDelta::new(72)), // max_processing
-            TimeDelta::new(12),       // time_slack
-            TimeDelta::new(2),        // fixed_gap
-            TimeDelta::new(10),       // processing_mu_base
-            TimeDelta::new(20),       // processing_mu_span
-            6,                        // arrival_oversample_mult
-            0.1,                      // processing_sigma_floor
-            SpaceLength::new(1),      // length_span_epsilon
-            1,                        // cost_inc_num (ramp up to +100% at max length)
-            1,                        // cost_inc_den
-            1,                        // min_cost_floor
-            SpaceLength::new(1),      // window_split_left_num (50/50)
-            SpaceLength::new(2),      // window_split_den
-            2,                        // base_cost_per_delay
-            1,                        // base_cost_per_dev
+            SpaceLength::new(1_500),
+            SpaceLength::new(80),
+            SpaceLength::new(300),
+            SpaceWindowPolicy::Halfwidth(HalfwidthPolicy::Relative(
+                RelativeSpaceWindowPolicy::new(0.75, SpaceLength::new(60), SpaceLength::new(260)),
+            )),
+            TimeWindowPolicy::AroundArrival(AroundArrivalTimeWindowPolicy::new(
+                8.into(),
+                48.into(),
+            )),
+            25,
+            5,
+            TimePoint::new(96),
+            0.9,
+            2.5,
+            TimeDelta::new(4),
+            Some(TimeDelta::new(72)),
+            TimeDelta::new(12),
+            TimeDelta::new(2),
+            TimeDelta::new(10),
+            TimeDelta::new(20),
+            6,
+            0.1,
+            SpaceLength::new(1),
+            Cost::new(1),
+            Cost::new(1),
+            Cost::new(1),
+            SpaceLength::new(1),
+            SpaceLength::new(2),
+            Cost::new(2),
+            Cost::new(1),
             seed,
         )
         .unwrap()
@@ -1094,27 +1559,28 @@ mod tests {
             SpaceLength::new(80),
             SpaceLength::new(300),
             SpaceWindowPolicy::FullQuay,
+            TimeWindowPolicy::FullHorizon,
             0,
             0,
             TimePoint::new(500),
             0.0,
             10.0,
-            TimeDelta::new(20),       // min
-            Some(TimeDelta::new(24)), // max
+            TimeDelta::new(20),
+            Some(TimeDelta::new(24)),
             TimeDelta::new(0),
             TimeDelta::new(0),
-            TimeDelta::new(10),  // processing_mu_base
-            TimeDelta::new(20),  // processing_mu_span
-            6,                   // arrival_oversample_mult
-            0.1,                 // processing_sigma_floor
-            SpaceLength::new(1), // length_span_epsilon
-            1,                   // cost_inc_num
-            1,                   // cost_inc_den
-            1_i64,               // min_cost_floor
-            SpaceLength::new(1), // window_split_left_num
-            SpaceLength::new(2), // window_split_den
-            1_i64,               // base_cost_per_delay
-            1_i64,               // base_cost_per_dev
+            TimeDelta::new(10),
+            TimeDelta::new(20),
+            6,
+            0.1,
+            SpaceLength::new(1),
+            Cost::new(1),
+            Cost::new(1),
+            Cost::new(1_i64),
+            SpaceLength::new(1),
+            SpaceLength::new(2),
+            Cost::new(1_i64),
+            Cost::new(1_i64),
             7,
         )
         .unwrap();
@@ -1129,6 +1595,51 @@ mod tests {
                 "processing {:?} not clamped",
                 d
             );
+        }
+    }
+
+    #[test]
+    fn test_time_window_policies() {
+        // Test FullHorizon policy
+        let cfg_full = InstanceGenConfig::new(
+            SpaceLength::new(1_000),
+            SpaceLength::new(80),
+            SpaceLength::new(300),
+            SpaceWindowPolicy::FullQuay,
+            TimeWindowPolicy::FullHorizon,
+            5,
+            0,
+            TimePoint::new(100),
+            0.0,
+            2.0,
+            TimeDelta::new(10),
+            Some(TimeDelta::new(20)),
+            TimeDelta::new(5),
+            TimeDelta::new(2),
+            TimeDelta::new(10),
+            TimeDelta::new(5),
+            6,
+            0.1,
+            SpaceLength::new(1),
+            Cost::new(1),
+            Cost::new(1),
+            Cost::new(1_i64),
+            SpaceLength::new(1),
+            SpaceLength::new(2),
+            Cost::new(1_i64),
+            Cost::new(1_i64),
+            123,
+        )
+        .unwrap();
+
+        let mut generator_full = InstanceGenerator::<Tm, Cm>::new(cfg_full);
+        let problem_full = generator_full.generate();
+
+        for request in problem_full.iter_movable_requests() {
+            let tw = request.feasible_time_window();
+            assert_eq!(tw.start(), TimePoint::new(0));
+            // Window should be large enough for the ship to complete
+            assert!(tw.duration() >= request.processing_duration());
         }
     }
 }
