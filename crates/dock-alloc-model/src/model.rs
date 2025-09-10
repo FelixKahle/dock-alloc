@@ -27,6 +27,7 @@ use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::{collections::HashMap, hash::Hash};
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RequestId(u64);
 
@@ -137,7 +138,9 @@ pub struct TimeWindowTooShortError<T: PrimInt + Signed> {
     processing: TimeDelta<T>,
     window: TimeInterval<T>,
 }
+
 impl<T: PrimInt + Signed> TimeWindowTooShortError<T> {
+    #[inline]
     pub fn new(id: RequestId, processing: TimeDelta<T>, window: TimeInterval<T>) -> Self {
         Self {
             id,
@@ -145,19 +148,23 @@ impl<T: PrimInt + Signed> TimeWindowTooShortError<T> {
             window,
         }
     }
+
     #[inline]
     pub fn id(&self) -> RequestId {
         self.id
     }
+
     #[inline]
     pub fn processing_duration(&self) -> TimeDelta<T> {
         self.processing
     }
+
     #[inline]
     pub fn time_window(&self) -> TimeInterval<T> {
         self.window
     }
 }
+
 impl<T: PrimInt + Signed + Display> Display for TimeWindowTooShortError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -167,6 +174,7 @@ impl<T: PrimInt + Signed + Display> Display for TimeWindowTooShortError<T> {
         )
     }
 }
+
 impl<T: PrimInt + Signed + Debug + Display> std::error::Error for TimeWindowTooShortError<T> {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -177,17 +185,21 @@ pub struct SpaceWindowTooShortError {
 }
 
 impl SpaceWindowTooShortError {
+    #[inline]
     pub fn new(id: RequestId, length: SpaceLength, window: SpaceInterval) -> Self {
         Self { id, length, window }
     }
+
     #[inline]
     pub fn id(&self) -> RequestId {
         self.id
     }
+
     #[inline]
     pub fn length(&self) -> SpaceLength {
         self.length
     }
+
     #[inline]
     pub fn space_window(&self) -> SpaceInterval {
         self.window
@@ -334,6 +346,7 @@ impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed + TryFrom<T>> Request<K, 
         self.cost_per_delay * scalar
     }
 }
+
 impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed + TryFrom<usize>> Request<K, T, C> {
     #[inline]
     pub fn target_position_deviation_cost(&self, deviation: SpaceLength) -> Cost<C> {
@@ -622,6 +635,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
             AnyRequest::Fixed(r) => r.length(),
         }
     }
+
     #[inline]
     pub fn arrival_time(&self) -> TimePoint<T> {
         match self {
@@ -629,6 +643,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
             AnyRequest::Fixed(r) => r.arrival_time(),
         }
     }
+
     #[inline]
     pub fn processing_duration(&self) -> TimeDelta<T> {
         match self {
@@ -636,6 +651,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
             AnyRequest::Fixed(r) => r.processing_duration(),
         }
     }
+
     #[inline]
     pub fn target_position(&self) -> SpacePosition {
         match self {
@@ -643,6 +659,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
             AnyRequest::Fixed(r) => r.target_position(),
         }
     }
+
     #[inline]
     pub fn cost_per_delay(&self) -> Cost<C> {
         match self {
@@ -650,6 +667,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
             AnyRequest::Fixed(r) => r.cost_per_delay(),
         }
     }
+
     #[inline]
     pub fn cost_per_position_deviation(&self) -> Cost<C> {
         match self {
@@ -657,6 +675,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
             AnyRequest::Fixed(r) => r.cost_per_position_deviation(),
         }
     }
+
     #[inline]
     pub fn feasible_time_window(&self) -> TimeInterval<T> {
         match self {
@@ -664,6 +683,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
             AnyRequest::Fixed(r) => r.feasible_time_window(),
         }
     }
+
     #[inline]
     pub fn feasible_space_window(&self) -> SpaceInterval {
         match self {
@@ -714,6 +734,7 @@ where
             AnyRequestRef::Fixed(r) => r.length(),
         }
     }
+
     #[inline]
     pub fn arrival_time(&self) -> TimePoint<T> {
         match self {
@@ -721,6 +742,7 @@ where
             AnyRequestRef::Fixed(r) => r.arrival_time(),
         }
     }
+
     #[inline]
     pub fn processing_duration(&self) -> TimeDelta<T> {
         match self {
@@ -728,6 +750,7 @@ where
             AnyRequestRef::Fixed(r) => r.processing_duration(),
         }
     }
+
     #[inline]
     pub fn target_position(&self) -> SpacePosition {
         match self {
@@ -735,6 +758,7 @@ where
             AnyRequestRef::Fixed(r) => r.target_position(),
         }
     }
+
     #[inline]
     pub fn cost_per_delay(&self) -> Cost<C> {
         match self {
@@ -742,6 +766,7 @@ where
             AnyRequestRef::Fixed(r) => r.cost_per_delay(),
         }
     }
+
     #[inline]
     pub fn cost_per_position_deviation(&self) -> Cost<C> {
         match self {
@@ -749,6 +774,7 @@ where
             AnyRequestRef::Fixed(r) => r.cost_per_position_deviation(),
         }
     }
+
     #[inline]
     pub fn feasible_time_window(&self) -> TimeInterval<T> {
         match self {
@@ -756,6 +782,7 @@ where
             AnyRequestRef::Fixed(r) => r.feasible_time_window(),
         }
     }
+
     #[inline]
     pub fn feasible_space_window(&self) -> SpaceInterval {
         match self {
@@ -809,22 +836,27 @@ where
         }
     }
 
+    #[inline]
     pub fn id(&self) -> RequestId {
         self.request.id()
     }
 
+    #[inline]
     pub fn request(&self) -> &AnyRequest<T, C> {
         &self.request
     }
 
+    #[inline]
     pub fn start_position(&self) -> SpacePosition {
         self.start_position
     }
 
+    #[inline]
     pub fn start_time(&self) -> TimePoint<T> {
         self.start_time
     }
 
+    #[inline]
     pub fn into_ref<'a>(&'a self) -> AnyAssignmentRef<'a, T, C> {
         let request = match &self.request {
             AnyRequest::Movable(r) => AnyRequestRef::Movable(r),
@@ -854,6 +886,7 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
+    #[inline]
     fn new(
         request: AnyRequestRef<'a, T, C>,
         start_position: SpacePosition,
@@ -866,22 +899,27 @@ where
         }
     }
 
+    #[inline]
     pub fn id(&self) -> RequestId {
         self.request.id()
     }
 
+    #[inline]
     pub fn request(&self) -> &AnyRequestRef<'a, T, C> {
         &self.request
     }
 
+    #[inline]
     pub fn start_position(&self) -> SpacePosition {
         self.start_position
     }
 
+    #[inline]
     pub fn start_time(&self) -> TimePoint<T> {
         self.start_time
     }
 
+    #[inline]
     pub fn into_owned(self) -> AnyAssignment<T, C> {
         let request = match self.request {
             AnyRequestRef::Movable(r) => AnyRequest::Movable(r.clone()),
@@ -894,6 +932,7 @@ where
         }
     }
 
+    #[inline]
     pub fn to_owned(&self) -> AnyAssignment<T, C> {
         let request = match self.request {
             AnyRequestRef::Movable(r) => AnyRequest::Movable(r.clone()),
@@ -1102,10 +1141,12 @@ impl<T: PrimInt + Signed> AssignmentOutsideTimeWindowError<T> {
     pub fn id(&self) -> RequestId {
         self.id
     }
+
     #[inline]
     pub fn time_window(&self) -> TimeInterval<T> {
         self.time_window
     }
+
     #[inline]
     pub fn assigned_interval(&self) -> TimeInterval<T> {
         self.assigned_interval
@@ -1133,6 +1174,7 @@ pub struct AssignmentOutsideSpaceWindowError {
 }
 
 impl AssignmentOutsideSpaceWindowError {
+    #[inline]
     pub fn new(
         id: RequestId,
         space_window: SpaceInterval,
@@ -1144,14 +1186,17 @@ impl AssignmentOutsideSpaceWindowError {
             assigned_interval,
         }
     }
+
     #[inline]
     pub fn id(&self) -> RequestId {
         self.id
     }
+
     #[inline]
     pub fn space_window(&self) -> SpaceInterval {
         self.space_window
     }
+
     #[inline]
     pub fn assigned_interval(&self) -> SpaceInterval {
         self.assigned_interval
@@ -1177,6 +1222,7 @@ pub struct AssignmentExceedsQuayError {
 }
 
 impl AssignmentExceedsQuayError {
+    #[inline]
     pub fn new(id: RequestId, quay_length: SpaceLength, assigned_interval: SpaceInterval) -> Self {
         Self {
             id,
@@ -1184,14 +1230,17 @@ impl AssignmentExceedsQuayError {
             assigned_interval,
         }
     }
+
     #[inline]
     pub fn id(&self) -> RequestId {
         self.id
     }
+
     #[inline]
     pub fn quay_length(&self) -> SpaceLength {
         self.quay_length
     }
+
     #[inline]
     pub fn assigned_interval(&self) -> SpaceInterval {
         self.assigned_interval
@@ -1207,6 +1256,7 @@ impl Display for AssignmentExceedsQuayError {
         )
     }
 }
+
 impl std::error::Error for AssignmentExceedsQuayError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1216,13 +1266,16 @@ pub struct PreassignedOverlapError {
 }
 
 impl PreassignedOverlapError {
+    #[inline]
     pub fn new(a: FixedRequestId, b: FixedRequestId) -> Self {
         Self { a, b }
     }
+
     #[inline]
     pub fn request_a(&self) -> FixedRequestId {
         self.a
     }
+
     #[inline]
     pub fn request_b(&self) -> FixedRequestId {
         self.b
@@ -1327,8 +1380,6 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> Problem<T, C> {
     }
 }
 
-pub type BerthAllocationProblem = Problem<i64, i64>;
-
 pub struct ProblemBuilder<T = i64, C = i64>
 where
     T: PrimInt + Signed,
@@ -1355,6 +1406,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> ProblemBuilder<T, C> {
         self
     }
 
+    #[inline]
     pub fn add_movable_request(
         &mut self,
         request: Request<Movable, T, C>,
@@ -1423,6 +1475,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> ProblemBuilder<T, C> {
         Ok(self)
     }
 
+    #[inline]
     pub fn build(&self) -> Problem<T, C> {
         Problem {
             movables: self.movables.clone(),
@@ -1442,6 +1495,7 @@ where
     total_waiting_time: TimeDelta<T>,
     total_target_position_deviation: SpaceLength,
 }
+
 impl<T: PrimInt + Signed, C: PrimInt + Signed> SolutionStats<T, C> {
     #[inline]
     fn new(
@@ -1471,6 +1525,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> SolutionStats<T, C> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnedSolution<T = i64, C = i64>
 where
     T: PrimInt + Signed,
@@ -1485,6 +1540,7 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
+    #[inline]
     fn new(decisions: HashMap<RequestId, AnyAssignment<T, C>>, stats: SolutionStats<T, C>) -> Self {
         Self { decisions, stats }
     }
@@ -1515,6 +1571,7 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
 {
+    #[inline]
     pub fn new(
         assignments: HashMap<RequestId, AnyAssignmentRef<'a, T, C>>,
         stats: SolutionStats<T, C>,
