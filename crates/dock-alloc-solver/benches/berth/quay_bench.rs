@@ -316,6 +316,6 @@ fn quay_benches(c: &mut Criterion) {
     }
 }
 
-// Register all benchmarks
+// Register all benchmarks using groups.
 criterion_group!(benches, quay_benches);
 criterion_main!(benches);
