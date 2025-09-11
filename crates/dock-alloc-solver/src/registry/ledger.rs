@@ -153,15 +153,15 @@ where
     }
 
     #[inline]
-    pub fn iter_fixed_handles(&self) -> impl Iterator<Item = &FixedRequestId> + '_ {
-        self.problem.preassigned().keys()
+    pub fn iter_fixed_handles(&self) -> impl Iterator<Item = FixedRequestId> + '_ {
+        self.problem.preassigned().iter().map(|r| r.typed_id())
     }
 
     #[inline]
     pub fn iter_fixed_assignments(
         &self,
     ) -> impl Iterator<Item = AssignmentRef<'a, Fixed, T, C>> + '_ {
-        self.problem.preassigned().values().map(|a| a.as_ref())
+        self.problem.preassigned().iter().map(|a| a.as_ref())
     }
 
     #[inline]
@@ -185,7 +185,7 @@ where
     pub fn iter_unassigned_requests(&self) -> impl Iterator<Item = &Request<Movable, T, C>> + '_ {
         self.problem
             .movables()
-            .values()
+            .iter()
             .filter(move |req| !self.committed.contains_key(&req.typed_id()))
     }
 
@@ -193,7 +193,7 @@ where
     pub fn iter_assigned_requests(&self) -> impl Iterator<Item = &Request<Movable, T, C>> + '_ {
         self.problem
             .movables()
-            .values()
+            .iter()
             .filter(move |req| self.committed.contains_key(&req.typed_id()))
     }
 
@@ -202,7 +202,7 @@ where
         let fixed_iter = self
             .problem
             .preassigned()
-            .values()
+            .iter()
             .map(AnyAssignmentRef::from);
         let movable_iter = self.committed.values().map(AnyAssignmentRef::from);
         fixed_iter.chain(movable_iter)
@@ -422,7 +422,7 @@ mod ledger_overlay_tests {
         let ledger = AssignmentLedger::from(&problem);
 
         // fixed via handles (now &FixedRequestId -> RequestId)
-        let fixed_ids = ids(ledger.iter_fixed_handles().map(|h| (*h).into()));
+        let fixed_ids = ids(ledger.iter_fixed_handles().map(|h| (h).into()));
         assert_eq!(fixed_ids, vec![RequestId::new(10)]);
         assert_eq!(ledger.iter_fixed_assignments().count(), 1);
 

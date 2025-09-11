@@ -114,7 +114,6 @@ where
                         .collect::<Vec<_>>()
                 });
 
-                // longest first, then earliest arrival
                 ready_order.sort_by_key(|&(_id, len_key, arr_key)| (len_key, arr_key));
                 let mut deps = Vec::new();
 
@@ -142,7 +141,6 @@ where
                             }
                         }
 
-                        // compare with best at next event if it's after arrival
                         let best_later_cost = match t_next_opt {
                             Some(tn) if tn >= req.request().arrival_time() => {
                                 let twin_later = TimeInterval::new(tn, tn + proc);
@@ -215,7 +213,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::berth::prelude::BooleanVecQuay;
+    use crate::berth::{prelude::BooleanVecQuay, quay::BTreeMapQuay};
 
     use dock_alloc_core::{
         cost::Cost,
@@ -223,7 +221,7 @@ mod tests {
         time::TimeDelta,
     };
     use dock_alloc_model::{
-        generator::{InstanceGenConfig, InstanceGenerator, SpaceWindowPolicy},
+        generator::{InstanceGenConfig, InstanceGenerator},
         model::{Assignment, Fixed, Movable, ProblemBuilder, Request, RequestId},
     };
 
@@ -458,40 +456,11 @@ mod tests {
 
     #[test]
     fn test_greedy_solves_large_instance() {
-        let config = InstanceGenConfig::new(
-            SpaceLength::new(1_500), // quay_length
-            SpaceLength::new(80),    // min_length
-            SpaceLength::new(300),   // max_length
-            SpaceWindowPolicy::FullQuay,
-            400,                      // amount_movables
-            0,                        // amount_fixed
-            TimePoint::new(10000),    // horizon
-            0.9,                      // lambda_per_time
-            2.5,                      // processing_time_sigma
-            TimeDelta::new(4),        // min_processing
-            Some(TimeDelta::new(72)), // max_processing
-            TimeDelta::new(2),        // fixed_gap
-            TimeDelta::new(10),       // processing_mu_base
-            TimeDelta::new(20),       // processing_mu_span
-            6,                        // arrival_oversample_mult
-            0.1,                      // processing_sigma_floor
-            SpaceLength::new(1),      // length_span_epsilon
-            Cost::new(1),             // cost_inc_num (ramp up to +100% at max length)
-            Cost::new(1),             // cost_inc_den
-            Cost::new(1),             // min_cost_floor
-            SpaceLength::new(1),      // window_split_left_num (50/50)
-            SpaceLength::new(2),      // window_split_den
-            Cost::new(2),             // base_cost_per_delay
-            Cost::new(1),             // base_cost_per_dev
-            28,
-        )
-        .unwrap();
-
-        let mut generator = InstanceGenerator::new(config);
+        let mut generator: InstanceGenerator<_, _> = InstanceGenConfig::default().into();
         let problem = generator.generate();
 
         let solver = GreedySolver::new();
-        let state: FeasibleSolverState<'_, Tm, Cm, BooleanVecQuay> =
+        let state: FeasibleSolverState<'_, Tm, Cm, BTreeMapQuay> =
             solver.build_state(&problem).unwrap();
         assert_eq!(
             state.ledger().iter_movable_assignments().count(),

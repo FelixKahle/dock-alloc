@@ -338,7 +338,7 @@ where
     fn validate(state: &SolverState<'p, T, C, Q>) -> Result<(), FeasibleStateError<T>> {
         let committed = state.ledger().committed();
         let mut missing: Vec<RequestId> = Vec::new();
-        for &mid in state.problem().movables().keys() {
+        for mid in state.problem().movables().iter().map(|r| r.typed_id()) {
             if !committed.contains_key(&mid) {
                 missing.push(RequestId::from(mid));
             }

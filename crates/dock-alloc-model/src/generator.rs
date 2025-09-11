@@ -114,37 +114,211 @@ impl Display for SpaceWindowPolicy {
     }
 }
 
+/// Configuration for generating synthetic berth-allocation instances
+/// in **realistic terminal units**:
+///
+/// - **Time unit:** 1 tick = **1 minute**
+/// - **Space unit:** **meter**
+///
+/// ### What the *defaults* imply (see `Default` impl below)
+/// - **Quay:** 2,400 m face; ships between **140–400 m**.
+/// - **Horizon:** **3 days** (4,320 min).
+/// - **Arrivals:** ~**1 ship/hour** on average (Poisson) → realistic **bursts and gaps**.
+/// - **Processing durations:** small ships around **8 h**, largest around **24 h**,
+///   clamped to **3–30 h**.
+/// - **Movables:** space windows centered by half-width policy (relative to ship size).
+/// - **Fixeds:** never overlap; **30 min** buffer between starts.
+///
+/// Use this to generate datasets that “feel” like a large port’s day-to-day flow.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstanceGenConfig<TimePrimitive, CostPrimitive>
 where
     TimePrimitive: PrimInt + Signed + NumCast + ToPrimitive,
     CostPrimitive: PrimInt + Signed + NumCast + Copy,
 {
+    /// **Usable quay length** in meters. All berths/placements must lie within `[0, quay_length]`.
+    /// Larger values allow more/larger ships to be present concurrently along the quay face.
     quay_length: SpaceLength,
+
+    /// **Smallest ship LOA** (meters) seen in the mix. Controls the low end of length sampling
+    /// and anchors the “short ship” side of processing-time means and cost scaling.
     min_ship_length: SpaceLength,
+
+    /// **Largest ship LOA** (meters). Must be `<= quay_length`.
+    /// Drives the “long ship” end of processing-time means and cost scaling.
     max_ship_length: SpaceLength,
+
+    /// **How wide a ship’s allowed berthing interval is** (its feasible space window).
+    /// - `FullQuay`: anywhere along the quay.
+    /// - `Halfwidth`: window centered around a target (movables) or containing the fixed run,
+    ///   with half-width either fixed or **relative to ship length** (longer ships → wider windows).
+    /// If the window is too narrow to fit the ship, it is expanded within quay bounds.
     space_window_policy: SpaceWindowPolicy,
+
+    /// **How many movable requests** to generate. These arrive over time with feasible time/space
+    /// windows and a target position but no fixed start; the solver must place them.
     amount_movables: usize,
+
+    /// **How many fixed assignments** to generate. These are pre-planned runs with concrete
+    /// start time and position. They never overlap in time and sit inside their windows/quay.
     amount_fixed: usize,
+
+    /// **End of the planning horizon** (minutes). All arrivals and time-window ends are clamped
+    /// to this point. Think of this as “we plan for the next N minutes.”
     horizon: TimePoint<TimePrimitive>,
+
+    /// **Average arrival rate per minute** (λ). We simulate a **Poisson process**:
+    /// inter-arrival times are exponential. Real-world effect: **bursty** sequences (several ships
+    /// in quick succession) interleaved with **quiet gaps**—not evenly spaced arrivals.
     lambda_per_time: f64,
+
+    /// **Spread (σ) of processing times** around the mean (in minutes).
+    /// Higher values make durations more variable; a small safety floor is applied so the
+    /// distribution never becomes nearly deterministic.
     processing_time_sigma: f64,
+
+    /// **Minimum allowed processing duration** (minutes) after sampling.
+    /// Models that a call can’t be unrealistically short even if the draw says so.
     min_processing: TimeDelta<TimePrimitive>,
+
+    /// **Maximum allowed processing duration** (minutes) after sampling. `None` = no hard cap.
+    /// Use to bound extreme tails (e.g., operational constraints, shift limits).
     max_processing: Option<TimeDelta<TimePrimitive>>,
+
+    /// **Idle time between fixed assignments** (minutes). Ensures fixeds never overlap;
+    /// with `fixed_gap = 30` you get at least a 30-minute buffer before the next fixed can start.
     fixed_gap: TimeDelta<TimePrimitive>,
+
+    /// **Base (short-ship) mean processing time** (minutes). A 140 m ship will hover around this
+    /// mean before adding length effects.
     processing_mu_base: TimeDelta<TimePrimitive>,
+
+    /// **Additional mean for the longest ship** (minutes). The mean grows linearly from
+    /// `processing_mu_base` at `min_ship_length` to `base + span` at `max_ship_length`.
+    /// Real-world effect: larger ships get **longer average service**.
     processing_mu_span: TimeDelta<TimePrimitive>,
+
+    /// **How many exponential draws we attempt** relative to the total number of ships.
+    /// Larger values make it more likely that enough Poisson arrivals fall **inside the horizon**
+    /// before we top up uniformly.
     arrival_oversample_mult: usize,
+
+    /// **Lower bound on σ** for processing times. Prevents “degenerate” near-zero variance
+    /// if someone sets `processing_time_sigma` tiny.
     processing_sigma_floor: f64,
+
+    /// **Safety minimum for length spans** (meters). If min = max length, we still treat the
+    /// span as at least this value to avoid divide-by-zero in length-based formulas.
     length_span_epsilon: SpaceLength,
+
+    /// **Numerator** of the length-based **cost ramp**. Longer ships pay more per unit of delay/dev.
+    /// This tunes how steeply per-unit costs grow from small to large ships.
     cost_inc_num: Cost<CostPrimitive>,
+
+    /// **Denominator** of the cost ramp. Larger denominator → gentler growth.
     cost_inc_den: Cost<CostPrimitive>,
+
+    /// **Per-unit cost floor** after ramping. Ensures neither delay nor deviation becomes “free”
+    /// due to scaling.
     min_cost_floor: Cost<CostPrimitive>,
+
+    /// **How we split extra space when a window is too narrow**: fraction added to the **left**.
+    /// With `1/2`, the expansion is 50/50 left/right; with `0/1`, all added to the right.
     window_split_left_num: SpaceLength,
+
+    /// **Split denominator** for the left/right expansion fraction (see above).
     window_split_den: SpaceLength,
+
+    /// **Base per-minute cost of waiting** (before length ramp). Real-world: queueing, tug,
+    /// crane readiness, and knock-on schedule effects—delay is often the dominant penalty.
     base_cost_per_delay: Cost<CostPrimitive>,
+
+    /// **Base per-meter cost of spatial deviation** (before length ramp). Real-world: being off the
+    /// target berth may induce extra crane travel or internal transport inefficiency.
     base_cost_per_dev: Cost<CostPrimitive>,
+
+    /// **RNG seed** for reproducible instance generation. Fix this to get identical datasets
+    /// from run to run; change it for fresh draws with the same configuration.
     seed: u64,
+}
+
+impl<T, C> Default for InstanceGenConfig<T, C>
+where
+    T: PrimInt + Signed + NumCast + ToPrimitive,
+    C: PrimInt + Signed + NumCast + Copy,
+{
+    fn default() -> Self {
+        // Helpers to construct typed wrappers from integer literals.
+        #[inline]
+        fn to_t<T: PrimInt + Signed + NumCast>(v: i64) -> T {
+            NumCast::from(v).expect("NumCast<i64 -> T>")
+        }
+        #[inline]
+        fn td<T: PrimInt + Signed + NumCast>(v: i64) -> TimeDelta<T> {
+            TimeDelta::new(to_t::<T>(v))
+        }
+        #[inline]
+        fn tp<T: PrimInt + Signed + NumCast>(v: i64) -> TimePoint<T> {
+            TimePoint::new(to_t::<T>(v))
+        }
+        #[inline]
+        fn cost<C: PrimInt + Signed + NumCast + Copy>(v: i64) -> Cost<C> {
+            Cost::new(NumCast::from(v).expect("NumCast<i64 -> C>"))
+        }
+
+        let quay_length = SpaceLength::new(2_400); // large quay face
+        let min_len = SpaceLength::new(140); // feeder / small container ship
+        let max_len = SpaceLength::new(400); // Panamax/Neo-Panamax
+        let seed = rand::rng().random();
+
+        Self {
+            // Geometry
+            quay_length,
+            min_ship_length: min_len,
+            max_ship_length: max_len,
+
+            // Space windows: relative half-width (≈ 0.75 * LOA), clamped to [80 m, 600 m]
+            space_window_policy: SpaceWindowPolicy::Halfwidth(HalfwidthPolicy::Relative(
+                RelativeSpaceWindowPolicy::new(0.75, SpaceLength::new(80), SpaceLength::new(600)),
+            )),
+
+            // Mix
+            amount_movables: 60,
+            amount_fixed: 10,
+
+            // Horizon: 3 days
+            horizon: tp::<T>(4_320),
+
+            // Arrivals: ≈ 1 ship/hour (Poisson → bursts + gaps)
+            lambda_per_time: 0.017,
+            arrival_oversample_mult: 6,
+
+            // Processing times (minutes): ~8 h (small) → ~24 h (large), with realistic spread
+            processing_time_sigma: 45.0,
+            processing_sigma_floor: 10.0,
+            min_processing: td::<T>(180),         // ≥ 3 h
+            max_processing: Some(td::<T>(1_800)), // ≤ 30 h
+            processing_mu_base: td::<T>(480),     // 8 h
+            processing_mu_span: td::<T>(960),     // +16 h across min→max LOA
+
+            // Fixed runs: non-overlap with a small real-world buffer
+            fixed_gap: td::<T>(30), // 30 min between fixed starts
+
+            // Space window expansion and span safety
+            window_split_left_num: SpaceLength::new(1), // 50/50 left-right expansion
+            window_split_den: SpaceLength::new(2),
+            length_span_epsilon: SpaceLength::new(1),
+
+            // Costs (per minute / per meter), length-ramped
+            base_cost_per_delay: cost::<C>(5), // waiting is expensive
+            base_cost_per_dev: cost::<C>(1),   // spatial deviation matters less
+            cost_inc_num: cost::<C>(1),        // linear ramp with LOA
+            cost_inc_den: cost::<C>(1),
+            min_cost_floor: cost::<C>(1),
+
+            seed,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

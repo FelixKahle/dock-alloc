@@ -1250,8 +1250,12 @@ where
     T: PrimInt + Signed,
     C: PrimInt + Signed,
 {
-    movables: HashMap<MovableRequestId, Request<Movable, T, C>>,
-    preassigned: HashMap<FixedRequestId, Assignment<Fixed, T, C>>,
+    movables: Vec<Request<Movable, T, C>>,
+    movable_index: HashMap<MovableRequestId, usize>,
+
+    preassigned: Vec<Assignment<Fixed, T, C>>,
+    preassigned_index: HashMap<FixedRequestId, usize>,
+
     quay_length: SpaceLength,
 }
 
@@ -1267,33 +1271,35 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> Problem<T, C> {
     }
 
     #[inline]
-    pub fn movables(&self) -> &HashMap<MovableRequestId, Request<Movable, T, C>> {
+    pub fn movables(&self) -> &[Request<Movable, T, C>] {
         &self.movables
     }
 
     #[inline]
-    pub fn preassigned(&self) -> &HashMap<FixedRequestId, Assignment<Fixed, T, C>> {
+    pub fn preassigned(&self) -> &[Assignment<Fixed, T, C>] {
         &self.preassigned
     }
 
     #[inline]
     pub fn get_movable(&self, id: MovableRequestId) -> Option<&Request<Movable, T, C>> {
-        self.movables.get(&id)
+        let idx = self.movable_index.get(&id)?;
+        self.movables.get(*idx)
     }
 
     #[inline]
     pub fn get_preassigned(&self, id: FixedRequestId) -> Option<&Assignment<Fixed, T, C>> {
-        self.preassigned.get(&id)
+        let idx = self.preassigned_index.get(&id)?;
+        self.preassigned.get(*idx)
     }
 
     #[inline]
     pub fn iter_movable_requests(&self) -> impl Iterator<Item = &Request<Movable, T, C>> {
-        self.movables.values()
+        self.movables.iter()
     }
 
     #[inline]
     pub fn iter_fixed_requests(&self) -> impl Iterator<Item = &Request<Fixed, T, C>> {
-        self.preassigned.values().map(|fa| fa.request())
+        self.preassigned.iter().map(|a| a.request())
     }
 
     #[inline]
@@ -1305,7 +1311,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> Problem<T, C> {
 
     #[inline]
     pub fn iter_fixed_assignments(&self) -> impl Iterator<Item = &Assignment<Fixed, T, C>> {
-        self.preassigned.values()
+        self.preassigned.iter()
     }
 }
 
@@ -1406,9 +1412,36 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> ProblemBuilder<T, C> {
 
     #[inline]
     pub fn build(&self) -> Problem<T, C> {
+        let mut movable_pairs: Vec<(MovableRequestId, Request<Movable, T, C>)> =
+            self.movables.iter().map(|(k, v)| (*k, v.clone())).collect();
+        movable_pairs.sort_by_key(|(id, _)| id.value());
+
+        let mut movables = Vec::with_capacity(movable_pairs.len());
+        let mut movable_index = HashMap::with_capacity(movable_pairs.len());
+        for (i, (mid, req)) in movable_pairs.into_iter().enumerate() {
+            movable_index.insert(mid, i);
+            movables.push(req);
+        }
+
+        let mut fixed_pairs: Vec<(FixedRequestId, Assignment<Fixed, T, C>)> = self
+            .preassigned
+            .iter()
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        fixed_pairs.sort_by_key(|(id, _)| id.value());
+
+        let mut preassigned = Vec::with_capacity(fixed_pairs.len());
+        let mut preassigned_index = HashMap::with_capacity(fixed_pairs.len());
+        for (i, (fid, asg)) in fixed_pairs.into_iter().enumerate() {
+            preassigned_index.insert(fid, i);
+            preassigned.push(asg);
+        }
+
         Problem {
-            movables: self.movables.clone(),
-            preassigned: self.preassigned.clone(),
+            movables,
+            movable_index,
+            preassigned,
+            preassigned_index,
             quay_length: self.quay_length,
         }
     }
@@ -1779,7 +1812,7 @@ mod tests {
         );
 
         let a_fixed_ref: AnyAssignmentRef<'_, Tm, Cm> =
-            AnyAssignmentRef::from(p.preassigned().values().next().unwrap());
+            AnyAssignmentRef::from(p.preassigned().iter().next().unwrap());
         let a_r1_ref: AnyAssignmentRef<'_, Tm, Cm> = AnyAssignmentRef::from(&a_r1);
 
         let mut map: HashMap<RequestId, AnyAssignmentRef<'_, Tm, Cm>> = HashMap::new();

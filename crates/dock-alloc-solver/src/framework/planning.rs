@@ -39,12 +39,12 @@ use crate::{
 };
 use dock_alloc_core::{
     cost::Cost,
-    space::{SpaceInterval, SpaceLength},
-    time::{TimeDelta, TimeInterval},
+    space::{SpaceInterval, SpaceLength, SpacePosition},
+    time::{TimeDelta, TimeInterval, TimePoint},
 };
 use dock_alloc_model::model::{AnyAssignmentRef, AssignmentRef, Fixed, Kind, Problem};
 use num_traits::{PrimInt, Signed};
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 
 pub struct PlanningContext<'p, 'al, 'bo, T, C, Q>
 where
@@ -226,36 +226,55 @@ where
     }
 }
 
+#[repr(transparent)]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ProposeError {
-    Stage(StageError),
-    QuaySpaceIntervalOutOfBounds(QuaySpaceIntervalOutOfBoundsError),
+pub struct FreeRegionViolationError<T: PrimInt + Signed>(SpaceTimeRectangle<T>);
+
+impl<T: PrimInt + Signed> FreeRegionViolationError<T> {
+    #[inline]
+    pub fn requested(&self) -> &SpaceTimeRectangle<T> {
+        &self.0
+    }
 }
 
-impl From<StageError> for ProposeError {
+impl<T: PrimInt + Signed + Display> Display for FreeRegionViolationError<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Violated free region: {}", self.0)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProposeError<T: PrimInt + Signed> {
+    Stage(StageError),
+    QuaySpaceIntervalOutOfBounds(QuaySpaceIntervalOutOfBoundsError),
+    FreeRegionViolation(FreeRegionViolationError<T>),
+}
+
+impl<T: PrimInt + Signed> From<StageError> for ProposeError<T> {
     #[inline]
     fn from(e: StageError) -> Self {
         ProposeError::Stage(e)
     }
 }
 
-impl From<QuaySpaceIntervalOutOfBoundsError> for ProposeError {
+impl<T: PrimInt + Signed> From<QuaySpaceIntervalOutOfBoundsError> for ProposeError<T> {
     #[inline]
     fn from(e: QuaySpaceIntervalOutOfBoundsError) -> Self {
         ProposeError::QuaySpaceIntervalOutOfBounds(e)
     }
 }
 
-impl Display for ProposeError {
+impl<T: PrimInt + Signed + Display> Display for ProposeError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ProposeError::Stage(e) => write!(f, "{}", e),
             ProposeError::QuaySpaceIntervalOutOfBounds(e) => write!(f, "{}", e),
+            ProposeError::FreeRegionViolation(e) => write!(f, "{}", e),
         }
     }
 }
 
-impl std::error::Error for ProposeError {}
+impl<T: PrimInt + Signed + Debug + Display> std::error::Error for ProposeError<T> {}
 
 pub struct PlanBuilder<'alob, 'boob, 'p, 'bo, 'al, T, C, Q>
 where
@@ -433,7 +452,7 @@ where
     pub fn propose_unassign(
         &mut self,
         assignment: &'alob BrandedMovableAssignment<'alob, 'p, T, C>,
-    ) -> Result<BrandedFreeRegion<'boob, T>, ProposeError> {
+    ) -> Result<BrandedFreeRegion<'boob, T>, ProposeError<T>> {
         let a = assignment.assignment();
         let rect: SpaceTimeRectangle<T> = a.into();
 
@@ -447,7 +466,7 @@ where
         &mut self,
         req: &BrandedMovableRequest<'alob, 'p, T, C>,
         slot: BrandedFreeSlot<'boob, T>,
-    ) -> Result<BrandedMovableAssignment<'alob, 'p, T, C>, ProposeError> {
+    ) -> Result<BrandedMovableAssignment<'alob, 'p, T, C>, ProposeError<T>> {
         let a = AssignmentRef::new(
             req.request(),
             slot.slot().space().start(),
@@ -462,6 +481,34 @@ where
         )?;
         self.berth_overlay.occupy(&rect)?;
 
+        Ok(ma)
+    }
+
+    pub fn propose_assign_at(
+        &mut self,
+        req: &BrandedMovableRequest<'alob, 'p, T, C>,
+        region: &BrandedFreeRegion<'boob, T>,
+        start_time: TimePoint<T>,
+        start_pos: SpacePosition,
+    ) -> Result<BrandedMovableAssignment<'alob, 'p, T, C>, ProposeError<T>> {
+        let rect = SpaceTimeRectangle::new(
+            SpaceInterval::new(start_pos, start_pos + req.length()),
+            TimeInterval::new(start_time, start_time + req.processing_duration()),
+        );
+
+        if !region.region().rectangle().contains(&rect) {
+            return Err(ProposeError::FreeRegionViolation(FreeRegionViolationError(
+                rect,
+            )));
+        }
+
+        let a = AssignmentRef::new(req.request(), start_pos, start_time);
+        let rect: SpaceTimeRectangle<T> = a.into();
+
+        let ma = self
+            .assignment_overlay
+            .commit_assignment(req.request(), start_time, start_pos)?;
+        self.berth_overlay.occupy(&rect)?;
         Ok(ma)
     }
 
@@ -553,7 +600,7 @@ mod tests {
         let mut berth: BerthOccupancy<Tm, BooleanVecQuay> =
             BerthOccupancy::new(problem.quay_length());
 
-        let mut ids: Vec<_> = problem.movables().keys().cloned().collect();
+        let mut ids: Vec<_> = problem.movables().iter().map(|r| r.typed_id()).collect();
         ids.sort_by_key(|id| id.value());
 
         // Search the whole quay and a broad time window; Explorer will clamp starts to arrival.

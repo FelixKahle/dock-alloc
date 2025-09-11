@@ -435,7 +435,7 @@ where
     type Error = QuaySpaceIntervalOutOfBoundsError;
     fn try_from(problem: &Problem<T, C>) -> Result<Self, Self::Error> {
         let mut berth_occupancy = BerthOccupancy::<T, Q>::new(problem.quay_length());
-        for fixed_assignment in problem.preassigned().values() {
+        for fixed_assignment in problem.preassigned() {
             let request = fixed_assignment.request();
             let length = request.length();
             let processing_duration = request.processing_duration();

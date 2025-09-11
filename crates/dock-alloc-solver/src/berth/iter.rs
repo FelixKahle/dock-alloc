@@ -258,8 +258,16 @@ where
 {
     let tw_start = time_window.start();
     let latest_start = time_window.end() - duration;
+
     if tw_start > latest_start {
         return Vec::new();
+    }
+
+    // Special-case: exactly one admissible start.
+    // Emit [tw_start, tw_start + 1) so regions represent “start at tw_start”.
+    if tw_start == latest_start {
+        let one = TimeDelta::new(T::one());
+        return vec![tw_start, tw_start + one];
     }
 
     let one = TimeDelta::new(T::one());
@@ -279,8 +287,8 @@ where
     };
 
     let mut right = prefix
-        .into_iter() // 0 or 1 element
-        .chain(base_right) // same Chain<IntoIter<_>, Keys<...>> type regardless
+        .into_iter()
+        .chain(base_right)
         .map(move |t| t - duration + one)
         .filter(move |&t| t > tw_start && t <= latest_start)
         .peekable();
@@ -891,5 +899,18 @@ mod tests {
         assert_eq!(owned.next(), Some(si(0, 1)));
         assert_eq!(owned.next(), Some(si(1, 3)));
         assert_eq!(owned.next(), None);
+    }
+
+    #[test]
+    fn regions_single_start_equals_slots() {
+        let b = BO::new(len(10));
+        // Only one admissible start: tw=[0,5), dur=5
+        let bands = collect_bands(&b, ti(0, 5), TimeDelta::new(5), len(2), si(0, 10));
+        assert_eq!(bands.len(), 1);
+        let ((ts, te), spaces) = bands.into_iter().next().unwrap();
+        assert_eq!(ts, 0);
+        assert_eq!(te, 1); // band represents “start at 0”
+        let slots = slot_set_for_start(&b, tp(0), TimeDelta::new(5), len(2), si(0, 10));
+        assert_eq!(spaces, slots);
     }
 }

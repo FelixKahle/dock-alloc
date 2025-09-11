@@ -151,6 +151,10 @@ impl<T: PrimInt + Signed> SpaceTimeRectangle<T> {
         self.space.intersects(&other.space) && self.time.intersects(&other.time)
     }
 
+    pub fn contains(&self, other: &Self) -> bool {
+        self.space.contains_interval(&other.space) && self.time.contains_interval(&other.time)
+    }
+
     pub fn intersection(&self, other: &Self) -> Option<Self> {
         let space = self.space.intersection(&other.space)?;
         let time = self.time.intersection(&other.time)?;

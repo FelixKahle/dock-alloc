@@ -19,32 +19,6 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-//! # Domain-Specific Core Data Types
-//!
-//! This module provides the fundamental data types for modeling the Berth Allocation Problem (BAP).
-//! It establishes a strong, type-safe foundation for representing the two primary domains
-//! of the problem: **time** and **space**.
-//!
-//! ## Key Concepts
-//!
-//! - **Time**:
-//!   - `TimePoint<T>`: Represents a specific point in time.
-//!   - `TimeDelta<T>`: Represents a duration or the difference between two time points.
-//!   - `TimeInterval<T>`: A half-open interval `[start, end)` composed of two `TimePoint`s.
-//!
-//! - **Space**:
-//!   - `SpacePosition`: Represents a discrete position along the quay.
-//!   - `SpaceLength`: Represents a length or size, such as that of a vessel.
-//!   - `SpaceInterval`: A half-open interval `[start, end)` representing a contiguous section of the quay.
-//!
-//! - **Cost**:
-//!   - `Cost`: Represents a cost associated with a specific operation or allocation.
-//!
-//! The use of distinct newtypes enforces correctness at compile time—for example,
-//! preventing the addition of two `TimePoint`s.
-//! All types implement standard arithmetic traits with checked operations
-//! to prevent overflow and underflow, ensuring robust calculations.
-
 #[allow(dead_code)]
 use crate::primitives::Interval;
 use num_traits::{

@@ -30,7 +30,7 @@ use dock_alloc_model::model::{
     RequestId, SolutionRef,
 };
 use num_traits::{PrimInt, Signed};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 
 use crate::registry::{
     commit::LedgerOverlayCommit,
@@ -243,8 +243,8 @@ where
     C: PrimInt + Signed,
 {
     ledger: &'l AssignmentLedger<'a, T, C>,
-    staged_commits: BTreeMap<MovableRequestId, BrandedMovableAssignment<'brand, 'a, T, C>>,
-    staged_uncommits: BTreeMap<MovableRequestId, BrandedMovableRequestId<'brand>>,
+    staged_commits: HashMap<MovableRequestId, BrandedMovableAssignment<'brand, 'a, T, C>>,
+    staged_uncommits: HashMap<MovableRequestId, BrandedMovableRequestId<'brand>>,
     _brand: Brand<'brand>,
 }
 
@@ -288,21 +288,23 @@ where
     C: PrimInt + Signed,
 {
     pub fn new(ledger: &'l AssignmentLedger<'a, T, C>) -> Self {
+        let reserve = ledger.problem().movables().len().max(8);
+        let staged_commits = HashMap::with_capacity(reserve);
+        let staged_uncommits = HashMap::with_capacity(reserve.min(64));
         Self {
             ledger,
-            staged_commits: BTreeMap::new(),
-            staged_uncommits: BTreeMap::new(),
+            staged_commits,
+            staged_uncommits,
             _brand: Brand::new(),
         }
     }
 
-    pub fn commit_assignment(
+    #[inline]
+    fn stage_commit_asg(
         &mut self,
-        req: &'a Request<Movable, T, C>,
-        start_time: TimePoint<T>,
-        start_position: SpacePosition,
+        asg: AssignmentRef<'a, Movable, T, C>,
     ) -> Result<BrandedMovableAssignment<'brand, 'a, T, C>, StageError> {
-        let id = req.typed_id();
+        let id = asg.typed_id();
 
         let base_has = self.ledger.committed().contains_key(&id);
         let tombstoned = self.staged_uncommits.contains_key(&id);
@@ -310,19 +312,30 @@ where
             return Err(StageError::AlreadyCommittedInBase(id));
         }
 
-        let asg = AssignmentRef::new(req, start_position, start_time);
-
         if let Some(existing) = self.staged_commits.get(&id) {
             if existing.assignment == asg {
-                return Ok(existing.clone());
+                return Ok(existing.clone()); // idempotent
             }
             return Err(StageError::AlreadyStagedCommit(id));
         }
 
+        // clear tombstone if present (we're replacing it with a new placement)
         self.staged_uncommits.remove(&id);
-        let new_bma = BrandedMovableAssignment::new(asg);
-        self.staged_commits.insert(id, new_bma.clone());
-        Ok(new_bma)
+
+        let bma = BrandedMovableAssignment::new(asg);
+        self.staged_commits.insert(id, bma.clone());
+        Ok(bma)
+    }
+
+    #[inline]
+    pub fn commit_assignment(
+        &mut self,
+        req: &'a Request<Movable, T, C>,
+        start_time: TimePoint<T>,
+        start_position: SpacePosition,
+    ) -> Result<BrandedMovableAssignment<'brand, 'a, T, C>, StageError> {
+        let asg = AssignmentRef::new(req, start_position, start_time);
+        self.stage_commit_asg(asg)
     }
 
     #[inline]
@@ -331,10 +344,10 @@ where
         ma_ref: &'brand BrandedMovableAssignment<'brand, 'a, T, C>,
     ) -> Result<BrandedMovableAssignment<'brand, 'a, T, C>, StageError> {
         let id = ma_ref.id();
+
         if let Some(staged) = self.staged_commits.remove(&id) {
             return Ok(staged);
         }
-
         if self.staged_uncommits.contains_key(&id) {
             return Err(StageError::AlreadyStagedUncommit(id));
         }
@@ -378,7 +391,7 @@ where
     pub fn iter_fixed_handles(&self) -> impl Iterator<Item = BrandedFixedRequestId<'brand>> + '_ {
         self.ledger
             .iter_fixed_handles()
-            .map(|id| BrandedFixedRequestId::new(*id))
+            .map(|id| BrandedFixedRequestId::new(id))
     }
 
     #[inline]
@@ -462,7 +475,7 @@ where
         self.ledger
             .problem()
             .movables()
-            .values()
+            .iter()
             .filter(move |req| {
                 let id = req.typed_id();
                 let base_has = self.ledger.committed().contains_key(&id);
@@ -480,7 +493,7 @@ where
         self.ledger
             .problem()
             .movables()
-            .values()
+            .iter()
             .filter(move |req| {
                 let id = req.typed_id();
                 (self.ledger.committed().contains_key(&id)
