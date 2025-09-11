@@ -1,0 +1,68 @@
+name: Bench (Pages cleanup on branch delete)
+
+on:
+  delete:
+    branches:
+      - "**"
+
+permissions:
+  contents: write #
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Figure out which branch was deleted
+      - name: Determine deleted ref
+        id: ref
+        run: |
+          echo "ref_name=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          # GITHUB_REF_NAME is the short ref for the deleted branch
+
+      # Pull current gh-pages into .site/
+      - name: Pull gh-pages
+        run: |
+          rm -rf .site
+          mkdir -p .site
+          if git ls-remote --exit-code origin gh-pages &>/dev/null; then
+            git fetch origin gh-pages:gh-pages
+            git worktree add --detach ghp-tmp gh-pages
+            rsync -a ghp-tmp/ .site/
+          fi
+
+      # Remove the branch folder and rebuild the index
+      - name: Remove branch folder & rebuild index
+        env:
+          BRANCH_SLUG: ${{ steps.ref.outputs.ref_name }}
+        run: |
+          rm -rf ".site/branches/${BRANCH_SLUG}"
+
+          # Rebuild top-level index
+          cat > .site/index.html <<'HTML'
+          <!doctype html><meta charset="utf-8">
+          <title>Bench Reports</title>
+          <h1>Bench Reports</h1>
+          <ul>
+          HTML
+          for d in .site/branches/*; do
+            [ -d "$d" ] || continue
+            b=$(basename "$d")
+            first=$(find "$d" -maxdepth 2 -type f -path '*/report/index.html' | head -n1)
+            if [ -n "$first" ]; then
+              rel=${first#.site/}
+              echo "<li><a href=\"$rel\">$b</a></li>" >> .site/index.html
+            else
+              echo "<li><a href=\"branches/$b/\">$b</a></li>" >> .site/index.html
+            fi
+          done
+          echo "</ul>" >> .site/index.html
+
+      - name: Push updated site
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: .site
+          publish_branch: gh-pages
+          keep_files: true # keep other branches untouched

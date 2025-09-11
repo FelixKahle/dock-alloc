@@ -1,0 +1,93 @@
+name: Bench (Pages per-branch)
+
+on:
+  push:
+    branches: ["**"] # run on every branch
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: read
+  id-token: write
+
+concurrency:
+  group: "pages-${{ github.ref_name }}"
+  cancel-in-progress: true
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    env:
+      BRANCH_SLUG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build benches
+        run: cargo bench -p dock_alloc_solver --no-run
+
+      - name: Run benches
+        run: |
+          cargo bench -p dock_alloc_solver -- \
+            --measurement-time 8 --sample-count 40
+
+      # Pull existing gh-pages into .site (if any)
+      - name: Pull existing gh-pages
+        shell: bash
+        run: |
+          rm -rf .site
+          mkdir -p .site
+          if git ls-remote --exit-code origin gh-pages &>/dev/null; then
+            git fetch origin gh-pages:gh-pages
+            git worktree add --detach ghp-tmp gh-pages
+            rsync -a ghp-tmp/ .site/
+          fi
+
+      # Overwrite this branch's folder (delete then re-copy fresh results)
+      - name: Stage branch site
+        shell: bash
+        run: |
+          rm -rf ".site/branches/${BRANCH_SLUG}"
+          mkdir -p ".site/branches/${BRANCH_SLUG}"
+          cp -r target/criterion/* ".site/branches/${BRANCH_SLUG}/" || true
+
+      # Rebuild top-level index (links all branches)
+      - name: Build top-level index
+        shell: bash
+        run: |
+          cat > .site/index.html <<'HTML'
+          <!doctype html><meta charset="utf-8">
+          <title>Bench Reports</title>
+          <h1>Bench Reports</h1>
+          <ul>
+          HTML
+          for d in .site/branches/*; do
+            [ -d "$d" ] || continue
+            b=$(basename "$d")
+            first=$(find "$d" -maxdepth 2 -type f -path '*/report/index.html' | head -n1)
+            if [ -n "$first" ]; then
+              echo "<li><a href=\"branches/$b/${first##*/branches/$b/}\">$b</a></li>" >> .site/index.html
+            else
+              echo "<li><a href=\"branches/$b/\">$b</a></li>" >> .site/index.html
+            fi
+          done
+          echo "</ul>" >> .site/index.html
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: .site
+          publish_branch: gh-pages
+          keep_files: true # keep other branches; we already deleted this branch's folder
