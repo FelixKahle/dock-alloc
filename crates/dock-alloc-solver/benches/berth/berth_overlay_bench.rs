@@ -282,6 +282,7 @@ fn bench_overlay_mut_ops(c: &mut Criterion) {
     group.finish();
 }
 
+// Register all benchmarks
 criterion_group!(
     benches,
     bench_is_free,

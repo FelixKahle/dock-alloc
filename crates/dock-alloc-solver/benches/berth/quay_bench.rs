@@ -1,3 +1,24 @@
+// Copyright (c) 2025 Felix Kahle.
+//
+// Permission is hereby granted, free of charge, to any person obtaining
+// a copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to
+// permit persons to whom the Software is furnished to do so, subject to
+// the following conditions:
+//
+// The above copyright notice and this permission notice shall be
+// included in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use dock_alloc_core::space::{SpaceInterval, SpaceLength, SpacePosition};
 use dock_alloc_solver::berth::quay::{
@@ -6,8 +27,6 @@ use dock_alloc_solver::berth::quay::{
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use std::{env, hint::black_box};
-
-// --- utilities ---------------------------------------------------------------
 
 #[inline]
 fn pos(x: usize) -> SpacePosition {
@@ -224,7 +243,6 @@ fn register_mixed<Q: QuayRead + QuayWrite>(
             b.iter_batched(
                 || prepare_fragmented_quay::<Q>(size, init_free, &ops),
                 |mut q| {
-                    // small delta
                     for &Op { kind, a, b } in &ops[0..ops.len().min(256)] {
                         let _ = match kind {
                             OpKind::Free => q.free(si(a, b)),
@@ -254,8 +272,6 @@ fn register_mixed<Q: QuayRead + QuayWrite>(
     group.finish();
 }
 
-// --- small macro to register all four suites for one impl --------------------
-
 macro_rules! register_impl {
     ($c:expr, $name:expr, $ty:ty, $size:expr, $ops:expr, $queries:expr, $iters:expr) => {{
         register_apply::<$ty>($c, $name, $size, $ops);
@@ -264,8 +280,6 @@ macro_rules! register_impl {
         register_mixed::<$ty>($c, $name, $size, $ops, $queries / 2, $iters / 2);
     }};
 }
-
-// --- orchestrator ------------------------------------------------------------
 
 fn quay_benches(c: &mut Criterion) {
     // Defaults (override with env)
@@ -286,7 +300,6 @@ fn quay_benches(c: &mut Criterion) {
         .and_then(|v| v.parse().ok())
         .unwrap_or(5_000usize);
 
-    // Which implementations to run (comma-separated): btreemap,boolvec,bitpacked
     let impls = env::var("QUAY_IMPLS").unwrap_or_else(|_| "btreemap,boolvec,bitpacked".to_string());
     let want_btree = impls.contains("btreemap");
     let want_boolvec = impls.contains("boolvec");
@@ -303,9 +316,6 @@ fn quay_benches(c: &mut Criterion) {
     }
 }
 
-// Single entry point; pass filters to Criterion at runtime:
-//   cargo bench -p dock_alloc_solver --bench quay_bench -- 'quay_apply/.*/init_free'
-// Or pick impls via env:
-//   QUAY_IMPLS=bitpacked cargo bench -p dock_alloc_solver --bench quay_bench
+// Register all benchmarks
 criterion_group!(benches, quay_benches);
 criterion_main!(benches);
