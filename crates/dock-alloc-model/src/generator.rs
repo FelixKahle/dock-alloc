@@ -23,7 +23,7 @@ use crate::model::{Assignment, Fixed, Movable, Problem, ProblemBuilder, Request,
 use dock_alloc_core::{
     cost::Cost,
     space::{SpaceInterval, SpaceLength, SpacePosition},
-    time::{TimeDelta, TimeInterval, TimePoint},
+    time::{TimeDelta, TimePoint},
 };
 use num_traits::{NumCast, PrimInt, SaturatingAdd, SaturatingMul, Signed, ToPrimitive};
 use rand::{Rng, SeedableRng, rngs::SmallRng};
@@ -114,259 +114,36 @@ impl Display for SpaceWindowPolicy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AroundArrivalTimeWindowPolicy<TimePrimitive: PrimInt + Signed> {
-    before: TimeDelta<TimePrimitive>,
-    after: TimeDelta<TimePrimitive>,
-}
-
-impl<TimePrimitive: PrimInt + Signed> AroundArrivalTimeWindowPolicy<TimePrimitive> {
-    pub fn new(before: TimeDelta<TimePrimitive>, after: TimeDelta<TimePrimitive>) -> Self {
-        Self { before, after }
-    }
-
-    #[inline]
-    pub fn before(&self) -> TimeDelta<TimePrimitive> {
-        self.before
-    }
-
-    #[inline]
-    pub fn after(&self) -> TimeDelta<TimePrimitive> {
-        self.after
-    }
-}
-
-impl<TimePrimitive: PrimInt + Signed + Display> Display
-    for AroundArrivalTimeWindowPolicy<TimePrimitive>
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "AroundArrivalTimeWindowPolicy {{ before: {}, after: {} }}",
-            self.before, self.after
-        )
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum TimeWindowPolicy<TimePrimitive: PrimInt + Signed> {
-    FullHorizon,
-    AroundArrival(AroundArrivalTimeWindowPolicy<TimePrimitive>),
-}
-
-impl<TimePrimitive: PrimInt + Signed> TimeWindowPolicy<TimePrimitive> {
-    #[inline]
-    pub fn full_horizon() -> Self {
-        Self::FullHorizon
-    }
-
-    #[inline]
-    pub fn around_arrival(
-        before: TimeDelta<TimePrimitive>,
-        after: TimeDelta<TimePrimitive>,
-    ) -> Self {
-        Self::AroundArrival(AroundArrivalTimeWindowPolicy::new(before, after))
-    }
-}
-
-impl<TimePrimitive: PrimInt + Signed + Display> Display for TimeWindowPolicy<TimePrimitive> {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TimeWindowPolicy::FullHorizon => write!(formatter, "FullHorizon"),
-            TimeWindowPolicy::AroundArrival(policy) => {
-                write!(formatter, "AroundArrival({})", policy)
-            }
-        }
-    }
-}
-
-/// Configuration for generating a synthetic berth-allocation instance.
-///
-/// # Notes
-/// - All **lengths** and **positions** are measured along the quay (in slots/units).
-/// - All **times** are discrete (integer ticks).
-/// - The generator ensures windows fit inside the quay and time horizon.
-/// - When Poisson arrivals don’t produce enough ships within the horizon, the
-///   generator tops up by sampling times uniformly in `[0, horizon]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstanceGenConfig<TimePrimitive, CostPrimitive>
 where
     TimePrimitive: PrimInt + Signed + NumCast + ToPrimitive,
     CostPrimitive: PrimInt + Signed + NumCast + Copy,
 {
-    /// Total usable length of the quay.
-    ///
-    /// All ships must fit inside `[0, quay_length]`. If `quay_length` is
-    /// smaller than `max_ship_length`, building the config will fail.
     quay_length: SpaceLength,
-
-    /// Minimum ship length to sample (inclusive).
-    ///
-    /// The generator draws ship lengths uniformly from
-    /// `[min_ship_length, max_ship_length]`.
-    /// Keep this ≥ 1 and ≤ `max_ship_length`.
     min_ship_length: SpaceLength,
-
-    /// Maximum ship length to sample (inclusive).
-    ///
-    /// Must be ≤ `quay_length`. Larger ships imply longer processing times and
-    /// usually higher costs (see cost ramp below).
     max_ship_length: SpaceLength,
-
-    /// Policy for how to construct **space windows** (allowed berth intervals).
-    ///
-    /// Supported:
-    /// - `FullQuay`: use the entire quay `[0, quay_length]`.
-    /// - `Halfwidth(HalfwidthPolicy)`: window derived from a half-width,
-    ///   either `Fixed(hw)` or `Relative { frac_of_length, min, max }`.
-    ///
-    /// The generator ensures the final window lies within the quay and can hold the ship.
     space_window_policy: SpaceWindowPolicy,
-
-    /// Policy for how to construct **time windows** (allowed time intervals)
-    /// for movable requests.
-    time_window_policy: TimeWindowPolicy<TimePrimitive>,
-
-    /// Number of **movable** requests to generate.
-    ///
-    /// Movables are ships without fixed start times/positions; they get
-    /// **feasible windows** and a target position, but no preassigned berth.
     amount_movables: usize,
-
-    /// Number of **fixed** assignments to generate.
-    ///
-    /// Fixed ships are created as already planned runs with concrete start
-    /// time/position; the generator guarantees they do **not overlap in time**
-    /// and that they sit inside their windows and the quay.
     amount_fixed: usize,
-
-    /// Latest allowed time point for anything in the instance.
-    ///
-    /// All arrivals and windows must lie within `[0, horizon]`.
     horizon: TimePoint<TimePrimitive>,
-
-    /// **Arrival rate** per time unit for the Poisson process (λ).
-    ///
-    /// - If `> 0.0`: interarrival times are `Exp(λ)` and we accumulate them
-    ///   to get arrival times (rounded to integers).
-    /// - If `== 0.0`: we skip Poisson and later fill arrivals uniformly.
-    ///
-    /// Tip: Larger λ → more arrivals early; smaller λ → sparser arrivals.
     lambda_per_time: f64,
-
-    /// Standard deviation (σ) for **processing time** draws (Normal distribution).
-    ///
-    /// The mean μ depends on ship length (see `processing_mu_base/span`).
-    /// We draw `Normal(μ, σ)`, round to integers, then **clamp** to
-    /// `[min_processing, max_processing]` (if max set).
     processing_time_sigma: f64,
-
-    /// **Minimum processing time** allowed after drawing from the Normal.
-    ///
-    /// Any sampled duration below this is clamped up to this value.
     min_processing: TimeDelta<TimePrimitive>,
-
-    /// Optional **maximum processing time** allowed after drawing.
-    ///
-    /// If `Some(max)`, any sampled duration above this is clamped down to `max`.
-    /// If `None`, there is no upper clamp.
     max_processing: Option<TimeDelta<TimePrimitive>>,
-
-    /// Extra slack allowed at the *end* of the time window.
-    ///
-    /// For a request with processing time `p` starting at `s`, the latest end
-    /// is roughly `s + p + time_slack` (but never beyond `horizon`).
-    time_slack: TimeDelta<TimePrimitive>,
-
-    /// Idle time inserted **between fixed assignments**.
-    ///
-    /// Ensures fixed ships don’t overlap in time; after placing a fixed ship
-    /// of duration `p`, the next fixed start is at least `p + fixed_gap` later.
     fixed_gap: TimeDelta<TimePrimitive>,
-
-    /// Base component of the **processing time mean** μ (as time delta).
-    ///
-    /// The mean processing time scales with ship length using:
-    /// `μ(length) = processing_mu_base + processing_mu_span * (length - min) / span`,
-    /// where `span` is clamped to at least `max(1, length_span_epsilon)`.
     processing_mu_base: TimeDelta<TimePrimitive>,
-
-    /// Span component of the **processing time mean** μ.
-    ///
-    /// Larger values make μ grow more strongly from `min_ship_length`
-    /// to `max_ship_length`.
     processing_mu_span: TimeDelta<TimePrimitive>,
-
-    /// Caps how many exponential interarrivals we attempt when generating
-    /// arrivals from the Poisson process.
-    ///
-    /// We try up to `n * arrival_oversample_mult` exponential draws to collect
-    /// `n = amount_fixed + amount_movables` arrivals **within the horizon**.
-    /// If we still don’t have enough, we **top up** with uniform times in
-    /// `[0, horizon]` so the instance always has the requested count.
     arrival_oversample_mult: usize,
-
-    /// Lower bound for `processing_time_sigma`.
-    ///
-    /// Prevents a near-zero σ that would make the Normal almost deterministic.
-    /// The effective σ is `max(processing_time_sigma, processing_sigma_floor)`.
     processing_sigma_floor: f64,
-
-    /// Minimum value used for the **length span** in formulas.
-    ///
-    /// Let `span = max_ship_length - min_ship_length`. To avoid divide-by-zero
-    /// (e.g., when min == max), we internally use
-    /// `effective_span = max(span, max(1, length_span_epsilon))`.
     length_span_epsilon: SpaceLength,
-
-    /// Numerator for the **length-based cost ramp**.
-    ///
-    /// For ship length `len`, with `dx = len - min_ship_length` and
-    /// `span = effective_span`, we compute
-    /// `ramp_factor = (cost_inc_num * dx) / (cost_inc_den * span)`.
-    /// Each base cost is then scaled as `base + base * ramp_factor` (floored).
     cost_inc_num: Cost<CostPrimitive>,
-
-    /// Denominator for the **length-based cost ramp**.
-    ///
-    /// Larger `cost_inc_den` means a gentler ramp; smaller means steeper.
     cost_inc_den: Cost<CostPrimitive>,
-
-    /// Minimum allowed **final cost** after scaling.
-    ///
-    /// After applying the ramp to a base cost, we clamp it up to this floor.
     min_cost_floor: Cost<CostPrimitive>,
-
-    /// How much of any **extra needed window length** to add on the **left**,
-    /// expressed as an integer fraction numerator.
-    ///
-    /// When a window isn’t long enough to contain the ship, we must expand it
-    /// by `need`. We split that as:
-    /// `add_left = floor(need * window_split_left_num / window_split_den)`,
-    /// `add_right = need - add_left`.
     window_split_left_num: SpaceLength,
-
-    /// Denominator for the window split fraction.
-    ///
-    /// Example: for a 50/50 split use `left_num = 1`, `den = 2`.
     window_split_den: SpaceLength,
-
-    /// **Base unit cost** per unit of **delay** (before length ramp).
-    ///
-    /// The final cost for delay grows with ship length according to the
-    /// integer ramp described above (and is floored by `min_cost_floor`).
     base_cost_per_delay: Cost<CostPrimitive>,
-
-    /// **Base unit cost** per unit of **spatial deviation** (before ramp).
-    ///
-    /// Like delay cost, this is scaled by the same length-based ramp and
-    /// then floored by `min_cost_floor`.
     base_cost_per_dev: Cost<CostPrimitive>,
-
-    /// RNG seed for reproducible generation.
-    ///
-    /// Use a fixed value to get the same instance again; change it to get
-    /// different random draws with the same configuration.
     seed: u64,
 }
 
@@ -414,7 +191,6 @@ where
         unord_min_length: SpaceLength,
         unord_max_length: SpaceLength,
         space_window_policy: SpaceWindowPolicy,
-        time_window_policy: TimeWindowPolicy<TimePrimitive>,
         amount_movables: usize,
         amount_fixed: usize,
         horizon: TimePoint<TimePrimitive>,
@@ -422,7 +198,6 @@ where
         processing_time_sigma: f64,
         min_processing: TimeDelta<TimePrimitive>,
         max_processing: Option<TimeDelta<TimePrimitive>>,
-        time_slack: TimeDelta<TimePrimitive>,
         fixed_gap: TimeDelta<TimePrimitive>,
         processing_mu_base: TimeDelta<TimePrimitive>,
         processing_mu_span: TimeDelta<TimePrimitive>,
@@ -456,7 +231,6 @@ where
             min_ship_length,
             max_ship_length,
             space_window_policy,
-            time_window_policy,
             amount_movables,
             amount_fixed,
             horizon,
@@ -464,7 +238,6 @@ where
             processing_time_sigma,
             min_processing,
             max_processing,
-            time_slack,
             fixed_gap,
             processing_mu_base,
             processing_mu_span,
@@ -503,11 +276,6 @@ where
     }
 
     #[inline]
-    pub fn time_window_policy(&self) -> &TimeWindowPolicy<TimePrimitive> {
-        &self.time_window_policy
-    }
-
-    #[inline]
     pub fn amount_movables(&self) -> usize {
         self.amount_movables
     }
@@ -543,11 +311,6 @@ where
     }
 
     #[inline]
-    pub fn time_slack(&self) -> TimeDelta<TimePrimitive> {
-        self.time_slack
-    }
-
-    #[inline]
     pub fn fixed_gap(&self) -> TimeDelta<TimePrimitive> {
         self.fixed_gap
     }
@@ -572,9 +335,9 @@ where
             formatter,
             "InstanceGenConfig {{ \
               quay_length: {}, min_length: {}, max_length: {}, space_window_policy: {}, \
-              time_window_policy: {}, amount_movables: {}, amount_fixed: {}, horizon: {}, \
+              amount_movables: {}, amount_fixed: {}, horizon: {}, \
               lambda_per_time: {:.4}, processing_time_sigma: {:.4}, \
-              min_processing: {}, max_processing: {}, time_slack: {}, fixed_gap: {}, \
+              min_processing: {}, max_processing: {}, fixed_gap: {}, \
               processing_mu_base: {}, processing_mu_span: {}, \
               arrival_oversample_mult: {}, processing_sigma_floor: {:.4}, \
               length_span_epsilon: {}, \
@@ -586,7 +349,6 @@ where
             self.min_ship_length,
             self.max_ship_length,
             self.space_window_policy,
-            self.time_window_policy,
             self.amount_movables,
             self.amount_fixed,
             self.horizon,
@@ -594,7 +356,6 @@ where
             self.processing_time_sigma,
             self.min_processing,
             max_proc_str,
-            self.time_slack,
             self.fixed_gap,
             self.processing_mu_base,
             self.processing_mu_span,
@@ -634,7 +395,6 @@ where
     max_length: Option<SpaceLength>,
     horizon: Option<TimePoint<TimePrimitive>>,
     space_window_policy: Option<SpaceWindowPolicy>,
-    time_window_policy: Option<TimeWindowPolicy<TimePrimitive>>,
     amount_movables: Option<usize>,
     amount_fixed: Option<usize>,
 
@@ -643,7 +403,6 @@ where
     processing_time_sigma: f64,
     min_processing: TimeDelta<TimePrimitive>,
     max_processing: Option<TimeDelta<TimePrimitive>>,
-    time_slack: TimeDelta<TimePrimitive>,
     fixed_gap: TimeDelta<TimePrimitive>,
     processing_mu_base: TimeDelta<TimePrimitive>,
     processing_mu_span: TimeDelta<TimePrimitive>,
@@ -687,7 +446,6 @@ where
             max_length: None,
             horizon: None,
             space_window_policy: None,
-            time_window_policy: None,
             amount_movables: None,
             amount_fixed: None,
 
@@ -696,7 +454,6 @@ where
             processing_time_sigma: 2.5,
             min_processing: to_time_delta(4),
             max_processing: Some(to_time_delta(72)),
-            time_slack: to_time_delta(12),
             fixed_gap: to_time_delta(2),
             processing_mu_base: to_time_delta(10),
             processing_mu_span: to_time_delta(20),
@@ -723,7 +480,6 @@ pub enum InstanceGenConfigBuildError {
     MissingMaxLength,
     MissingHorizon,
     MissingSpaceWindowPolicy,
-    MissingTimeWindowPolicy,
     MissingAmountMovables,
     MissingAmountFixed,
 }
@@ -744,9 +500,6 @@ impl Display for InstanceGenConfigBuildError {
             InstanceGenConfigBuildError::MissingHorizon => write!(formatter, "Missing horizon"),
             InstanceGenConfigBuildError::MissingSpaceWindowPolicy => {
                 write!(formatter, "Missing space_window_policy")
-            }
-            InstanceGenConfigBuildError::MissingTimeWindowPolicy => {
-                write!(formatter, "Missing time_window_policy")
             }
             InstanceGenConfigBuildError::MissingAmountMovables => {
                 write!(formatter, "Missing amount_movables")
@@ -819,22 +572,6 @@ where
     }
 
     #[inline]
-    pub fn time_policy_full_horizon(mut self) -> Self {
-        self.time_window_policy = Some(TimeWindowPolicy::full_horizon());
-        self
-    }
-
-    #[inline]
-    pub fn time_policy_around_arrival(
-        mut self,
-        before: TimeDelta<TimePrimitive>,
-        after: TimeDelta<TimePrimitive>,
-    ) -> Self {
-        self.time_window_policy = Some(TimeWindowPolicy::around_arrival(before, after));
-        self
-    }
-
-    #[inline]
     pub fn amount_movables(mut self, value: usize) -> Self {
         self.amount_movables = Some(value);
         self
@@ -867,12 +604,6 @@ where
     #[inline]
     pub fn max_processing(mut self, value: Option<TimeDelta<TimePrimitive>>) -> Self {
         self.max_processing = value;
-        self
-    }
-
-    #[inline]
-    pub fn time_slack(mut self, value: TimeDelta<TimePrimitive>) -> Self {
-        self.time_slack = value;
         self
     }
 
@@ -983,9 +714,6 @@ where
         let space_window_policy = self
             .space_window_policy
             .ok_or(InstanceGenConfigBuildError::MissingSpaceWindowPolicy)?;
-        let time_window_policy = self
-            .time_window_policy
-            .ok_or(InstanceGenConfigBuildError::MissingTimeWindowPolicy)?;
         let amount_movables = self
             .amount_movables
             .ok_or(InstanceGenConfigBuildError::MissingAmountMovables)?;
@@ -997,7 +725,6 @@ where
             min_length,
             max_length,
             space_window_policy,
-            time_window_policy,
             amount_movables,
             amount_fixed,
             horizon,
@@ -1005,7 +732,6 @@ where
             self.processing_time_sigma,
             self.min_processing,
             self.max_processing,
-            self.time_slack,
             self.fixed_gap,
             self.processing_mu_base,
             self.processing_mu_span,
@@ -1146,7 +872,7 @@ where
                 let rounded_time = current_time_float.round() as i64;
                 let time_value: TimePrimitive = NumCast::from(rounded_time.max(0)).expect("i64->T");
                 let time_point = TimePoint::new(time_value);
-                if time_point <= self.config.horizon {
+                if time_point < self.config.horizon {
                     arrivals.push(time_point);
                     if arrivals.len() >= count {
                         break;
@@ -1160,7 +886,7 @@ where
         while arrivals.len() < count {
             let time_value: TimePrimitive = self
                 .rng
-                .random_range(TimePrimitive::zero()..=self.config.horizon.value());
+                .random_range(TimePrimitive::zero()..self.config.horizon.value());
             arrivals.push(TimePoint::new(time_value));
         }
 
@@ -1228,9 +954,10 @@ where
             clamped_duration_value = self.config.min_processing.value();
         }
         if let Some(max_processing) = self.config.max_processing
-            && clamped_duration_value > max_processing.value() {
-                clamped_duration_value = max_processing.value();
-            }
+            && clamped_duration_value > max_processing.value()
+        {
+            clamped_duration_value = max_processing.value();
+        }
         TimeDelta::new(clamped_duration_value)
     }
 
@@ -1332,23 +1059,6 @@ where
         SpaceInterval::new(window_start, window_end)
     }
 
-    #[inline]
-    fn time_window_containing(
-        &self,
-        start: TimePoint<TimePrimitive>,
-        processing_duration: TimeDelta<TimePrimitive>,
-    ) -> TimeInterval<TimePrimitive> {
-        let mut end = start + processing_duration + self.config.time_slack;
-        if end > self.config.horizon {
-            end = self.config.horizon;
-        }
-        let min_end = start + processing_duration;
-        if end < min_end {
-            end = min_end;
-        }
-        TimeInterval::new(start, end)
-    }
-
     fn space_window_for_movable(
         &self,
         target: SpacePosition,
@@ -1365,31 +1075,6 @@ where
         }
     }
 
-    fn time_window_from_arrival(
-        &self,
-        arrival: TimePoint<TimePrimitive>,
-        processing_duration: TimeDelta<TimePrimitive>,
-    ) -> TimeInterval<TimePrimitive> {
-        match &self.config.time_window_policy {
-            TimeWindowPolicy::FullHorizon => {
-                let latest_start = self.config.horizon.saturating_sub(processing_duration);
-                TimeInterval::new(TimePoint::zero(), latest_start + processing_duration)
-            }
-            TimeWindowPolicy::AroundArrival(policy) => {
-                let start = arrival.saturating_sub(policy.before());
-                let min_end = arrival + processing_duration;
-                let mut end = min_end + policy.after();
-                if end > self.config.horizon {
-                    end = self.config.horizon;
-                }
-                if end < min_end {
-                    end = min_end;
-                }
-                TimeInterval::new(start, end)
-            }
-        }
-    }
-
     fn sample_movable(
         &mut self,
         arrival: TimePoint<TimePrimitive>,
@@ -1398,18 +1083,16 @@ where
         let processing_duration = self.sample_processing(length);
         let target = self.sample_target_position_for_length(length);
         let (cost_per_delay, cost_per_deviation) = self.length_scaled_costs(length);
-
-        let time_window = self.time_window_from_arrival(arrival, processing_duration);
         let space_window = self.space_window_for_movable(target, length);
 
         Request::<Movable, TimePrimitive, CostPrimitive>::new(
             self.fresh_id(),
             length,
+            arrival,
             processing_duration,
             target,
             cost_per_delay,
             cost_per_deviation,
-            time_window,
             space_window,
         )
         .expect("movable: constructed request must be feasible")
@@ -1440,17 +1123,16 @@ where
             } else {
                 target
             };
-
-            let time_window = self.time_window_containing(start, processing_duration);
             let space_window = self.space_window_for_fixed_assignment(start_pos, length);
+
             let request = Request::<Fixed, TimePrimitive, CostPrimitive>::new(
                 self.fresh_id(),
                 length,
+                arrival,
                 processing_duration,
                 target,
                 cost_per_delay,
                 cost_per_deviation,
-                time_window,
                 space_window,
             )
             .expect("fixed: constructed request must be feasible");
@@ -1478,10 +1160,6 @@ mod tests {
             SpaceWindowPolicy::Halfwidth(HalfwidthPolicy::Relative(
                 RelativeSpaceWindowPolicy::new(0.75, SpaceLength::new(60), SpaceLength::new(260)),
             )),
-            TimeWindowPolicy::AroundArrival(AroundArrivalTimeWindowPolicy::new(
-                8.into(),
-                48.into(),
-            )),
             25,
             5,
             TimePoint::new(96),
@@ -1489,7 +1167,6 @@ mod tests {
             2.5,
             TimeDelta::new(4),
             Some(TimeDelta::new(72)),
-            TimeDelta::new(12),
             TimeDelta::new(2),
             TimeDelta::new(10),
             TimeDelta::new(20),
@@ -1532,7 +1209,6 @@ mod tests {
         for request in problem.iter_movable_requests() {
             assert!(request.length() >= config.min_length());
             assert!(request.length() <= config.max_length());
-            assert!(request.feasible_time_window().duration() >= request.processing_duration());
             assert!(request.feasible_space_window().measure() >= request.length());
             let max_start_pos = SpacePosition::new(config.quay_length().value()) - request.length();
             assert!(request.target_position() <= max_start_pos);
@@ -1572,10 +1248,7 @@ mod tests {
             assert!(start_pos <= quay_end);
             assert!(end_pos <= quay_end);
 
-            let time_window = assignment.request().feasible_time_window();
             let space_window = assignment.request().feasible_space_window();
-            assert!(time_window.contains(start_time));
-            assert!(time_window.contains(end_time) || end_time == time_window.end());
             assert!(space_window.contains(start_pos));
             assert!(space_window.contains(end_pos) || end_pos == space_window.end());
 
@@ -1622,7 +1295,6 @@ mod tests {
             SpaceLength::new(80),
             SpaceLength::new(300),
             SpaceWindowPolicy::FullQuay,
-            TimeWindowPolicy::FullHorizon,
             0,
             0,
             TimePoint::new(500),
@@ -1630,7 +1302,6 @@ mod tests {
             10.0,
             TimeDelta::new(20),
             Some(TimeDelta::new(24)),
-            TimeDelta::new(0),
             TimeDelta::new(0),
             TimeDelta::new(10),
             TimeDelta::new(20),
@@ -1662,47 +1333,13 @@ mod tests {
     }
 
     #[test]
-    fn test_time_window_policies() {
-        // Test FullHorizon policy
-        let config_full_horizon = InstanceGenConfig::new(
-            SpaceLength::new(1_000),
-            SpaceLength::new(80),
-            SpaceLength::new(300),
-            SpaceWindowPolicy::FullQuay,
-            TimeWindowPolicy::FullHorizon,
-            5,
-            0,
-            TimePoint::new(100),
-            0.0,
-            2.0,
-            TimeDelta::new(10),
-            Some(TimeDelta::new(20)),
-            TimeDelta::new(5),
-            TimeDelta::new(2),
-            TimeDelta::new(10),
-            TimeDelta::new(5),
-            6,
-            0.1,
-            SpaceLength::new(1),
-            Cost::new(1),
-            Cost::new(1),
-            Cost::new(1_i64),
-            SpaceLength::new(1),
-            SpaceLength::new(2),
-            Cost::new(1_i64),
-            Cost::new(1_i64),
-            123,
-        )
-        .unwrap();
+    fn fixed_assignments_start_no_earlier_than_arrival() {
+        let config = cfg_relative(31415);
+        let mut generator = InstanceGenerator::<Tm, Cm>::new(config.clone());
+        let problem = generator.generate();
 
-        let mut generator_full = InstanceGenerator::<Tm, Cm>::new(config_full_horizon);
-        let problem_full = generator_full.generate();
-
-        for request in problem_full.iter_movable_requests() {
-            let time_window = request.feasible_time_window();
-            assert_eq!(time_window.start(), TimePoint::new(0));
-            // Window should be large enough for the ship to complete
-            assert!(time_window.duration() >= request.processing_duration());
+        for a in problem.iter_fixed_assignments() {
+            assert!(a.start_time() >= a.request().arrival_time());
         }
     }
 }

@@ -24,10 +24,10 @@ use crate::registry::{
 };
 use dock_alloc_core::{
     space::{SpaceInterval, SpacePosition},
-    time::{TimeInterval, TimePoint},
+    time::TimePoint,
 };
 use dock_alloc_model::model::{
-    AnyAssignmentRef, AssignmentOutsideSpaceWindowError, AssignmentOutsideTimeWindowError,
+    AnyAssignmentRef, AssignmentBeforeArrivalTimeError, AssignmentOutsideSpaceWindowError,
     AssignmentRef, Fixed, FixedRequestId, Movable, MovableRequestId, Problem, Request, RequestId,
     SolutionRef,
 };
@@ -76,7 +76,7 @@ impl std::error::Error for LedgerError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LedgerApplyValidationError<T: PrimInt + Signed> {
     Ledger(LedgerError),
-    AssignmentOutsideTimeWindow(AssignmentOutsideTimeWindowError<T>),
+    AssignmentBeforeArrivalTime(AssignmentBeforeArrivalTimeError<T>),
     AssignmentOutsideSpaceWindow(AssignmentOutsideSpaceWindowError),
 }
 
@@ -84,7 +84,7 @@ impl<T: PrimInt + Signed + std::fmt::Display> std::fmt::Display for LedgerApplyV
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LedgerApplyValidationError::Ledger(e) => write!(f, "{e}"),
-            LedgerApplyValidationError::AssignmentOutsideTimeWindow(e) => write!(f, "{e}"),
+            LedgerApplyValidationError::AssignmentBeforeArrivalTime(e) => write!(f, "{e}"),
             LedgerApplyValidationError::AssignmentOutsideSpaceWindow(e) => write!(f, "{e}"),
         }
     }
@@ -118,7 +118,7 @@ where
     }
 
     #[inline]
-    pub fn get_moveable_assignment(
+    pub fn get_movable_assignment(
         &self,
         id: &MovableRequestId,
     ) -> Option<&AssignmentRef<'a, Movable, T, C>> {
@@ -281,19 +281,20 @@ where
         assignment: &AssignmentRef<'a, Movable, T, C>,
     ) -> Result<(), LedgerApplyValidationError<T>> {
         let r = assignment.request();
-
         let t0 = assignment.start_time();
-        let t1 = t0 + r.processing_duration();
-        let t_iv = TimeInterval::new(t0, t1);
-
         let s0 = assignment.start_position();
         let s1 = SpacePosition::new(s0.value() + r.length().value());
         let s_iv = SpaceInterval::new(s0, s1);
 
-        let tw = r.feasible_time_window();
-        if !tw.contains_interval(&t_iv) {
-            return Err(LedgerApplyValidationError::AssignmentOutsideTimeWindow(
-                dock_alloc_model::model::AssignmentOutsideTimeWindowError::new(r.id(), tw, t_iv),
+        let arrival_time = r.arrival_time();
+        let start = assignment.start_time();
+        if start < arrival_time {
+            return Err(LedgerApplyValidationError::AssignmentBeforeArrivalTime(
+                dock_alloc_model::model::AssignmentBeforeArrivalTimeError::new(
+                    r.id(),
+                    arrival_time,
+                    t0,
+                ),
             ));
         }
         let sw = r.feasible_space_window();
@@ -346,7 +347,7 @@ mod ledger_overlay_tests {
     use dock_alloc_core::{
         cost::Cost,
         space::{SpaceInterval, SpaceLength},
-        time::{TimeDelta, TimeInterval},
+        time::TimeDelta,
     };
     use dock_alloc_model::model::{Assignment, ProblemBuilder, RequestId};
 
@@ -356,20 +357,19 @@ mod ledger_overlay_tests {
     fn req_movable_ok(
         id: u64,
         len: usize,
-        proc_t: i64,
         t0: i64,
-        t1: i64,
+        proc_t: i64,
         s0: usize,
         s1: usize,
     ) -> Request<Movable, Tm, Cm> {
         Request::<Movable, _, _>::new(
             RequestId::new(id),
             SpaceLength::new(len),
+            TimePoint::new(t0),
             TimeDelta::new(proc_t),
             SpacePosition::new(s0),
             Cost::new(1),
             Cost::new(1),
-            TimeInterval::new(TimePoint::new(t0), TimePoint::new(t1)),
             SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
         )
         .expect("valid movable request")
@@ -378,20 +378,19 @@ mod ledger_overlay_tests {
     fn req_fixed_ok(
         id: u64,
         len: usize,
-        proc_t: i64,
         t0: i64,
-        t1: i64,
+        proc_t: i64,
         s0: usize,
         s1: usize,
     ) -> Request<Fixed, Tm, Cm> {
         Request::<Fixed, _, _>::new(
             RequestId::new(id),
             SpaceLength::new(len),
+            TimePoint::new(t0),
             TimeDelta::new(proc_t),
             SpacePosition::new(s0),
             Cost::new(1),
             Cost::new(1),
-            TimeInterval::new(TimePoint::new(t0), TimePoint::new(t1)),
             SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
         )
         .expect("valid fixed request")
@@ -406,10 +405,10 @@ mod ledger_overlay_tests {
     #[test]
     fn test_ledger_initial_iterators_ok() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
-        let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 100);
-        let r3 = req_movable_ok(3, 10, 5, 0, 100, 0, 100);
-        let r_fixed = req_fixed_ok(10, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
+        let r2 = req_movable_ok(2, 10, 0, 5, 0, 100);
+        let r3 = req_movable_ok(3, 10, 0, 5, 0, 100);
+        let r_fixed = req_fixed_ok(10, 10, 0, 5, 0, 100);
 
         b.add_movable_request(r1.clone()).unwrap();
         b.add_movable_request(r2.clone()).unwrap();
@@ -444,10 +443,10 @@ mod ledger_overlay_tests {
     #[test]
     fn test_ledger_commit_and_iterators_update() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
-        let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 100);
-        let r3 = req_movable_ok(3, 10, 5, 0, 100, 0, 100);
-        let r_fixed = req_fixed_ok(10, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
+        let r2 = req_movable_ok(2, 10, 0, 5, 0, 100);
+        let r3 = req_movable_ok(3, 10, 0, 5, 0, 100);
+        let r_fixed = req_fixed_ok(10, 10, 0, 5, 0, 100);
 
         b.add_movable_request(r1.clone()).unwrap();
         b.add_movable_request(r2.clone()).unwrap();
@@ -498,8 +497,8 @@ mod ledger_overlay_tests {
     fn test_overlay_assign_then_into_commit_and_apply_updates_ledger() {
         // Problem with two movables; ledger initially empty.
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
-        let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
+        let r2 = req_movable_ok(2, 10, 0, 5, 0, 100);
         b.add_movable_request(r1.clone()).unwrap();
         b.add_movable_request(r2.clone()).unwrap();
 
@@ -530,7 +529,7 @@ mod ledger_overlay_tests {
     fn test_overlay_unassign_then_into_commit_and_apply_updates_ledger() {
         // Problem with one movable; ledger starts with r1 committed.
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
         b.add_movable_request(r1.clone()).unwrap();
         let problem = b.build();
 
@@ -565,7 +564,7 @@ mod ledger_overlay_tests {
     fn test_overlay_move_then_into_commit_and_apply_updates_ledger() {
         // Problem with one movable; ledger starts with r1 committed at (pos=0, time=0).
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
         b.add_movable_request(r1.clone()).unwrap();
         let problem = b.build();
 

@@ -99,35 +99,32 @@ where
         while let Some(t) = events.pop_first() {
             let t_next_opt = events.first().copied();
             let ctx = PlanningContext::new(state.ledger(), state.berth(), problem);
+
             let (plan_opt, departures) = ctx.with_builder(|mut b| {
                 let mut ready_order = b.with_explorer(|ex| {
                     ex.iter_unassigned_requests()
-                        .filter(|req| {
-                            let tw = req.feasible_time_window();
-                            req.request().arrival_time() <= t && tw.contains(t)
-                        })
+                        .filter(|req| req.request().arrival_time() <= t)
                         .map(|req| {
-                            let proc = req.processing_duration();
-                            let tw = req.feasible_time_window();
-                            let latest_start = tw.end() - proc;
-                            let slack = latest_start - t;
-                            let len_key = Reverse(req.length().value());
-                            let arr_key = req.request().arrival_time().value();
-
-                            (req.id(), slack.value(), len_key, arr_key)
+                            (
+                                req.id(),
+                                Reverse(req.length().value()),
+                                req.request().arrival_time().value(),
+                            )
                         })
                         .collect::<Vec<_>>()
                 });
 
-                ready_order
-                    .sort_by_key(|&(_id, slack_v, len_key, arr_key)| (slack_v, len_key, arr_key));
+                // longest first, then earliest arrival
+                ready_order.sort_by_key(|&(_id, len_key, arr_key)| (len_key, arr_key));
                 let mut deps = Vec::new();
 
-                for (rid, _slack_v, _len_key, _arr_key) in ready_order {
+                for (rid, _len_key, _arr_key) in ready_order {
                     let decision = b.with_explorer(|ex| {
                         let req = ex.iter_unassigned_requests().find(|r| r.id() == rid)?;
                         let proc = req.processing_duration();
                         let swin = req.feasible_space_window();
+
+                        // try to place now
                         let twin_now = TimeInterval::new(t, t + proc);
                         let mut best_now_cost = None;
                         let mut best_now_slot = None;
@@ -139,15 +136,15 @@ where
                             let c =
                                 AssignmentRef::new(req.request(), slot.slot().space().start(), t)
                                     .cost();
-
                             if best_now_cost.is_none_or(|b| c < b) {
                                 best_now_cost = Some(c);
                                 best_now_slot = Some(slot);
                             }
                         }
 
+                        // compare with best at next event if it's after arrival
                         let best_later_cost = match t_next_opt {
-                            Some(tn) if req.feasible_time_window().contains(tn) => {
+                            Some(tn) if tn >= req.request().arrival_time() => {
                                 let twin_later = TimeInterval::new(tn, tn + proc);
                                 let mut best = None;
                                 for slot in ex.iter_slots_for_request_within(&req, twin_later, swin)
@@ -226,7 +223,7 @@ mod tests {
         time::TimeDelta,
     };
     use dock_alloc_model::{
-        generator::{InstanceGenConfig, InstanceGenerator, SpaceWindowPolicy, TimeWindowPolicy},
+        generator::{InstanceGenConfig, InstanceGenerator, SpaceWindowPolicy},
         model::{Assignment, Fixed, Movable, ProblemBuilder, Request, RequestId},
     };
 
@@ -236,9 +233,8 @@ mod tests {
     fn req_movable_ok(
         id: u64,
         len: usize,
+        arrival_t: i64,
         proc_t: i64,
-        t0: i64,
-        t1: i64,
         s0: usize,
         s1: usize,
         target: usize,
@@ -246,11 +242,11 @@ mod tests {
         Request::<Movable, _, _>::new(
             RequestId::new(id),
             SpaceLength::new(len),
+            TimePoint::new(arrival_t),
             TimeDelta::new(proc_t),
             SpacePosition::new(target),
             Cost::new(1),
             Cost::new(1),
-            TimeInterval::new(TimePoint::new(t0), TimePoint::new(t1)),
             SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
         )
         .expect("valid movable request")
@@ -259,9 +255,8 @@ mod tests {
     fn req_fixed_ok(
         id: u64,
         len: usize,
+        arrival_t: i64,
         proc_t: i64,
-        t0: i64,
-        t1: i64,
         s0: usize,
         s1: usize,
         target: usize,
@@ -269,11 +264,11 @@ mod tests {
         Request::<Fixed, _, _>::new(
             RequestId::new(id),
             SpaceLength::new(len),
+            TimePoint::new(arrival_t),
             TimeDelta::new(proc_t),
-            SpacePosition::new(target), // target_position
+            SpacePosition::new(target),
             Cost::new(1),
             Cost::new(1),
-            TimeInterval::new(TimePoint::new(t0), TimePoint::new(t1)),
             SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
         )
         .expect("valid fixed request")
@@ -283,8 +278,8 @@ mod tests {
     fn test_greedy_assigns_at_arrival_when_free() {
         // quay has plenty of space; both ships can start at arrival t=0 at their targets
         let mut pb = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(200));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 200, 0);
-        let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 200, 50);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100, 0);
+        let r2 = req_movable_ok(2, 10, 0, 5, 0, 100, 50);
         pb.add_movable_request(r1.clone()).unwrap();
         pb.add_movable_request(r2.clone()).unwrap();
 
@@ -315,7 +310,7 @@ mod tests {
         // Movable arrives at t=0 needs same space; should be placed at t=5.
         let mut pb = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(20));
 
-        let rf = req_fixed_ok(10, 10, 5, 0, 100, 0, 20, 0);
+        let rf = req_fixed_ok(10, 10, 0, 5, 0, 100, 0);
         pb.add_preassigned(Assignment::new(
             rf.clone(),
             SpacePosition::new(0),
@@ -323,7 +318,7 @@ mod tests {
         ))
         .unwrap(); // occupies [space 0..10) x [time 0..5)
 
-        let rm = req_movable_ok(1, 10, 5, 0, 100, 0, 20, 0);
+        let rm = req_movable_ok(1, 10, 0, 5, 0, 100, 0);
         pb.add_movable_request(rm.clone()).unwrap();
 
         let problem = pb.build();
@@ -346,8 +341,8 @@ mod tests {
         // One starts at 0, the other waits until first departs (t=5).
         let mut pb = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(10));
 
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 10, 0);
-        let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 10, 0);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100, 0);
+        let r2 = req_movable_ok(2, 10, 0, 5, 0, 100, 0);
 
         pb.add_movable_request(r1.clone()).unwrap();
         pb.add_movable_request(r2.clone()).unwrap();
@@ -381,8 +376,8 @@ mod tests {
         type Cm = i64;
 
         let mut pb = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(200));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 200, 0);
-        let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 200, 50);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100, 0);
+        let r2 = req_movable_ok(2, 10, 0, 5, 0, 100, 50);
         pb.add_movable_request(r1.clone()).unwrap();
         pb.add_movable_request(r2.clone()).unwrap();
 
@@ -415,11 +410,11 @@ mod tests {
         let r1 = Request::<Movable, _, _>::new(
             RequestId::new(1),
             SpaceLength::new(10),
+            TimePoint::new(0),
             TimeDelta::new(5),
             SpacePosition::new(0),
             Cost::new(1),
             Cost::new(1),
-            TimeInterval::new(TimePoint::new(0), TimePoint::new(5)),
             SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10)),
         )
         .unwrap();
@@ -427,11 +422,11 @@ mod tests {
         let r2 = Request::<Movable, _, _>::new(
             RequestId::new(2),
             SpaceLength::new(10),
+            TimePoint::new(0),
             TimeDelta::new(5),
             SpacePosition::new(0),
             Cost::new(1),
             Cost::new(1),
-            TimeInterval::new(TimePoint::new(0), TimePoint::new(5)),
             SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10)),
         )
         .unwrap();
@@ -445,12 +440,20 @@ mod tests {
         // build_state must error (cannot assign both)
         let state_res: Result<FeasibleSolverState<'_, Tm, Cm, BooleanVecQuay>, _> =
             solver.build_state(&problem);
-        assert!(state_res.is_err(), "expected infeasible, got state OK");
+        assert!(
+            state_res.is_ok(),
+            "expected Ok, got error {:?}",
+            state_res.err()
+        );
 
         // solve must error too (no partial SolutionRef)
         let solve_res =
             <GreedySolver as Solver<i64, i64, BooleanVecQuay>>::solve(&solver, &problem);
-        assert!(solve_res.is_err(), "expected infeasible, got solution OK");
+        assert!(
+            solve_res.is_ok(),
+            "expected Ok, got error {:?}",
+            solve_res.err()
+        );
     }
 
     #[test]
@@ -460,7 +463,6 @@ mod tests {
             SpaceLength::new(80),    // min_length
             SpaceLength::new(300),   // max_length
             SpaceWindowPolicy::FullQuay,
-            TimeWindowPolicy::FullHorizon,
             400,                      // amount_movables
             0,                        // amount_fixed
             TimePoint::new(10000),    // horizon
@@ -468,7 +470,6 @@ mod tests {
             2.5,                      // processing_time_sigma
             TimeDelta::new(4),        // min_processing
             Some(TimeDelta::new(72)), // max_processing
-            TimeDelta::new(12),       // time_slack
             TimeDelta::new(2),        // fixed_gap
             TimeDelta::new(10),       // processing_mu_base
             TimeDelta::new(20),       // processing_mu_span

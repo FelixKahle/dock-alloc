@@ -31,11 +31,11 @@ use crate::{
 };
 use dock_alloc_core::{
     space::{SpaceInterval, SpacePosition},
-    time::TimeInterval,
+    time::{TimeInterval, TimePoint},
 };
 use dock_alloc_model::model::{
-    AssignmentExceedsQuayError, AssignmentOutsideSpaceWindowError,
-    AssignmentOutsideTimeWindowError, AssignmentRef, Kind, Problem, RequestId, SolutionRef,
+    AssignmentBeforeArrivalTimeError, AssignmentExceedsQuayError,
+    AssignmentOutsideSpaceWindowError, AssignmentRef, Kind, Problem, RequestId, SolutionRef,
 };
 use num_traits::{PrimInt, Signed, Zero};
 use std::fmt::{Debug, Display};
@@ -200,16 +200,16 @@ impl<T: PrimInt + Signed + Display + Debug> std::error::Error for SolverStateOve
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FeasibleStateError<T: PrimInt + Signed> {
-    AssignmentOutsideTimeWindow(AssignmentOutsideTimeWindowError<T>),
+    AssignmentBeforeArrivalTime(AssignmentBeforeArrivalTimeError<T>),
     AssignmentOutsideSpaceWindow(AssignmentOutsideSpaceWindowError),
     AssignmentExceedsQuay(AssignmentExceedsQuayError),
     Overlap(SolverStateOverlapError<T>),
     UnassignedRequests(Vec<RequestId>),
 }
 
-impl<T: PrimInt + Signed> From<AssignmentOutsideTimeWindowError<T>> for FeasibleStateError<T> {
-    fn from(value: AssignmentOutsideTimeWindowError<T>) -> Self {
-        FeasibleStateError::AssignmentOutsideTimeWindow(value)
+impl<T: PrimInt + Signed> From<AssignmentBeforeArrivalTimeError<T>> for FeasibleStateError<T> {
+    fn from(value: AssignmentBeforeArrivalTimeError<T>) -> Self {
+        FeasibleStateError::AssignmentBeforeArrivalTime(value)
     }
 }
 
@@ -234,7 +234,7 @@ impl<T: PrimInt + Signed> From<SolverStateOverlapError<T>> for FeasibleStateErro
 impl<T: PrimInt + Signed + Display + Debug> std::fmt::Display for FeasibleStateError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FeasibleStateError::AssignmentOutsideTimeWindow(e) => {
+            FeasibleStateError::AssignmentBeforeArrivalTime(e) => {
                 write!(f, "{}", e)
             }
             FeasibleStateError::AssignmentOutsideSpaceWindow(e) => {
@@ -262,7 +262,7 @@ impl<T: PrimInt + Signed + Display + Debug> std::error::Error for FeasibleStateE
 struct Item<T: PrimInt + Signed> {
     req_id: RequestId,
     rect: SpaceTimeRectangle<T>,
-    feasible_time_window: TimeInterval<T>,
+    arrival_time: TimePoint<T>,
     feasible_space_window: SpaceInterval,
 }
 
@@ -270,13 +270,13 @@ impl<T: PrimInt + Signed> Item<T> {
     fn new(
         req_id: RequestId,
         rect: SpaceTimeRectangle<T>,
-        feasible_time_window: TimeInterval<T>,
+        arrival_time: TimePoint<T>,
         feasible_space_window: SpaceInterval,
     ) -> Self {
         Self {
             req_id,
             rect,
-            feasible_time_window,
+            arrival_time,
             feasible_space_window,
         }
     }
@@ -338,13 +338,11 @@ where
     fn validate(state: &SolverState<'p, T, C, Q>) -> Result<(), FeasibleStateError<T>> {
         let committed = state.ledger().committed();
         let mut missing: Vec<RequestId> = Vec::new();
-
         for &mid in state.problem().movables().keys() {
             if !committed.contains_key(&mid) {
                 missing.push(RequestId::from(mid));
             }
         }
-
         if !missing.is_empty() {
             return Err(FeasibleStateError::UnassignedRequests(missing));
         }
@@ -357,7 +355,7 @@ where
             items.push(Item::new(
                 fa.id(),
                 rect_for_assignment(aref),
-                fa.request().feasible_time_window(),
+                fa.request().arrival_time(),
                 fa.request().feasible_space_window(),
             ));
         }
@@ -367,7 +365,7 @@ where
             items.push(Item::new(
                 ma.id(),
                 rect_for_assignment(aref),
-                ma.request().feasible_time_window(),
+                ma.request().arrival_time(),
                 ma.request().feasible_space_window(),
             ));
         }
@@ -375,9 +373,9 @@ where
         for it in &items {
             let (sint, tint) = it.rect.into_inner();
 
-            if !it.feasible_time_window.contains_interval(&tint) {
-                return Err(FeasibleStateError::AssignmentOutsideTimeWindow(
-                    AssignmentOutsideTimeWindowError::new(it.req_id, it.feasible_time_window, tint),
+            if tint.start() < it.arrival_time {
+                return Err(FeasibleStateError::AssignmentBeforeArrivalTime(
+                    AssignmentBeforeArrivalTimeError::new(it.req_id, it.arrival_time, tint.start()),
                 ));
             }
 
@@ -394,12 +392,12 @@ where
             let quay_bounds = state.berth().quay_space_interval();
             if !quay_bounds.contains_interval(&sint) {
                 return Err(FeasibleStateError::AssignmentExceedsQuay(
-                    AssignmentExceedsQuayError::new(it.req_id, state.problem().quay_length(), sint),
+                    AssignmentExceedsQuayError::new(it.req_id, quay_len, sint),
                 ));
             }
 
             match state.berth().is_occupied(&it.rect) {
-                Ok(true) => {}
+                Ok(true) => {} // good
                 Ok(false) => {
                     return Err(FeasibleStateError::AssignmentOutsideSpaceWindow(
                         AssignmentOutsideSpaceWindowError::new(
@@ -419,18 +417,23 @@ where
 
         let mut order: Vec<usize> = (0..items.len()).collect();
         order.sort_by_key(|&i| items[i].rect.time().start().value());
+
         let mut active: Vec<usize> = Vec::new();
-        let active_sorted_by_end = |v: &mut Vec<usize>| {
+        let sort_active_by_end = |v: &mut Vec<usize>| {
             v.sort_by(|&i, &j| {
-                let ei = items[i].rect.time().end().value();
-                let ej = items[j].rect.time().end().value();
-                ei.cmp(&ej)
-            })
+                items[i]
+                    .rect
+                    .time()
+                    .end()
+                    .value()
+                    .cmp(&items[j].rect.time().end().value())
+            });
         };
 
         for &i in &order {
             let t_start_i = items[i].rect.time().start();
-            active_sorted_by_end(&mut active);
+
+            sort_active_by_end(&mut active);
             let mut keep_from = 0;
             for (k, &idx) in active.iter().enumerate() {
                 if items[idx].rect.time().end() > t_start_i {
@@ -443,17 +446,14 @@ where
             if keep_from > 0 {
                 active.drain(0..keep_from);
             }
+
             for &j in &active {
-                let a = &items[i];
-                let b = &items[j];
-
-                if let Some(inter) = a.rect.intersection(&b.rect) {
-                    let (ra, rb) = if a.req_id.value() <= b.req_id.value() {
-                        (a.req_id, b.req_id)
+                if let Some(inter) = items[i].rect.intersection(&items[j].rect) {
+                    let (ra, rb) = if items[i].req_id.value() <= items[j].req_id.value() {
+                        (items[i].req_id, items[j].req_id)
                     } else {
-                        (b.req_id, a.req_id)
+                        (items[j].req_id, items[i].req_id)
                     };
-
                     return Err(FeasibleStateError::Overlap(SolverStateOverlapError::new(
                         ra, rb, inter,
                     )));

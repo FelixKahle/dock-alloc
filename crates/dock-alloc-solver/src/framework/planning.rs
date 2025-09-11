@@ -337,55 +337,32 @@ where
         self.assignment_overlay.iter_assignments()
     }
 
-    pub fn iter_slots_for_request(
-        &self,
-        request: &BrandedMovableRequest<'boob, 'p, T, C>,
-    ) -> impl Iterator<Item = BrandedFreeSlot<'boob, T>> + '_ {
-        let time_search_window = request.feasible_time_window();
-        let space_search_window = request.feasible_space_window();
-        let processing_duration = request.processing_duration();
-        let length = request.length();
-
-        self.berth_overlay.iter_free_slots(
-            time_search_window,
-            processing_duration,
-            length,
-            space_search_window,
-        )
-    }
-
-    pub fn iter_regions_for_request(
-        &self,
-        request: &BrandedMovableRequest<'alob, 'p, T, C>,
-    ) -> impl Iterator<Item = BrandedFreeRegion<'boob, T>> + '_ {
-        let time_search_window = request.feasible_time_window();
-        let space_search_window = request.feasible_space_window();
-        let processing_duration = request.processing_duration();
-        let length = request.length();
-
-        self.berth_overlay.iter_free_regions(
-            time_search_window,
-            processing_duration,
-            length,
-            space_search_window,
-        )
-    }
-
     pub fn iter_slots_for_request_within(
         &self,
         request: &BrandedMovableRequest<'alob, 'p, T, C>,
         time_search_window: TimeInterval<T>,
         space_search_window: SpaceInterval,
     ) -> impl Iterator<Item = BrandedFreeSlot<'boob, T>> + '_ {
-        let proc = request.processing_duration();
+        let p = request.processing_duration();
         let len = request.length();
-        let t_opt = time_search_window.intersection(&request.feasible_time_window());
+
+        let t0 = request.arrival_time();
+        let clamped_time = {
+            let start = if time_search_window.start() < t0 {
+                t0
+            } else {
+                time_search_window.start()
+            };
+            TimeInterval::new(start, time_search_window.end())
+        };
+
         let s_opt = space_search_window.intersection(&request.feasible_space_window());
 
-        t_opt
+        clamped_time
+            .intersection(&clamped_time) // no-op; keeps type symmetry
             .and_then(|twin| s_opt.map(|swin| (twin, swin)))
-            .filter(|(twin, swin)| twin.duration() >= proc && swin.measure() >= len)
-            .map(move |(twin, swin)| self.berth_overlay.iter_free_slots(twin, proc, len, swin))
+            .filter(|(twin, swin)| twin.duration() >= p && swin.measure() >= len)
+            .map(move |(twin, swin)| self.berth_overlay.iter_free_slots(twin, p, len, swin))
             .into_iter()
             .flatten()
     }
@@ -396,15 +373,26 @@ where
         time_search_window: TimeInterval<T>,
         space_search_window: SpaceInterval,
     ) -> impl Iterator<Item = BrandedFreeRegion<'boob, T>> + '_ {
-        let proc = request.processing_duration();
+        let p = request.processing_duration();
         let len = request.length();
-        let t_opt = time_search_window.intersection(&request.feasible_time_window());
+
+        let t0 = request.arrival_time();
+        let clamped_time = {
+            let start = if time_search_window.start() < t0 {
+                t0
+            } else {
+                time_search_window.start()
+            };
+            TimeInterval::new(start, time_search_window.end())
+        };
+
         let s_opt = space_search_window.intersection(&request.feasible_space_window());
 
-        t_opt
+        clamped_time
+            .intersection(&clamped_time) // no-op; keeps type symmetry
             .and_then(|twin| s_opt.map(|swin| (twin, swin)))
-            .filter(|(twin, swin)| twin.duration() >= proc && swin.measure() >= len)
-            .map(move |(twin, swin)| self.berth_overlay.iter_free_regions(twin, proc, len, swin))
+            .filter(|(twin, swin)| twin.duration() >= p && swin.measure() >= len)
+            .map(move |(twin, swin)| self.berth_overlay.iter_free_regions(twin, p, len, swin))
             .into_iter()
             .flatten()
     }
@@ -530,20 +518,19 @@ mod tests {
     fn req_movable_ok(
         id: u64,
         len: usize,
-        proc_t: i64,
         t0: i64,
-        t1: i64,
+        proc_t: i64,
         s0: usize,
         s1: usize,
     ) -> Request<Movable, Tm, Cm> {
         Request::<Movable, _, _>::new(
             RequestId::new(id),
             SpaceLength::new(len),
+            TimePoint::new(t0),
             TimeDelta::new(proc_t),
             SpacePosition::new(s0),
             Cost::new(1),
             Cost::new(1),
-            TimeInterval::new(TimePoint::new(t0), TimePoint::new(t1)),
             SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
         )
         .expect("valid movable request")
@@ -557,16 +544,8 @@ mod tests {
         let mut pb = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(quay_len));
         for i in 0..n {
             let base = i * 20;
-            pb.add_movable_request(req_movable_ok(
-                (i as u64) + 1,
-                10,
-                5,
-                0,
-                100,
-                base,
-                base + 20,
-            ))
-            .unwrap();
+            pb.add_movable_request(req_movable_ok((i as u64) + 1, 10, 0, 5, base, base + 20))
+                .unwrap();
         }
         let problem = pb.build();
 
@@ -576,6 +555,13 @@ mod tests {
 
         let mut ids: Vec<_> = problem.movables().keys().cloned().collect();
         ids.sort_by_key(|id| id.value());
+
+        // Search the whole quay and a broad time window; Explorer will clamp starts to arrival.
+        let time_window = TimeInterval::new(TimePoint::new(0), TimePoint::new(100));
+        let space_window = SpaceInterval::new(
+            SpacePosition::new(0),
+            SpacePosition::new(problem.quay_length().value()),
+        );
 
         let plans = ids
             .par_iter()
@@ -590,7 +576,7 @@ mod tests {
                         .find(|r| r.id() == *mid)
                         .expect("request visible in overlay");
                     let slot = ex
-                        .iter_slots_for_request(&req)
+                        .iter_slots_for_request_within(&req, time_window, space_window)
                         .next()
                         .expect("at least one feasible slot");
                     (req, slot)

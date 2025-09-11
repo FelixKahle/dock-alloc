@@ -23,7 +23,7 @@ use dock_alloc_core::{
     cost::Cost,
     marker::Brand,
     space::{SpaceInterval, SpaceLength, SpacePosition},
-    time::{TimeDelta, TimeInterval, TimePoint},
+    time::{TimeDelta, TimePoint},
 };
 use dock_alloc_model::model::{
     AnyAssignmentRef, AssignmentRef, Fixed, FixedRequestId, Movable, MovableRequestId, Request,
@@ -143,11 +143,6 @@ where
     #[inline]
     pub fn cost_per_position_deviation(&self) -> Cost<C> {
         self.inner.cost_per_position_deviation()
-    }
-
-    #[inline]
-    pub fn feasible_time_window(&self) -> TimeInterval<T> {
-        self.inner.feasible_time_window()
     }
 
     #[inline]
@@ -556,20 +551,19 @@ mod tests {
     fn req_movable_ok(
         id: u64,
         len: usize,
-        proc_t: i64,
         t0: i64,
-        t1: i64,
+        proc_t: i64,
         s0: usize,
         s1: usize,
     ) -> Request<Movable, Tm, Cm> {
         Request::<Movable, _, _>::new(
             RequestId::new(id),
             SpaceLength::new(len),
+            TimePoint::new(t0),
             TimeDelta::new(proc_t),
             SpacePosition::new(s0),
             Cost::new(1),
             Cost::new(1),
-            TimeInterval::new(TimePoint::new(t0), TimePoint::new(t1)),
             SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
         )
         .expect("valid movable request")
@@ -578,20 +572,19 @@ mod tests {
     fn req_fixed_ok(
         id: u64,
         len: usize,
-        proc_t: i64,
         t0: i64,
-        t1: i64,
+        proc_t: i64,
         s0: usize,
         s1: usize,
     ) -> Request<Fixed, Tm, Cm> {
         Request::<Fixed, _, _>::new(
             RequestId::new(id),
             SpaceLength::new(len),
+            TimePoint::new(t0),
             TimeDelta::new(proc_t),
             SpacePosition::new(s0),
             Cost::new(1),
             Cost::new(1),
-            TimeInterval::new(TimePoint::new(t0), TimePoint::new(t1)),
             SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
         )
         .expect("valid fixed request")
@@ -620,9 +613,9 @@ mod tests {
     #[test]
     fn test_overlay_uncommit_makes_request_unassigned_in_overlay_view() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
-        let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 100);
-        let r_fixed = req_fixed_ok(10, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
+        let r2 = req_movable_ok(2, 10, 0, 5, 0, 100);
+        let r_fixed = req_fixed_ok(10, 10, 0, 5, 0, 100);
 
         b.add_movable_request(r1.clone()).unwrap();
         b.add_movable_request(r2.clone()).unwrap();
@@ -674,9 +667,9 @@ mod tests {
     #[test]
     fn test_overlay_commit_hides_request_from_unassigned_in_overlay_view() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
-        let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 100);
-        let r3 = req_movable_ok(3, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
+        let r2 = req_movable_ok(2, 10, 0, 5, 0, 100);
+        let r3 = req_movable_ok(3, 10, 0, 5, 0, 100);
 
         b.add_movable_request(r1.clone()).unwrap();
         b.add_movable_request(r2.clone()).unwrap();
@@ -714,7 +707,7 @@ mod tests {
     #[test]
     fn test_overlay_move_same_id_tombstones_then_readds_with_new_assignment() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
 
         b.add_movable_request(r1.clone()).unwrap();
 
@@ -761,7 +754,7 @@ mod tests {
     #[test]
     fn test_overlay_commit_conflict_when_already_in_base() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
         b.add_movable_request(r1.clone()).unwrap();
 
         let problem = b.build();
@@ -792,7 +785,7 @@ mod tests {
     #[test]
     fn test_overlay_uncommit_conflict_when_not_in_base() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
         b.add_movable_request(r1.clone()).unwrap();
 
         let problem = b.build();
@@ -811,7 +804,7 @@ mod tests {
     #[test]
     fn test_overlay_double_stage_rules() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
         b.add_movable_request(r1.clone()).unwrap();
 
         let problem = b.build();
@@ -856,9 +849,9 @@ mod tests {
     #[test]
     fn test_into_solution_from_ledger_and_overlay() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
-        let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 100);
-        let r_fixed = req_fixed_ok(10, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
+        let r2 = req_movable_ok(2, 10, 0, 5, 0, 100);
+        let r_fixed = req_fixed_ok(10, 10, 0, 5, 0, 100);
 
         b.add_movable_request(r1.clone()).unwrap();
         b.add_movable_request(r2.clone()).unwrap();
