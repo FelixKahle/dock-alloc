@@ -39,8 +39,7 @@ jobs:
 
       - name: Run benches
         run: |
-          cargo bench -p dock_alloc_solver -- \
-            --measurement-time 8 --sample-count 40
+          cargo bench -p dock_alloc_solver
 
       # Pull existing gh-pages into .site (if any)
       - name: Pull existing gh-pages
