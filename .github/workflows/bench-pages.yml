@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: write # needed to push to gh-pages via peaceiris
   pages: read
   id-token: write
 
@@ -17,8 +17,7 @@ concurrency:
 jobs:
   bench:
     runs-on: ubuntu-latest
-    env:
-      BRANCH_SLUG: ${{ github.ref_name }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -38,45 +37,61 @@ jobs:
         run: cargo bench -p dock_alloc_solver --no-run
 
       - name: Run benches
+        run: cargo bench -p dock_alloc_solver
+
+      # Compute slug exactly like the cleanup job
+      - name: Compute branch slug
+        id: slug
+        shell: bash
         run: |
-          cargo bench -p dock_alloc_solver
+          RAW="${GITHUB_REF_NAME}"
+          SAFE="$(echo "${RAW}" | sed 's#[/ ]#-#g')"
+          echo "safe=${SAFE}" >> "$GITHUB_OUTPUT"
 
       # Pull existing gh-pages into .site (if any)
       - name: Pull existing gh-pages
         shell: bash
         run: |
+          set -e
           rm -rf .site
           mkdir -p .site
           if git ls-remote --exit-code origin gh-pages &>/dev/null; then
             git fetch origin gh-pages:gh-pages
             git worktree add --detach ghp-tmp gh-pages
             rsync -a ghp-tmp/ .site/
+            rm -rf ghp-tmp
+            git worktree prune
           fi
 
       # Overwrite this branch's folder (delete then re-copy fresh results)
       - name: Stage branch site
         shell: bash
         run: |
-          rm -rf ".site/branches/${BRANCH_SLUG}"
-          mkdir -p ".site/branches/${BRANCH_SLUG}"
-          cp -r target/criterion/* ".site/branches/${BRANCH_SLUG}/" || true
+          set -e
+          BRANCH_SLUG_SAFE='${{ steps.slug.outputs.safe }}'
+          rm -rf ".site/branches/${BRANCH_SLUG_SAFE}"
+          mkdir -p ".site/branches/${BRANCH_SLUG_SAFE}"
+          cp -r target/criterion/* ".site/branches/${BRANCH_SLUG_SAFE}/" || true
 
       # Rebuild top-level index (links all branches)
       - name: Build top-level index
         shell: bash
         run: |
+          set -e
           cat > .site/index.html <<'HTML'
           <!doctype html><meta charset="utf-8">
           <title>Bench Reports</title>
           <h1>Bench Reports</h1>
           <ul>
           HTML
+          mkdir -p .site/branches
           for d in .site/branches/*; do
             [ -d "$d" ] || continue
             b=$(basename "$d")
             first=$(find "$d" -maxdepth 2 -type f -path '*/report/index.html' | head -n1)
             if [ -n "$first" ]; then
-              echo "<li><a href=\"branches/$b/${first##*/branches/$b/}\">$b</a></li>" >> .site/index.html
+              rel=${first#.site/}
+              echo "<li><a href=\"$rel\">$b</a></li>" >> .site/index.html
             else
               echo "<li><a href=\"branches/$b/\">$b</a></li>" >> .site/index.html
             fi
@@ -89,4 +104,4 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: .site
           publish_branch: gh-pages
-          keep_files: true # keep other branches; we already deleted this branch's folder
+          keep_files: true # keep other branches; we already replaced only this one
