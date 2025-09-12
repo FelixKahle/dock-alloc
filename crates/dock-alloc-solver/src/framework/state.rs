@@ -69,6 +69,7 @@ impl std::fmt::Display for SolverStateApplyError {
 
 impl std::error::Error for SolverStateApplyError {}
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SolverState<'p, T, C, Q>
 where
     T: PrimInt + Signed,
@@ -146,6 +147,7 @@ where
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FeasibleSolverState<'p, T, C, Q>
 where
     T: PrimInt + Signed,
@@ -504,7 +506,7 @@ where
 {
     pub fn apply_plan_validated(
         &mut self,
-        plan: &'p Plan<T, C>,
+        plan: &Plan<'p, T, C>,
     ) -> Result<(), FeasibleSolverStateApplyError<T>> {
         self.ledger.apply_validated(plan.ledger_commit())?;
         self.berth.apply_validated(plan.berth_commit())?;
@@ -545,7 +547,7 @@ where
     type SolveError;
 
     fn build_state<'p>(
-        &self,
+        &mut self,
         problem: &'p Problem<T, C>,
     ) -> Result<FeasibleSolverState<'p, T, C, Q>, Self::SolveError>;
 }
@@ -559,7 +561,7 @@ where
     type SolveError;
 
     fn solve<'p>(
-        &self,
+        &mut self,
         problem: &'p Problem<T, C>,
     ) -> Result<SolutionRef<'p, T, C>, Self::SolveError>;
 }

@@ -19,7 +19,10 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{
+    BatchSize, BenchmarkGroup, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main,
+    measurement::WallTime,
+};
 use dock_alloc_core::space::{SpaceInterval, SpaceLength, SpacePosition};
 use dock_alloc_solver::berth::quay::{
     BTreeMapQuay, BitPackedQuay, BooleanVecQuay, QuayRead, QuayWrite,
@@ -92,6 +95,7 @@ fn gen_queries(size: usize, n: usize, rng: &mut impl Rng) -> Vec<Query> {
     }
     out
 }
+
 fn gen_iter_reqs(size: usize, n: usize, rng: &mut impl Rng) -> Vec<IterReq> {
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
@@ -120,20 +124,22 @@ fn prepare_fragmented_quay<Q: QuayRead + QuayWrite>(
     q
 }
 
-fn register_apply<Q: QuayRead + QuayWrite>(
-    c: &mut Criterion,
-    name: &str,
+fn register_apply_for_impl<Q: QuayRead + QuayWrite>(
+    group: &mut BenchmarkGroup<'_, WallTime>,
+    impl_label: &str,
     size: usize,
     ops_n: usize,
 ) {
-    let mut group = c.benchmark_group(format!("quay_apply/{name}"));
     group.throughput(Throughput::Elements(ops_n as u64));
 
-    let mut rng = ChaCha8Rng::seed_from_u64(0xA11CE_DEAD_BEEF);
+    let mut rng = ChaCha8Rng::seed_from_u64(0xA11C_EDEA_DBEE_F000);
     let ops = gen_ops(size, ops_n, &mut rng);
 
     for &init_free in &[false, true] {
-        let label = if init_free { "init_free" } else { "init_occ" };
+        let label = format!(
+            "{impl_label}/{}",
+            if init_free { "init_free" } else { "init_occ" }
+        );
         group.bench_function(BenchmarkId::new("apply", label), |b| {
             b.iter_batched(
                 || Q::new(len(size), init_free),
@@ -150,17 +156,15 @@ fn register_apply<Q: QuayRead + QuayWrite>(
             )
         });
     }
-    group.finish();
 }
 
-fn register_queries<Q: QuayRead + QuayWrite>(
-    c: &mut Criterion,
-    name: &str,
+fn register_queries_for_impl<Q: QuayRead + QuayWrite>(
+    group: &mut BenchmarkGroup<'_, WallTime>,
+    impl_label: &str,
     size: usize,
     ops_n: usize,
     queries_n: usize,
 ) {
-    let mut group = c.benchmark_group(format!("quay_queries/{name}"));
     group.throughput(Throughput::Elements(queries_n as u64));
 
     let mut rng = ChaCha8Rng::seed_from_u64(0xFEED_FACE_CAFE_BABE);
@@ -169,7 +173,10 @@ fn register_queries<Q: QuayRead + QuayWrite>(
 
     for &init_free in &[false, true] {
         let quay = prepare_fragmented_quay::<Q>(size, init_free, &ops);
-        let label = if init_free { "init_free" } else { "init_occ" };
+        let label = format!(
+            "{impl_label}/{}",
+            if init_free { "init_free" } else { "init_occ" }
+        );
         group.bench_function(BenchmarkId::new("check", label), |b| {
             b.iter(|| {
                 let mut free_cnt = 0usize;
@@ -186,17 +193,15 @@ fn register_queries<Q: QuayRead + QuayWrite>(
             })
         });
     }
-    group.finish();
 }
 
-fn register_iterate<Q: QuayRead + QuayWrite>(
-    c: &mut Criterion,
-    name: &str,
+fn register_iter_for_impl<Q: QuayRead + QuayWrite>(
+    group: &mut BenchmarkGroup<'_, WallTime>,
+    impl_label: &str,
     size: usize,
     ops_n: usize,
     iters_n: usize,
 ) {
-    let mut group = c.benchmark_group(format!("quay_iter/{name}"));
     group.throughput(Throughput::Elements(iters_n as u64));
 
     let mut rng = ChaCha8Rng::seed_from_u64(0x1234_5678_9ABC_DEF0);
@@ -205,7 +210,10 @@ fn register_iterate<Q: QuayRead + QuayWrite>(
 
     for &init_free in &[false, true] {
         let quay = prepare_fragmented_quay::<Q>(size, init_free, &ops);
-        let label = if init_free { "init_free" } else { "init_occ" };
+        let label = format!(
+            "{impl_label}/{}",
+            if init_free { "init_free" } else { "init_occ" }
+        );
         group.bench_function(BenchmarkId::new("iter", label), |b| {
             b.iter(|| {
                 let mut count = 0usize;
@@ -219,26 +227,26 @@ fn register_iterate<Q: QuayRead + QuayWrite>(
             })
         });
     }
-    group.finish();
 }
 
-fn register_mixed<Q: QuayRead + QuayWrite>(
-    c: &mut Criterion,
-    name: &str,
+fn register_mixed_for_impl<Q: QuayRead + QuayWrite>(
+    group: &mut BenchmarkGroup<'_, WallTime>,
+    impl_label: &str,
     size: usize,
     ops_n: usize,
     queries_n: usize,
     iters_n: usize,
 ) {
-    let mut group = c.benchmark_group(format!("quay_mixed/{name}"));
-
     let mut rng = ChaCha8Rng::seed_from_u64(0xD00D_F00D_F0F0);
     let ops = gen_ops(size, ops_n, &mut rng);
     let queries = gen_queries(size, queries_n, &mut rng);
     let iters = gen_iter_reqs(size, iters_n, &mut rng);
 
     for &init_free in &[false, true] {
-        let label = if init_free { "init_free" } else { "init_occ" };
+        let label = format!(
+            "{impl_label}/{}",
+            if init_free { "init_free" } else { "init_occ" }
+        );
         group.bench_function(BenchmarkId::new("mixed", label), |b| {
             b.iter_batched(
                 || prepare_fragmented_quay::<Q>(size, init_free, &ops),
@@ -250,7 +258,7 @@ fn register_mixed<Q: QuayRead + QuayWrite>(
                         };
                     }
                     let mut acc = 0usize;
-                    for &Query { a, b } in &queries[0..queries.len().min(1000)] {
+                    for &Query { a, b } in &queries[0..queries.len().min(1_000)] {
                         if q.check_free(si(a, b)).unwrap() {
                             acc ^= 1;
                         }
@@ -269,53 +277,142 @@ fn register_mixed<Q: QuayRead + QuayWrite>(
             )
         });
     }
+}
+
+#[derive(Clone, Copy)]
+struct Impls {
+    btree: bool,
+    boolvec: bool,
+    bitpack: bool,
+}
+impl Impls {
+    fn from_env() -> Self {
+        let s = env::var("QUAY_IMPLS").unwrap_or_else(|_| "btreemap,boolvec,bitpacked".to_string());
+        Self {
+            btree: s.contains("btreemap"),
+            boolvec: s.contains("boolvec"),
+            bitpack: s.contains("bitpacked"),
+        }
+    }
+}
+
+fn register_apply_all(c: &mut Criterion, size: usize, ops_n: usize, impls: Impls) {
+    let mut group = c.benchmark_group("quay_apply");
+    if impls.btree {
+        register_apply_for_impl::<BTreeMapQuay>(&mut group, "btreemap", size, ops_n);
+    }
+    if impls.boolvec {
+        register_apply_for_impl::<BooleanVecQuay>(&mut group, "boolvec", size, ops_n);
+    }
+    if impls.bitpack {
+        register_apply_for_impl::<BitPackedQuay>(&mut group, "bitpacked", size, ops_n);
+    }
     group.finish();
 }
 
-macro_rules! register_impl {
-    ($c:expr, $name:expr, $ty:ty, $size:expr, $ops:expr, $queries:expr, $iters:expr) => {{
-        register_apply::<$ty>($c, $name, $size, $ops);
-        register_queries::<$ty>($c, $name, $size, $ops, $queries);
-        register_iterate::<$ty>($c, $name, $size * 2, $ops * 2, $iters); // iterate uses a larger size, like before
-        register_mixed::<$ty>($c, $name, $size, $ops, $queries / 2, $iters / 2);
-    }};
+fn register_queries_all(
+    c: &mut Criterion,
+    size: usize,
+    ops_n: usize,
+    queries_n: usize,
+    impls: Impls,
+) {
+    let mut group = c.benchmark_group("quay_queries");
+    if impls.btree {
+        register_queries_for_impl::<BTreeMapQuay>(&mut group, "btreemap", size, ops_n, queries_n);
+    }
+    if impls.boolvec {
+        register_queries_for_impl::<BooleanVecQuay>(&mut group, "boolvec", size, ops_n, queries_n);
+    }
+    if impls.bitpack {
+        register_queries_for_impl::<BitPackedQuay>(&mut group, "bitpacked", size, ops_n, queries_n);
+    }
+    group.finish();
+}
+
+fn register_iter_all(c: &mut Criterion, size: usize, ops_n: usize, iters_n: usize, impls: Impls) {
+    // iterate uses a larger arena like before
+    let size2 = size * 2;
+    let ops2 = ops_n * 2;
+    let mut group = c.benchmark_group("quay_iter");
+    if impls.btree {
+        register_iter_for_impl::<BTreeMapQuay>(&mut group, "btreemap", size2, ops2, iters_n);
+    }
+    if impls.boolvec {
+        register_iter_for_impl::<BooleanVecQuay>(&mut group, "boolvec", size2, ops2, iters_n);
+    }
+    if impls.bitpack {
+        register_iter_for_impl::<BitPackedQuay>(&mut group, "bitpacked", size2, ops2, iters_n);
+    }
+    group.finish();
+}
+
+fn register_mixed_all(
+    c: &mut Criterion,
+    size: usize,
+    ops_n: usize,
+    queries_n: usize,
+    iters_n: usize,
+    impls: Impls,
+) {
+    let mut group = c.benchmark_group("quay_mixed");
+    if impls.btree {
+        register_mixed_for_impl::<BTreeMapQuay>(
+            &mut group,
+            "btreemap",
+            size,
+            ops_n,
+            queries_n / 2,
+            iters_n / 2,
+        );
+    }
+    if impls.boolvec {
+        register_mixed_for_impl::<BooleanVecQuay>(
+            &mut group,
+            "boolvec",
+            size,
+            ops_n,
+            queries_n / 2,
+            iters_n / 2,
+        );
+    }
+    if impls.bitpack {
+        register_mixed_for_impl::<BitPackedQuay>(
+            &mut group,
+            "bitpacked",
+            size,
+            ops_n,
+            queries_n / 2,
+            iters_n / 2,
+        );
+    }
+    group.finish();
 }
 
 fn quay_benches(c: &mut Criterion) {
-    // Defaults (override with env)
-    let size = env::var("QUAY_SIZE")
+    let size: usize = env::var("QUAY_SIZE")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(4096usize);
-    let ops_n = env::var("QUAY_OPS")
+        .unwrap_or(4096);
+    let ops_n: usize = env::var("QUAY_OPS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(6_000usize);
-    let queries = env::var("QUAY_QUERIES")
+        .unwrap_or(6_000);
+    let queries_n: usize = env::var("QUAY_QUERIES")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(10_000usize);
-    let iters_n = env::var("QUAY_ITERS")
+        .unwrap_or(10_000);
+    let iters_n: usize = env::var("QUAY_ITERS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(5_000usize);
+        .unwrap_or(5_000);
+    let impls = Impls::from_env();
 
-    let impls = env::var("QUAY_IMPLS").unwrap_or_else(|_| "btreemap,boolvec,bitpacked".to_string());
-    let want_btree = impls.contains("btreemap");
-    let want_boolvec = impls.contains("boolvec");
-    let want_bitpack = impls.contains("bitpacked");
-
-    if want_btree {
-        register_impl!(c, "btreemap", BTreeMapQuay, size, ops_n, queries, iters_n);
-    }
-    if want_boolvec {
-        register_impl!(c, "boolvec", BooleanVecQuay, size, ops_n, queries, iters_n);
-    }
-    if want_bitpack {
-        register_impl!(c, "bitpacked", BitPackedQuay, size, ops_n, queries, iters_n);
-    }
+    register_apply_all(c, size, ops_n, impls);
+    register_queries_all(c, size, ops_n, queries_n, impls);
+    register_iter_all(c, size, ops_n, iters_n, impls);
+    register_mixed_all(c, size, ops_n, queries_n, iters_n, impls);
 }
 
-// Register all benchmarks using groups.
 criterion_group!(benches, quay_benches);
 criterion_main!(benches);

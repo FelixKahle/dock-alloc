@@ -152,6 +152,7 @@ where
     /// - `FullQuay`: anywhere along the quay.
     /// - `Halfwidth`: window centered around a target (movables) or containing the fixed run,
     ///   with half-width either fixed or **relative to ship length** (longer ships → wider windows).
+    ///
     /// If the window is too narrow to fit the ship, it is expanded within quay bounds.
     space_window_policy: SpaceWindowPolicy,
 
@@ -283,11 +284,11 @@ where
             )),
 
             // Mix
-            amount_movables: 60,
+            amount_movables: 200,
             amount_fixed: 10,
 
             // Horizon: 3 days
-            horizon: tp::<T>(4_320),
+            horizon: tp::<T>(4_320_00),
 
             // Arrivals: ≈ 1 ship/hour (Poisson → bursts + gaps)
             lambda_per_time: 0.017,

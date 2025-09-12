@@ -24,17 +24,19 @@ use crate::{
     framework::planning::{Plan, PlanningContext},
 };
 use num_traits::{PrimInt, Signed};
+use rand::rngs::StdRng;
 
-pub trait Operator {
-    const NAME: &'static str;
+pub trait Operator: Send + Sync {
+    type Time: PrimInt + Signed;
+    type Cost: PrimInt + Signed;
+    type Quay: QuayRead;
 
-    fn propose<'p, 'al, 'bo, T, C, Q>(
+    fn name(&self) -> &'static str;
+
+    fn propose<'p, 'al, 'bo>(
         &self,
         iteration: usize,
-        ctx: PlanningContext<'p, 'al, 'bo, T, C, Q>,
-    ) -> Plan<'p, T, C>
-    where
-        T: PrimInt + Signed,
-        C: PrimInt + Signed,
-        Q: QuayRead;
+        rng: &mut StdRng,
+        ctx: PlanningContext<'p, 'al, 'bo, Self::Time, Self::Cost, Self::Quay>,
+    ) -> Plan<'p, Self::Time, Self::Cost>;
 }

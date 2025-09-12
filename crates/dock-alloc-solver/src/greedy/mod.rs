@@ -66,7 +66,7 @@ where
     type SolveError = GreedySolverError;
 
     fn solve<'p>(
-        &self,
+        &mut self,
         problem: &'p Problem<T, C>,
     ) -> Result<SolutionRef<'p, T, C>, Self::SolveError> {
         let state: FeasibleSolverState<'p, T, C, Q> = self.build_state(problem)?;
@@ -83,7 +83,7 @@ where
     type SolveError = GreedySolverError;
 
     fn build_state<'p>(
-        &self,
+        &mut self,
         problem: &'p Problem<T, C>,
     ) -> Result<FeasibleSolverState<'p, T, C, Q>, Self::SolveError> {
         let mut state: SolverState<'p, T, C, Q> = SolverState::try_from(problem)?;
@@ -283,7 +283,7 @@ mod tests {
 
         let problem = pb.build();
 
-        let solver = GreedySolver::new();
+        let mut solver = GreedySolver::new();
         let state: FeasibleSolverState<'_, Tm, Cm, BooleanVecQuay> =
             solver.build_state(&problem).unwrap();
 
@@ -320,7 +320,7 @@ mod tests {
         pb.add_movable_request(rm.clone()).unwrap();
 
         let problem = pb.build();
-        let solver = GreedySolver::new();
+        let mut solver = GreedySolver::new();
         let state: FeasibleSolverState<'_, Tm, Cm, BooleanVecQuay> =
             solver.build_state(&problem).unwrap();
 
@@ -346,7 +346,7 @@ mod tests {
         pb.add_movable_request(r2.clone()).unwrap();
 
         let problem = pb.build();
-        let solver = GreedySolver::new();
+        let mut solver = GreedySolver::new();
         let state: FeasibleSolverState<'_, Tm, Cm, BooleanVecQuay> =
             solver.build_state(&problem).unwrap();
 
@@ -380,9 +380,9 @@ mod tests {
         pb.add_movable_request(r2.clone()).unwrap();
 
         let problem = pb.build();
-        let solver = GreedySolver::new();
+        let mut solver = GreedySolver::new();
 
-        let sol = <GreedySolver as Solver<i64, i64, BooleanVecQuay>>::solve(&solver, &problem)
+        let sol = <GreedySolver as Solver<i64, i64, BooleanVecQuay>>::solve(&mut solver, &problem)
             .expect("solve");
 
         assert_eq!(sol.decisions().len(), 2);
@@ -433,7 +433,7 @@ mod tests {
         pb.add_movable_request(r2).unwrap();
         let problem = pb.build();
 
-        let solver = GreedySolver::new();
+        let mut solver = GreedySolver::new();
 
         // build_state must error (cannot assign both)
         let state_res: Result<FeasibleSolverState<'_, Tm, Cm, BooleanVecQuay>, _> =
@@ -446,7 +446,7 @@ mod tests {
 
         // solve must error too (no partial SolutionRef)
         let solve_res =
-            <GreedySolver as Solver<i64, i64, BooleanVecQuay>>::solve(&solver, &problem);
+            <GreedySolver as Solver<i64, i64, BooleanVecQuay>>::solve(&mut solver, &problem);
         assert!(
             solve_res.is_ok(),
             "expected Ok, got error {:?}",
@@ -459,7 +459,7 @@ mod tests {
         let mut generator: InstanceGenerator<_, _> = InstanceGenConfig::default().into();
         let problem = generator.generate();
 
-        let solver = GreedySolver::new();
+        let mut solver = GreedySolver::new();
         let state: FeasibleSolverState<'_, Tm, Cm, BTreeMapQuay> =
             solver.build_state(&problem).unwrap();
         assert_eq!(

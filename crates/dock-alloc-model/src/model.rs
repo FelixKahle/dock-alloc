@@ -624,6 +624,14 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
             AnyRequest::Fixed(r) => r.feasible_space_window(),
         }
     }
+
+    pub fn is_movable(&self) -> bool {
+        matches!(self, AnyRequest::Movable(_))
+    }
+
+    pub fn is_fixed(&self) -> bool {
+        matches!(self, AnyRequest::Fixed(_))
+    }
 }
 
 impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Request<Movable, T, C>> for AnyRequest<T, C> {
@@ -714,6 +722,14 @@ where
             AnyRequestRef::Movable(r) => r.feasible_space_window(),
             AnyRequestRef::Fixed(r) => r.feasible_space_window(),
         }
+    }
+
+    pub fn is_movable(&self) -> bool {
+        matches!(self, AnyRequestRef::Movable(_))
+    }
+
+    pub fn is_fixed(&self) -> bool {
+        matches!(self, AnyRequestRef::Fixed(_))
     }
 }
 

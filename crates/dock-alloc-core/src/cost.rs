@@ -22,7 +22,7 @@
 use std::{
     fmt::Display,
     iter::Sum,
-    ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign},
+    ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
 use num_traits::{
@@ -102,6 +102,18 @@ impl<T: Copy> Cost<T> {
 impl<T: Copy + Display> Display for Cost<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Cost({})", self.0)
+    }
+}
+
+impl<T> Neg for Cost<T>
+where
+    T: Copy + CheckedSub<Output = T> + Zero,
+{
+    type Output = Cost<T>;
+
+    #[inline]
+    fn neg(self) -> Self::Output {
+        Cost(T::zero().checked_sub(&self.0).expect("underflow in -Cost"))
     }
 }
 

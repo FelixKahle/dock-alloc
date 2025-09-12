@@ -341,7 +341,7 @@ where
     #[inline]
     pub fn uncommit_assignment(
         &mut self,
-        ma_ref: &'brand BrandedMovableAssignment<'brand, 'a, T, C>,
+        ma_ref: &BrandedMovableAssignment<'brand, 'a, T, C>,
     ) -> Result<BrandedMovableAssignment<'brand, 'a, T, C>, StageError> {
         let id = ma_ref.id();
 
@@ -391,7 +391,7 @@ where
     pub fn iter_fixed_handles(&self) -> impl Iterator<Item = BrandedFixedRequestId<'brand>> + '_ {
         self.ledger
             .iter_fixed_handles()
-            .map(|id| BrandedFixedRequestId::new(id))
+            .map(BrandedFixedRequestId::new)
     }
 
     #[inline]

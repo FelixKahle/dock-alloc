@@ -39,7 +39,7 @@ use crate::{
 };
 use dock_alloc_core::{
     cost::Cost,
-    space::{SpaceInterval, SpaceLength, SpacePosition},
+    space::{SpaceInterval, SpacePosition},
     time::{TimeDelta, TimeInterval, TimePoint},
 };
 use dock_alloc_model::model::{AnyAssignmentRef, AssignmentRef, Fixed, Kind, Problem};
@@ -155,7 +155,7 @@ where
 {
     delta_cost: Cost<C>,
     delta_wait: TimeDelta<T>,
-    delta_dev: SpaceLength,
+    delta_dev: i64,
 }
 
 impl<T, C> PlanEval<T, C>
@@ -164,7 +164,7 @@ where
     C: PrimInt + Signed,
 {
     #[inline]
-    fn new(delta_cost: Cost<C>, delta_wait: TimeDelta<T>, delta_dev: SpaceLength) -> Self {
+    fn new(delta_cost: Cost<C>, delta_wait: TimeDelta<T>, delta_dev: i64) -> Self {
         Self {
             delta_cost,
             delta_wait,
@@ -183,7 +183,7 @@ where
     }
 
     #[inline]
-    pub fn delta_dev(&self) -> SpaceLength {
+    pub fn delta_dev(&self) -> i64 {
         self.delta_dev
     }
 }
@@ -215,6 +215,10 @@ where
             berth_commit,
             ledger_commit,
         }
+    }
+
+    pub fn eval(&self) -> &PlanEval<T, C> {
+        &self.eval
     }
 
     pub fn berth_commit(&self) -> &BerthOverlayCommit<T> {
@@ -451,7 +455,7 @@ where
 
     pub fn propose_unassign(
         &mut self,
-        assignment: &'alob BrandedMovableAssignment<'alob, 'p, T, C>,
+        assignment: &BrandedMovableAssignment<'alob, 'p, T, C>,
     ) -> Result<BrandedFreeRegion<'boob, T>, ProposeError<T>> {
         let a = assignment.assignment();
         let rect: SpaceTimeRectangle<T> = a.into();
@@ -521,27 +525,25 @@ where
 
         let mut delta_cost = Cost::<C>::new(C::zero());
         let mut delta_wait = TimeDelta::<T>::new(T::zero());
-        let mut delta_dev = SpaceLength::new(0);
+        let mut delta_dev: i64 = 0;
 
         for op in ledger_commit.operations() {
             match op {
                 Operation::Assign(assign) => {
                     let c = assign.assignment().cost();
                     let w = assign.assignment().waiting_time();
-                    let d = assign.assignment().position_deviation();
-
+                    let d = assign.assignment().position_deviation(); // SpaceLength
                     delta_cost += c;
                     delta_wait += w;
-                    delta_dev += d;
+                    delta_dev += d.value() as i64;
                 }
                 Operation::Unassign(unassign) => {
                     let c = unassign.assignment().cost();
                     let w = unassign.assignment().waiting_time();
-                    let d = unassign.assignment().position_deviation();
-
+                    let d = unassign.assignment().position_deviation(); // SpaceLength
                     delta_cost -= c;
                     delta_wait -= w;
-                    delta_dev -= d;
+                    delta_dev -= d.value() as i64; // now safe
                 }
             }
         }
@@ -555,7 +557,10 @@ where
 mod tests {
     use super::*;
     use crate::berth::prelude::BooleanVecQuay;
-    use dock_alloc_core::{space::SpacePosition, time::TimePoint};
+    use dock_alloc_core::{
+        space::{SpaceLength, SpacePosition},
+        time::TimePoint,
+    };
     use dock_alloc_model::model::{Movable, ProblemBuilder, Request, RequestId};
     use rayon::prelude::*;
 
