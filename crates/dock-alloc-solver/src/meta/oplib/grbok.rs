@@ -56,7 +56,7 @@ where
     }
 }
 
-/// Choose `k` based on congestion ρ and instance size; set `horizon_end` to latest completion.
+/// Adaptive K: size- and congestion-aware; horizon from stats.
 impl<T, C, Q> From<&Problem<T, C>> for GreedyRelocateBestOfKOperator<T, C, Q>
 where
     T: SolverVariable,
@@ -66,23 +66,19 @@ where
     fn from(p: &Problem<T, C>) -> Self {
         let s = p.stats();
         let rho = s.rho();
-        let mov = p.movable_count();
+        let mov = s.movable_count().max(1);
 
-        // Base k by congestion; add a small size-aware bump; clamp to a sane range.
-        let base = if rho < 0.6 {
-            48
-        } else if rho < 0.9 {
-            64
-        } else if rho < 1.2 {
-            96
-        } else {
-            128
-        };
-        let size = 16 + mov / 6;
-        let k = (base + size).clamp(16, 512);
+        // Base ~ O(log n) with a small size bump; congestion multiplies effort.
+        let base = (mov.ilog2() as usize) + 8;
+        let size_bump = (mov / 32).min(32);
+        let cong_mult = 1.0 + 0.5 * rho; // ρ ∈ [0,2] → [1.0, 2.0]
+        let k = (((base + size_bump) as f64) * cong_mult).round() as usize;
+
+        // Size-aware ceiling.
+        let ceiling = (48 + (mov.ilog2() as usize) * 32).clamp(64, 512);
 
         Self {
-            k,
+            k: k.clamp(24, ceiling),
             horizon_end: s.latest_completion_time(),
             _phantom: core::marker::PhantomData,
         }
@@ -113,23 +109,28 @@ where
         ctx.with_builder(|mut b| {
             let mut tx = b.begin();
 
-            let Some(cur) = tx.with_explorer(|ex| ex.iter_movable_assignments().next()) else {
+            // Pick the movable with highest current assignment cost (greater potential gain).
+            let Some(cur) = tx.with_explorer(|ex| {
+                ex.iter_movable_assignments()
+                    .max_by_key(|m| m.assignment().cost())
+            }) else {
                 return b.build();
             };
 
             let req = cur.branded_request();
             let old_cost = cur.assignment().cost();
 
-            // Typed global time window and request-constrained windows.
+            // Shared dynamic horizon + request windows (typed).
             let gw = global_time_window(&tx, self.horizon_end);
             let (t_w, s_w) = req_windows(&req, gw, req.feasible_space_window());
 
-            // Best improving among first k candidates (domain-level cost comparisons).
-            let best = best_improving_slot(&tx, &req, t_w, s_w, old_cost, self.k);
-            let Some((_d, slot)) = best else {
+            // Best improving among first k candidates (domain-typed cost).
+            let Some((_delta, slot)) = best_improving_slot(&tx, &req, t_w, s_w, old_cost, self.k)
+            else {
                 return b.build();
             };
 
+            // Apply move (no borrow conflicts: mutations after explorer borrows end).
             if tx.propose_unassign(&cur).is_err() {
                 return b.build();
             }
@@ -137,6 +138,7 @@ where
                 return b.build();
             }
 
+            // Commit only if everything remains fully assigned.
             if tx.with_explorer(|ex| ex.iter_unassigned_requests().next().is_none()) {
                 tx.commit();
             }

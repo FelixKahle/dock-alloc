@@ -17,7 +17,7 @@
 // NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
 // LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-// THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use crate::{
     berth::quay::QuayRead,
@@ -30,7 +30,7 @@ use dock_alloc_core::{
     time::{TimeDelta, TimeInterval},
 };
 use dock_alloc_model::model::Problem;
-use num_traits::FromPrimitive;
+use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 use tracing::instrument;
 
@@ -64,7 +64,7 @@ where
 
 impl<T, C, Q> From<&Problem<T, C>> for MultiRelocateShakerOperator<T, C, Q>
 where
-    T: SolverVariable + FromPrimitive,
+    T: SolverVariable,
     C: SolverVariable,
     Q: QuayRead,
 {
@@ -77,22 +77,25 @@ where
         let rho = s.rho();
         let mov = p.movable_count();
 
-        // spatial radius: ~2×p90, clamped into [p50, quay_len]
+        // Spatial radius: ~2×p90, clamped to [p50, quay_len]
         let space_base = p90_len * 2;
         let local_space_radius = space_base.clamp(p50_len, quay_len);
 
-        // time radius: (~2×p50) * congestion factor, all in typed units
-        let time_scale_usize = if rho < 0.9 {
+        // Time radius: (~2×p50) .. (~4×p50) depending on congestion.
+        // Scale without requiring a Mul impl for TimeDelta<T>.
+        let time_scale = if rho < 0.9 {
             2
         } else if rho < 1.2 {
             3
         } else {
             4
         };
-        let time_scale_t: T = T::from_usize(time_scale_usize).unwrap_or_else(T::one);
-        let local_time_radius = p50_proc * time_scale_t;
+        let mut local_time_radius = TimeDelta::new(T::zero());
+        for _ in 0..time_scale {
+            local_time_radius += p50_proc;
+        }
 
-        // relocations: small; bump with ρ and instance size
+        // Relocations: small base, bump by congestion and size (capped).
         let base = if rho < 0.6 {
             2
         } else if rho < 0.9 {
@@ -131,10 +134,11 @@ where
     fn propose<'p, 'al, 'bo>(
         &self,
         _: usize,
-        _: &mut ChaCha8Rng,
+        rng: &mut ChaCha8Rng,
         ctx: PlanningContext<'p, 'al, 'bo, T, C, Q>,
     ) -> Plan<'p, T, C> {
         ctx.with_builder(|mut b| {
+            // Quay span [0, quay_len)
             let quay_len = b.problem().quay_length();
             let quay_span =
                 SpaceInterval::new(SpacePosition::zero(), SpacePosition::zero() + quay_len);
@@ -142,12 +146,35 @@ where
             let mut tx = b.begin();
             let mut done = 0usize;
 
-            // Iterate one-at-a-time to avoid holding an immutable borrow
-            while done < self.relocations {
-                // pick the next movable (or stop)
-                let maybe_cur = tx.with_explorer(|ex| ex.iter_movable_assignments().next());
-                let Some(cur) = maybe_cur else {
+            // Count once to set an upper bound on attempts this call.
+            let n0 = tx.with_explorer(|ex| ex.iter_movable_assignments().count());
+            if n0 == 0 {
+                return b.build();
+            }
+            // Try at most ~2 passes over the current set, also at least a multiple of relocations.
+            let mut tries = 0usize;
+            let max_tries_cap = n0.saturating_mul(2).max(self.relocations.saturating_mul(8));
+
+            while done < self.relocations && tries < max_tries_cap {
+                tries += 1;
+
+                // Get current count (may change a bit as we relocate).
+                let count_opt = tx.with_explorer(|ex| {
+                    let mut n = 0usize;
+                    for _ in ex.iter_movable_assignments() {
+                        n += 1;
+                    }
+                    (n != 0).then_some(n)
+                });
+                let Some(n) = count_opt else {
                     break;
+                };
+
+                // Pick a random movable without allocating a Vec.
+                let idx = rng.random_range(0..n);
+                let maybe_cur = tx.with_explorer(|ex| ex.iter_movable_assignments().nth(idx));
+                let Some(cur) = maybe_cur else {
+                    continue;
                 };
 
                 let req = cur.branded_request();
@@ -155,7 +182,7 @@ where
                 let old_t = cur.start_time();
                 let old_s = cur.start_position();
 
-                // Local spatial band around old_s, clamped to quay span and request window
+                // Local spatial band around old_s, clamped to quay span and request window.
                 let left = old_s.saturating_sub(self.local_space_radius);
                 let right = old_s + self.local_space_radius;
                 let band = SpaceInterval::new(left, right);
@@ -166,31 +193,30 @@ where
                     .intersection(&quay_span)
                     .unwrap_or(band);
 
-                // Local time window around old_t, respecting arrival
+                // Local time window around old_t, respecting arrival.
                 let arr = req.arrival_time();
                 let t_lo = core::cmp::max(arr, old_t - self.local_time_radius);
                 let t_hi = old_t + self.local_time_radius;
                 if t_lo >= t_hi {
-                    // cannot form a valid local time window; skip this one
-                    // (optionally: try next movable instead of breaking)
-                    break;
+                    // Not a valid local window for this movable — try another one.
+                    continue;
                 }
                 let t_w = TimeInterval::new(t_lo, t_hi);
 
-                // Best improving nearby (outside of with_explorer borrow)
-                let best =
-                    tx.with_explorer(|_| best_improving_slot(&tx, &req, t_w, s_w, old_cost, 64));
+                // Find a best improving nearby slot; limit internal trials (64 is fine for locality).
+                let best = best_improving_slot(&tx, &req, t_w, s_w, old_cost, 64);
                 let Some((_d, slot)) = best else {
-                    // no improvement found locally; optionally continue with next movable
-                    break;
+                    // No local improvement for this movable — try another one.
+                    continue;
                 };
 
-                // Perform relocation (mutable borrows happen here, no explorer borrow alive)
+                // Apply relocation (no explorer borrow alive here).
                 if tx.propose_unassign(&cur).is_ok() && tx.propose_assign(&req, slot).is_ok() {
                     done += 1;
                 }
             }
 
+            // Commit only if fully assigned and at least one relocation succeeded.
             if done > 0 && tx.with_explorer(|ex| ex.iter_unassigned_requests().next().is_none()) {
                 tx.commit();
             }

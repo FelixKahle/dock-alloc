@@ -334,6 +334,7 @@ where
             stats_cfg.eval_time_alpha,
         );
         println!("Winner Operator: {}", rec.operator.name());
+        println!("Delta: {}", w_delta);
 
         if state.apply_plan_validated(&w_plan).is_ok() {
             rec.stats_mut().on_accept(-w_delta, stats_cfg.reward_alpha);

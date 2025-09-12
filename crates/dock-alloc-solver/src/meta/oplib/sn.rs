@@ -19,8 +19,6 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use std::cmp;
-
 use crate::{
     berth::{overlay::BrandedFreeSlot, quay::QuayRead},
     framework::planning::{Plan, PlanningContext},
@@ -30,13 +28,14 @@ use dock_alloc_core::{
     SolverVariable,
     cost::Cost,
     space::{SpaceInterval, SpaceLength, SpacePosition},
-    time::{TimeDelta, TimeInterval, TimePoint},
+    time::TimeInterval,
 };
 use dock_alloc_model::model::Problem;
 use rand_chacha::ChaCha8Rng;
+use std::cmp;
 use tracing::instrument;
 
-/// Nudge an assignment left in space within a bounded span, keeping time within a tight window.
+/// Nudge an assignment left in space within a bounded span, keeping time within an adaptive window.
 pub struct SpaceNudgeLeftOperator<T, C, Q> {
     pub max_span: SpaceLength,
     pub scan: usize,
@@ -70,9 +69,8 @@ where
         let p50: SpaceLength = s.p50_request_length();
         let p90: SpaceLength = s.p90_request_length();
         let rho: f64 = s.rho();
-        let mov: usize = p.movable_count();
+        let mov: usize = s.movable_count();
 
-        // Base span: start from ~2×p90; increase when congested, but never exceed quay length.
         let span_mult = if rho < 0.9 {
             2
         } else if rho < 1.2 {
@@ -83,7 +81,6 @@ where
         let base_span = p90 * span_mult;
         let max_span = base_span.clamp(p50, quay_len);
 
-        // Scan budget: modest when light, deeper when medium/heavy; lightly scale with instance size.
         let rho_scan: usize = if rho < 0.6 {
             24
         } else if rho < 0.9 {
@@ -93,8 +90,7 @@ where
         } else {
             96
         };
-        // Add a small size-aware component; clamp to a sane range.
-        let size_scan = 16 + mov / 4; // grows slowly with instance size
+        let size_scan = 16 + mov / 4;
         let scan = cmp::min(rho_scan, size_scan).clamp(16, 256);
 
         Self {
@@ -128,50 +124,83 @@ where
     ) -> Plan<'p, T, C> {
         ctx.with_builder(|mut b| {
             let quay_len: SpaceLength = b.problem().quay_length();
-            let quay_span: SpaceInterval =
+            let quay_span =
                 SpaceInterval::new(SpacePosition::zero(), SpacePosition::zero() + quay_len);
 
             let mut tx = b.begin();
-            let Some(cur) = tx.with_explorer(|ex| ex.iter_movable_assignments().next()) else {
+
+            // pick the right-most movable to nudge left
+            let Some(cur) = tx.with_explorer(|ex| {
+                ex.iter_movable_assignments()
+                    .max_by_key(|m| m.start_position().value())
+            }) else {
                 return b.build();
             };
 
             let req = cur.branded_request();
             let old_cost = cur.assignment().cost();
-            let old_s: SpacePosition = cur.start_position();
+            let old_s = cur.start_position();
+            let old_t = cur.start_time();
 
-            // left band [old_s - max_span, old_s]
+            // spatial band strictly to the left: [old_s - max_span, old_s)
             let s_min = old_s.saturating_sub(self.max_span);
             let band = SpaceInterval::new(s_min, old_s);
-
-            // tight time band [arrival, arrival + 24h)
-            let arr: TimePoint<T> = req.arrival_time();
-            let day = TimeDelta::new(T::from(24 * 3600).unwrap_or_else(T::zero));
-            let gw = TimeInterval::new(arr, arr + day);
-
-            // clamp spatial band to quay span
             let s_band = band.intersection(&quay_span).unwrap_or(band);
+
+            // adaptive time band around old_t: ± (p50_proc * f(ρ))
+            let stats = tx.problem().stats();
+            let mut rad = stats.p50_processing_time(); // TimeDelta<T>
+            let mul = if stats.rho() < 0.9 {
+                2
+            } else if stats.rho() < 1.2 {
+                3
+            } else {
+                4
+            };
+            for _ in 1..mul {
+                rad += stats.p50_processing_time();
+            } // cheap multiply
+            let arr = req.arrival_time();
+            let t_lo = core::cmp::max(arr, old_t - rad);
+            let t_hi = old_t + rad;
+            if t_lo >= t_hi {
+                return b.build();
+            }
+            let gw = TimeInterval::new(t_lo, t_hi);
 
             let (t_w, s_w) = req_windows(&req, gw, s_band);
 
-            // greedy best improvement within windows
-            let mut best: Option<(Cost<C>, BrandedFreeSlot<'_, T>)> = None;
+            // greedy best improvement, tie-break by larger left shift
+            let mut best: Option<(Cost<C>, usize, BrandedFreeSlot<'_, T>)> = None;
             tx.with_explorer(|ex| {
                 for s in ex
                     .iter_slots_for_request_within(&req, t_w, s_w)
                     .take(self.scan)
                 {
-                    let t = s.slot().start_time();
                     let sp = s.slot().space().start();
+                    if sp == old_s {
+                        continue;
+                    } // must actually move
+                    if sp > old_s {
+                        continue;
+                    } // enforce left nudge
+
+                    let t = s.slot().start_time();
                     let hyp = dock_alloc_model::model::AssignmentRef::new(req.request(), sp, t);
                     let d = hyp.cost() - old_cost;
-                    if d.value() < C::zero() && best.as_ref().is_none_or(|(bd, _)| d < *bd) {
-                        best = Some((d, s));
+                    if d.value() < C::zero() {
+                        let dist = old_s.value().saturating_sub(sp.value()); // larger is better for left
+                        if best
+                            .as_ref()
+                            .is_none_or(|(bd, bdist, _)| d < *bd || (d == *bd && dist > *bdist))
+                        {
+                            best = Some((d, dist, s));
+                        }
                     }
                 }
             });
 
-            let Some((_d, slot)) = best else {
+            let Some((_d, _dist, slot)) = best else {
                 return b.build();
             };
 
@@ -189,7 +218,7 @@ where
     }
 }
 
-/// Nudge an assignment right in space within a bounded span, keeping time within a tight window.
+/// Nudge an assignment right in space within a bounded span, keeping time within an adaptive window.
 pub struct SpaceNudgeRightOperator<T, C, Q> {
     pub max_span: SpaceLength,
     pub scan: usize,
@@ -218,13 +247,12 @@ where
     Q: QuayRead,
 {
     fn from(p: &Problem<T, C>) -> Self {
-        // Mirror the Left heuristic; keep symmetry unless you intentionally want asymmetry.
         let s = p.stats();
         let quay_len: SpaceLength = s.quay_length();
         let p50: SpaceLength = s.p50_request_length();
         let p90: SpaceLength = s.p90_request_length();
         let rho: f64 = s.rho();
-        let mov: usize = p.movable_count();
+        let mov: usize = s.movable_count();
 
         let span_mult = if rho < 0.9 {
             2
@@ -279,50 +307,83 @@ where
     ) -> Plan<'p, T, C> {
         ctx.with_builder(|mut b| {
             let quay_len: SpaceLength = b.problem().quay_length();
-            let quay_span: SpaceInterval =
+            let quay_span =
                 SpaceInterval::new(SpacePosition::zero(), SpacePosition::zero() + quay_len);
 
             let mut tx = b.begin();
-            let Some(cur) = tx.with_explorer(|ex| ex.iter_movable_assignments().next()) else {
+
+            // pick the left-most movable to nudge right
+            let Some(cur) = tx.with_explorer(|ex| {
+                ex.iter_movable_assignments()
+                    .min_by_key(|m| m.start_position().value())
+            }) else {
                 return b.build();
             };
 
             let req = cur.branded_request();
             let old_cost = cur.assignment().cost();
-            let old_s: SpacePosition = cur.start_position();
+            let old_s = cur.start_position();
+            let old_t = cur.start_time();
 
-            // right band [old_s, old_s + max_span]
+            // spatial band strictly to the right: (old_s, old_s + max_span]
             let s_max = old_s + self.max_span;
             let band = SpaceInterval::new(old_s, s_max);
-
-            // tight time band [arrival, arrival + 24h)
-            let arr: TimePoint<T> = req.arrival_time();
-            let day = TimeDelta::new(T::from(24 * 3600).unwrap_or_else(T::zero));
-            let gw = TimeInterval::new(arr, arr + day);
-
-            // clamp spatial band to quay span
             let s_band = band.intersection(&quay_span).unwrap_or(band);
+
+            // adaptive time band around old_t: ± (p50_proc * f(ρ))
+            let stats = tx.problem().stats();
+            let mut rad = stats.p50_processing_time();
+            let mul = if stats.rho() < 0.9 {
+                2
+            } else if stats.rho() < 1.2 {
+                3
+            } else {
+                4
+            };
+            for _ in 1..mul {
+                rad += stats.p50_processing_time();
+            }
+            let arr = req.arrival_time();
+            let t_lo = core::cmp::max(arr, old_t - rad);
+            let t_hi = old_t + rad;
+            if t_lo >= t_hi {
+                return b.build();
+            }
+            let gw = TimeInterval::new(t_lo, t_hi);
 
             let (t_w, s_w) = req_windows(&req, gw, s_band);
 
-            // greedy best improvement within windows
-            let mut best: Option<(Cost<C>, BrandedFreeSlot<'_, T>)> = None;
+            // greedy best improvement, tie-break by larger right shift
+            let mut best: Option<(Cost<C>, usize, BrandedFreeSlot<'_, T>)> = None;
             tx.with_explorer(|ex| {
                 for s in ex
                     .iter_slots_for_request_within(&req, t_w, s_w)
                     .take(self.scan)
                 {
-                    let t = s.slot().start_time();
                     let sp = s.slot().space().start();
+                    if sp == old_s {
+                        continue;
+                    }
+                    if sp < old_s {
+                        continue;
+                    } // enforce right nudge
+
+                    let t = s.slot().start_time();
                     let hyp = dock_alloc_model::model::AssignmentRef::new(req.request(), sp, t);
                     let d = hyp.cost() - old_cost;
-                    if d.value() < C::zero() && best.as_ref().is_none_or(|(bd, _)| d < *bd) {
-                        best = Some((d, s));
+                    if d.value() < C::zero() {
+                        let dist = sp.value().saturating_sub(old_s.value()); // larger is better for right
+                        if best
+                            .as_ref()
+                            .is_none_or(|(bd, bdist, _)| d < *bd || (d == *bd && dist > *bdist))
+                        {
+                            best = Some((d, dist, s));
+                        }
                     }
                 }
             });
 
-            let Some((_d, slot)) = best else {
+            let Some((_d, _dist, slot)) = best else {
                 return b.build();
             };
 

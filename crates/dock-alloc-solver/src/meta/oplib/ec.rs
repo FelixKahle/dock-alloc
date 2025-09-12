@@ -38,7 +38,9 @@ where
     C: SolverVariable,
     Q: QuayRead,
 {
+    /// Number of candidate slots to scan when searching improvements.
     pub trials: usize,
+    /// Soft upper bound for time window (typed).
     pub horizon_end: TimePoint<T>,
     _phantom: core::marker::PhantomData<(T, C, Q)>,
 }
@@ -59,8 +61,8 @@ where
 }
 
 /// Heuristic from instance stats:
-/// - `trials`: grows with congestion ρ and movable_count; clamped to [16, 256].
-/// - `horizon_end`: latest completion time (typed).
+/// - trials grows with congestion ρ and size; clamped to [16, 256].
+/// - horizon_end uses latest_completion_time (typed).
 impl<T, C, Q> From<&Problem<T, C>> for EjectionChain2Operator<T, C, Q>
 where
     T: SolverVariable,
@@ -70,19 +72,14 @@ where
     fn from(p: &Problem<T, C>) -> Self {
         let s = p.stats();
         let rho = s.rho();
-        let mov = p.movable_count();
+        let mov = p.movable_count().max(1);
 
-        let base = if rho < 0.6 {
-            24
-        } else if rho < 0.9 {
-            32
-        } else if rho < 1.2 {
-            48
-        } else {
-            64
-        };
-        let size = 8 + mov / 8;
-        let trials = (base + size).clamp(16, 256);
+        // Size + congestion aware budget.
+        let base = (mov.ilog2() as usize) + 24;
+        let size_bump = (mov / 32).min(24);
+        let cong_mult = 1.0 + 0.5 * rho; // ρ∈[0,2] ⇒ [1.0, 2.0]
+        let trials = (((base + size_bump) as f64) * cong_mult).round() as usize;
+        let trials = trials.clamp(16, 256);
 
         Self {
             trials,
@@ -116,48 +113,54 @@ where
         ctx.with_builder(|mut b| {
             let mut tx = b.begin();
 
-            // Pick A
-            let Some(a) = tx.with_explorer(|ex| ex.iter_movable_assignments().next()) else {
+            // Pick A = movable with highest current assignment cost (bigger potential gain).
+            let Some(a) = tx.with_explorer(|ex| {
+                ex.iter_movable_assignments()
+                    .max_by_key(|m| m.assignment().cost())
+            }) else {
                 return b.build();
             };
+
             let req_a = a.branded_request();
             let old_a = a.assignment().cost();
 
-            // Windows for A (typed)
+            // Shared dynamic horizon + request windows (typed).
             let gw = global_time_window(&tx, self.horizon_end);
-            let (t_w, s_w) = req_windows(&req_a, gw, req_a.feasible_space_window());
+            let (t_w_a, s_w_a) = req_windows(&req_a, gw, req_a.feasible_space_window());
 
-            // Try a better slot for A among first `trials`
-            let best_a = best_improving_slot(&tx, &req_a, t_w, s_w, old_a, self.trials);
-            let Some((_da, slot_a)) = best_a else {
+            // Best improving slot for A among first `trials`.
+            let Some((_da, slot_a)) =
+                best_improving_slot(&tx, &req_a, t_w_a, s_w_a, old_a, self.trials)
+            else {
                 return b.build();
             };
 
-            // Move A
+            // Move A (mutable ops after explorer borrows end).
             if tx.propose_unassign(&a).is_err() {
                 return b.build();
             }
-            let Ok(_a_new) = tx.propose_assign(&req_a, slot_a) else {
+            if tx.propose_assign(&req_a, slot_a).is_err() {
                 return b.build();
-            };
+            }
 
-            // Pick B (any other movable) and relocate greedily
+            // Pick B = highest-cost movable (≠ A) and try a greedy relocate.
             if let Some(bm) = tx.with_explorer(|ex| {
                 ex.iter_movable_assignments()
-                    .find(|m| m.branded_request().id() != req_a.id())
+                    .filter(|m| m.branded_request().id() != req_a.id())
+                    .max_by_key(|m| m.assignment().cost())
             }) {
                 let req_b = bm.branded_request();
                 let old_b = bm.assignment().cost();
-                let (t2, s2) = req_windows(&req_b, gw, req_b.feasible_space_window());
+
+                let (t_w_b, s_w_b) = req_windows(&req_b, gw, req_b.feasible_space_window());
                 if let Some((_db, slot_b)) =
-                    best_improving_slot(&tx, &req_b, t2, s2, old_b, self.trials)
-                    && tx.propose_unassign(&bm).is_ok()
-                {
-                    let _ = tx.propose_assign(&req_b, slot_b);
-                }
+                    best_improving_slot(&tx, &req_b, t_w_b, s_w_b, old_b, self.trials)
+                    && tx.propose_unassign(&bm).is_ok() {
+                        let _ = tx.propose_assign(&req_b, slot_b);
+                    }
             }
 
-            // Commit only if fully assigned
+            // Commit only if everything remains fully assigned.
             if tx.with_explorer(|ex| ex.iter_unassigned_requests().next().is_none()) {
                 tx.commit();
             }

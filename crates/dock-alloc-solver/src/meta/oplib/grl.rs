@@ -17,7 +17,7 @@
 // NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
 // LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use dock_alloc_core::{SolverVariable, time::TimePoint};
 use dock_alloc_model::model::Problem;
@@ -61,8 +61,8 @@ where
 }
 
 /// Heuristic from `Problem`:
-/// - `trials`: scale with congestion ρ and instance size (movable_count), clamped to [16, 256]
-/// - `horizon_end`: use the instance's `latest_completion_time` (typed `TimePoint<T>`)
+/// - `trials`: scale with congestion ρ and size; clamp to [16, 256]
+/// - `horizon_end`: latest completion time (typed)
 impl<T, C, Q> From<&Problem<T, C>> for GlobalRelocateRandomOperator<T, C, Q>
 where
     T: SolverVariable,
@@ -72,23 +72,15 @@ where
     fn from(p: &Problem<T, C>) -> Self {
         let s = p.stats();
         let rho = s.rho();
-        let mov = p.movable_count();
+        let mov = s.movable_count().max(1);
 
-        let base = if rho < 0.6 {
-            32
-        } else if rho < 0.9 {
-            48
-        } else if rho < 1.2 {
-            64
-        } else {
-            96
-        };
-        // small size-aware bump
-        let size = 8 + mov / 6;
-        let trials = (base + size).clamp(16, 256);
+        let base = (mov.ilog2() as usize) + 16;
+        let size_bump = (mov / 24).min(32);
+        let cong_mul = 1.0 + 0.5 * rho; // ρ ∈ [0,2] → [1.0, 2.0]
+        let trials = (((base + size_bump) as f64) * cong_mul).round() as usize;
 
         Self {
-            trials,
+            trials: trials.clamp(16, 256),
             horizon_end: s.latest_completion_time(),
             _phantom: core::marker::PhantomData,
         }
@@ -119,16 +111,23 @@ where
         ctx.with_builder(|mut b| {
             let mut tx = b.begin();
 
-            // Pick a random movable assignment
-            let picked = tx.with_explorer(|ex| {
-                let v: Vec<_> = ex.iter_movable_assignments().collect();
-                if v.is_empty() {
-                    None
-                } else {
-                    let i = rng.random_range(0..v.len());
-                    Some(v[i].clone())
+            // --- pick a random movable WITHOUT allocating a Vec
+            // pass 1: count
+            let count_opt = tx.with_explorer(|ex| {
+                let mut n = 0usize;
+                for _ in ex.iter_movable_assignments() {
+                    n += 1;
                 }
+                if n == 0 { None } else { Some(n) }
             });
+            let Some(n) = count_opt else {
+                return b.build();
+            };
+
+            // pass 2: select nth
+            let idx = rng.random_range(0..n);
+            let picked =
+                tx.with_explorer(|ex| ex.iter_movable_assignments().nth(idx));
             let Some(cur) = picked else {
                 return b.build();
             };
@@ -136,37 +135,44 @@ where
             let req = cur.branded_request();
             let old_cost = cur.assignment().cost();
 
-            // Global time window up to configured horizon_end; clamp spatially by the request's window
+            // typed global time window (dynamic) + request window
             let gw = global_time_window(&tx, self.horizon_end);
             let (t_w, s_w) = req_windows(&req, gw, req.feasible_space_window());
 
-            // Scan up to `trials` candidate slots (in iterator order; upstream can randomize order)
-            let mut choice = None;
+            // --- reservoir sample among IMPROVING slots within first `trials`
+            let mut chosen = None;
+            let mut k_improving = 0usize;
+
             tx.with_explorer(|ex| {
-                let mut cnt = 0usize;
-                for slot in ex.iter_slots_for_request_within(&req, t_w, s_w) {
-                    choice = Some(slot);
-                    cnt += 1;
-                    if cnt >= self.trials {
-                        break;
+                for (seen, slot) in ex
+                    .iter_slots_for_request_within(&req, t_w, s_w)
+                    .take(self.trials)
+                    .enumerate()
+                {
+                    // quick exact delta (domain-typed)
+                    let hyp = dock_alloc_model::model::AssignmentRef::new(
+                        req.request(),
+                        slot.slot().space().start(),
+                        slot.slot().start_time(),
+                    );
+                    if hyp.cost() < old_cost {
+                        k_improving += 1;
+                        // replace with probability 1/k
+                        if rng.random_range(0..k_improving) == 0 {
+                            chosen = Some(slot);
+                        }
                     }
+
+                    // early escape if we've exhausted trials (enumerate already limits)
+                    let _ = seen; // silence unused warning
                 }
             });
-            let Some(slot) = choice else {
+
+            let Some(slot) = chosen else {
                 return b.build();
             };
 
-            // Evaluate cost delta using domain types only
-            // Prefer direct comparison on Cost<C> (no `.value()`).
-            let hyp = dock_alloc_model::model::AssignmentRef::new(
-                req.request(),
-                slot.slot().space().start(),
-                slot.slot().start_time(),
-            );
-            if hyp.cost() >= old_cost {
-                return b.build();
-            }
-
+            // --- apply move
             if tx.propose_unassign(&cur).is_err() {
                 return b.build();
             }
@@ -174,6 +180,7 @@ where
                 return b.build();
             }
 
+            // commit only on full assignment
             if tx.with_explorer(|ex| ex.iter_unassigned_requests().next().is_none()) {
                 tx.commit();
             }

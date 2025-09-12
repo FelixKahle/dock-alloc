@@ -900,6 +900,43 @@ where
         }
     }
 
+    pub fn waiting_time(&self) -> TimeDelta<T> {
+        (self.start_time() - self.request.arrival_time()).max(TimeDelta::zero())
+    }
+
+    pub fn waiting_cost(&self) -> Cost<C>
+    where
+        C: TryFrom<T>,
+    {
+        let waiting_time = self.waiting_time();
+        let scalar: C = C::try_from(waiting_time.value())
+            .ok()
+            .expect("waiting time does not fit in C");
+        self.request().cost_per_delay() * scalar
+    }
+
+    pub fn position_deviation(&self) -> SpaceLength {
+        (self.start_position() - self.request.target_position()).abs()
+    }
+
+    pub fn position_deviation_cost(&self) -> Cost<C>
+    where
+        C: TryFrom<usize>,
+    {
+        let deviation = self.position_deviation();
+        let scalar: C = C::try_from(deviation.value())
+            .ok()
+            .expect("deviation does not fit in C");
+        self.request().cost_per_position_deviation() * scalar
+    }
+
+    pub fn cost(&self) -> Cost<C>
+    where
+        C: TryFrom<T> + TryFrom<usize>,
+    {
+        self.waiting_cost() + self.position_deviation_cost()
+    }
+
     #[inline]
     pub fn to_owned(&self) -> AnyAssignment<T, C> {
         let request = match self.request {

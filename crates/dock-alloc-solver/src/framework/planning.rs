@@ -536,6 +536,10 @@ where
         Explorer::new(alov, bov)
     }
 
+    pub fn problem(&self) -> &'p Problem<T, C> {
+        self.parent.problem()
+    }
+
     pub fn with_explorer<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&Explorer<'alob, 'boob, 'p, 'bo, 'al, '_, T, C, Q>) -> R,

@@ -17,7 +17,7 @@
 // NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
 // LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use crate::{
     berth::{overlay::BrandedFreeSlot, quay::QuayRead},
@@ -52,12 +52,15 @@ where
     fn default() -> Self {
         Self {
             scan_limit: 64,
-            horizon_end: TimePoint::new(T::from(10_000).unwrap_or(T::zero())),
+            horizon_end: TimePoint::new(T::zero()),
             _phantom: core::marker::PhantomData,
         }
     }
 }
 
+/// Adaptive tuning:
+/// - `scan_limit`: ~O(log n) with size bump; scaled by congestion ρ; capped by a size-aware ceiling
+/// - `horizon_end`: latest completion time (typed)
 impl<T, C, Q> From<&Problem<T, C>> for MoveToLatestFeasibleOperator<T, C, Q>
 where
     T: SolverVariable,
@@ -69,18 +72,18 @@ where
         let mov = s.movable_count().max(1);
         let rho = s.rho();
 
-        // Base ~ O(log n) with a gentle size bump; congestion increases effort.
+        // Base ~ log2(n) + small bump; congestion increases effort.
         let base = (mov.ilog2() as usize) + 8;
-        let size_bump = (mov / 64).min(8);
-        let cong_mult = 1.0 + 0.6 * rho; // ρ in [0,2] ⇒ multiplier in ~[1.0, 2.2]
-        let scan = (((base + size_bump) as f64) * cong_mult).round() as usize;
+        let size_bump = (mov / 64).min(12);
+        let cong_mult = 1.0 + 0.6 * rho; // ρ∈[0,2] → ~[1.0, 2.2]
+        let raw_scan = (((base + size_bump) as f64) * cong_mult).round() as usize;
 
-        // Size-aware ceiling; let big instances explore more, still bounded.
-        let ceiling = (24 + (mov.ilog2() as usize) * 16).clamp(64, 256);
+        // Ceiling grows mildly with instance size; clamp overall.
+        let ceiling = (48 + (mov.ilog2() as usize) * 16).clamp(64, 384);
 
         Self {
-            scan_limit: scan.clamp(16, ceiling),
-            horizon_end: s.latest_completion_time(), // typed TimePoint<T>
+            scan_limit: raw_scan.clamp(16, ceiling),
+            horizon_end: s.latest_completion_time(),
             _phantom: core::marker::PhantomData,
         }
     }
@@ -95,6 +98,7 @@ where
     type Time = T;
     type Cost = C;
     type Quay = Q;
+
     fn name(&self) -> &'static str {
         "MoveToLatestFeasible"
     }
@@ -108,46 +112,73 @@ where
     ) -> Plan<'p, T, C> {
         ctx.with_builder(|mut b| {
             let mut tx = b.begin();
+
+            // pick the currently latest-starting movable
             let Some(cur) = tx.with_explorer(|ex| {
                 ex.iter_movable_assignments()
-                    .max_by_key(|m| m.start_time().value())
+                    .max_by(|a, b| a.start_time().cmp(&b.start_time()))
             }) else {
                 return b.build();
             };
+
             let req = cur.branded_request();
             let old_cost = cur.assignment().cost();
+
+            // global window (typed) + request windows
             let gw = global_time_window(&tx, self.horizon_end);
             let (t_w, s_w) = req_windows(&req, gw, req.feasible_space_window());
-            // collect up to scan_limit then pick the last
-            let mut last: Option<BrandedFreeSlot<'_, T>> = None;
-            let mut count = 0usize;
+
+            // scan up to `scan_limit`, choose the *latest* improving slot;
+            // tie-break on lower resulting cost.
+            let mut candidate: Option<BrandedFreeSlot<'_, T>> = None;
+            let mut cand_t: Option<TimePoint<T>> = None;
+            let mut cand_cost: Option<dock_alloc_core::cost::Cost<C>> = None;
+
             tx.with_explorer(|ex| {
+                let mut seen = 0usize;
                 for s in ex.iter_slots_for_request_within(&req, t_w, s_w) {
-                    last = Some(s);
-                    count += 1;
-                    if count >= self.scan_limit {
+                    // evaluate cost in domain units
+                    let t = s.slot().start_time();
+                    let sp = s.slot().space().start();
+                    let hyp = dock_alloc_model::model::AssignmentRef::new(req.request(), sp, t);
+                    let c = hyp.cost();
+
+                    if c < old_cost {
+                        // prefer later start time; if equal time, prefer cheaper
+                        let take = match (cand_t, cand_cost) {
+                            (None, _) => true,
+                            (Some(bt), Some(bc)) => (t > bt) || (t == bt && c < bc),
+                            (Some(bt), None) => t > bt,
+                        };
+                        if take {
+                            candidate = Some(s);
+                            cand_t = Some(t);
+                            cand_cost = Some(c);
+                        }
+                    }
+
+                    seen += 1;
+                    if seen >= self.scan_limit {
                         break;
                     }
                 }
             });
-            let Some(slot) = last else {
+
+            let Some(slot) = candidate else {
                 return b.build();
             };
-            let hyp = dock_alloc_model::model::AssignmentRef::new(
-                req.request(),
-                slot.slot().space().start(),
-                slot.slot().start_time(),
-            );
-            if (hyp.cost() - old_cost).value() < C::zero() {
-                if tx.propose_unassign(&cur).is_err() {
-                    return b.build();
-                }
-                if tx.propose_assign(&req, slot).is_err() {
-                    return b.build();
-                }
-                if tx.with_explorer(|ex| ex.iter_unassigned_requests().next().is_none()) {
-                    tx.commit();
-                }
+
+            // apply if it truly improves
+            if tx.propose_unassign(&cur).is_err() {
+                return b.build();
+            }
+            if tx.propose_assign(&req, slot).is_err() {
+                return b.build();
+            }
+
+            // commit only if fully assigned
+            if tx.with_explorer(|ex| ex.iter_unassigned_requests().next().is_none()) {
+                tx.commit();
             }
             b.build()
         })

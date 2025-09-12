@@ -65,7 +65,7 @@ impl Default for AllocationConfig {
     fn default() -> Self {
         Self {
             target_total_proposals_per_round: 4096,
-            min_per_op: 8,
+            min_per_op: 128,
             max_per_op: 4096,
             explore_frac: 0.15,
             speed_weight: 0.7,
@@ -126,7 +126,7 @@ pub struct MetaConfig {
 impl Default for MetaConfig {
     fn default() -> Self {
         Self {
-            max_solver_time_ms: 60000,
+            max_solver_time_ms: 50000,
             stats: StatsConfig::default(),
             alloc: AllocationConfig::default(),
             anneal: AnnealingConfig::default(),
