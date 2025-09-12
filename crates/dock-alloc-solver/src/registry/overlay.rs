@@ -20,6 +20,7 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE..
 
 use dock_alloc_core::{
+    SolverVariable,
     cost::Cost,
     marker::Brand,
     space::{SpaceInterval, SpaceLength, SpacePosition},
@@ -29,7 +30,6 @@ use dock_alloc_model::model::{
     AnyAssignmentRef, AssignmentRef, Fixed, FixedRequestId, Movable, MovableRequestId, Request,
     RequestId, SolutionRef,
 };
-use num_traits::{PrimInt, Signed};
 use std::collections::{BTreeSet, HashMap};
 
 use crate::registry::{
@@ -95,8 +95,8 @@ impl<'brand> std::fmt::Display for BrandedFixedRequestId<'brand> {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BrandedMovableRequest<'brand, 'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     inner: &'a Request<Movable, T, C>,
     _brand: Brand<'brand>,
@@ -104,8 +104,8 @@ where
 
 impl<'brand, 'a, T, C> BrandedMovableRequest<'brand, 'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     #[inline]
     fn new(inner: &'a Request<Movable, T, C>) -> Self {
@@ -169,8 +169,8 @@ where
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BrandedMovableAssignment<'brand, 'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     assignment: AssignmentRef<'a, Movable, T, C>,
     _brand: Brand<'brand>,
@@ -178,8 +178,8 @@ where
 
 impl<'brand, 'a, T, C> BrandedMovableAssignment<'brand, 'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     #[inline]
     fn new(assignment: AssignmentRef<'a, Movable, T, C>) -> Self {
@@ -228,8 +228,8 @@ where
 impl<'brand, 'a, T, C> From<BrandedMovableAssignment<'brand, 'a, T, C>>
     for AssignmentRef<'a, Movable, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     fn from(val: BrandedMovableAssignment<'brand, 'a, T, C>) -> Self {
         val.assignment
@@ -239,8 +239,8 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssignmentLedgerOverlay<'brand, 'a, 'l, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     ledger: &'l AssignmentLedger<'a, T, C>,
     staged_commits: HashMap<MovableRequestId, BrandedMovableAssignment<'brand, 'a, T, C>>,
@@ -284,8 +284,8 @@ impl std::error::Error for StageError {}
 
 impl<'brand, 'a, 'l, T, C> AssignmentLedgerOverlay<'brand, 'a, 'l, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     pub fn new(ledger: &'l AssignmentLedger<'a, T, C>) -> Self {
         let reserve = ledger.problem().movables().len().max(8);
@@ -539,8 +539,8 @@ where
 impl<'brand, 'p, 'l, T, C> From<&'l AssignmentLedgerOverlay<'brand, 'p, 'l, T, C>>
     for SolutionRef<'l, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
 {
     fn from(val: &'l AssignmentLedgerOverlay<'brand, 'p, 'l, T, C>) -> Self {
         let decisions: HashMap<RequestId, AnyAssignmentRef<'l, T, C>> =

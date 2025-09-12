@@ -23,6 +23,7 @@ use crate::registry::{
     commit::LedgerOverlayCommit, operations::Operation, overlay::AssignmentLedgerOverlay,
 };
 use dock_alloc_core::{
+    SolverVariable,
     space::{SpaceInterval, SpacePosition},
     time::TimePoint,
 };
@@ -31,19 +32,18 @@ use dock_alloc_model::model::{
     AssignmentRef, Fixed, FixedRequestId, Movable, MovableRequestId, Problem, Request, RequestId,
     SolutionRef,
 };
-use num_traits::{PrimInt, Signed};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AssignmentLedger<'a, T: PrimInt + Signed, C: PrimInt + Signed> {
+pub struct AssignmentLedger<'a, T: SolverVariable, C: SolverVariable> {
     problem: &'a Problem<T, C>,
     committed: HashMap<MovableRequestId, AssignmentRef<'a, Movable, T, C>>,
 }
 
 impl<'a, T, C> From<&'a Problem<T, C>> for AssignmentLedger<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     fn from(problem: &'a Problem<T, C>) -> Self {
         Self {
@@ -74,13 +74,13 @@ impl std::fmt::Display for LedgerError {
 impl std::error::Error for LedgerError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LedgerApplyValidationError<T: PrimInt + Signed> {
+pub enum LedgerApplyValidationError<T: SolverVariable> {
     Ledger(LedgerError),
     AssignmentBeforeArrivalTime(AssignmentBeforeArrivalTimeError<T>),
     AssignmentOutsideSpaceWindow(AssignmentOutsideSpaceWindowError),
 }
 
-impl<T: PrimInt + Signed + std::fmt::Display> std::fmt::Display for LedgerApplyValidationError<T> {
+impl<T: SolverVariable + std::fmt::Display> std::fmt::Display for LedgerApplyValidationError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LedgerApplyValidationError::Ledger(e) => write!(f, "{e}"),
@@ -90,15 +90,15 @@ impl<T: PrimInt + Signed + std::fmt::Display> std::fmt::Display for LedgerApplyV
     }
 }
 
-impl<T: PrimInt + Signed + std::fmt::Display + std::fmt::Debug> std::error::Error
+impl<T: SolverVariable + std::fmt::Display + std::fmt::Debug> std::error::Error
     for LedgerApplyValidationError<T>
 {
 }
 
 impl<'a, T, C> AssignmentLedger<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     pub fn new(problem: &'a Problem<T, C>) -> Self {
         Self {
@@ -309,8 +309,8 @@ where
 
 impl<'a, 'l, T, C> From<&'l AssignmentLedger<'a, T, C>> for SolutionRef<'l, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
 {
     fn from(val: &'l AssignmentLedger<'a, T, C>) -> Self {
         let decisions: HashMap<RequestId, AnyAssignmentRef<'l, T, C>> =
@@ -321,8 +321,8 @@ where
 
 impl<'a, T, C> From<AssignmentLedger<'a, T, C>> for SolutionRef<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
 {
     fn from(val: AssignmentLedger<'a, T, C>) -> Self {
         let decisions: HashMap<RequestId, AnyAssignmentRef<'a, T, C>> = {

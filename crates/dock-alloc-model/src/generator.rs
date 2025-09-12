@@ -21,6 +21,7 @@
 
 use crate::model::{Assignment, Fixed, Movable, Problem, ProblemBuilder, Request, RequestId};
 use dock_alloc_core::{
+    SolverVariable,
     cost::Cost,
     space::{SpaceInterval, SpaceLength, SpacePosition},
     time::{TimeDelta, TimePoint},
@@ -245,25 +246,25 @@ where
 
 impl<T, C> Default for InstanceGenConfig<T, C>
 where
-    T: PrimInt + Signed + NumCast + ToPrimitive,
-    C: PrimInt + Signed + NumCast + Copy,
+    T: SolverVariable + NumCast + ToPrimitive,
+    C: SolverVariable + NumCast + Copy,
 {
     fn default() -> Self {
         // Helpers to construct typed wrappers from integer literals.
         #[inline]
-        fn to_t<T: PrimInt + Signed + NumCast>(v: i64) -> T {
+        fn to_t<T: SolverVariable + NumCast>(v: i64) -> T {
             NumCast::from(v).expect("NumCast<i64 -> T>")
         }
         #[inline]
-        fn td<T: PrimInt + Signed + NumCast>(v: i64) -> TimeDelta<T> {
+        fn td<T: SolverVariable + NumCast>(v: i64) -> TimeDelta<T> {
             TimeDelta::new(to_t::<T>(v))
         }
         #[inline]
-        fn tp<T: PrimInt + Signed + NumCast>(v: i64) -> TimePoint<T> {
+        fn tp<T: SolverVariable + NumCast>(v: i64) -> TimePoint<T> {
             TimePoint::new(to_t::<T>(v))
         }
         #[inline]
-        fn cost<C: PrimInt + Signed + NumCast + Copy>(v: i64) -> Cost<C> {
+        fn cost<C: SolverVariable + NumCast + Copy>(v: i64) -> Cost<C> {
             Cost::new(NumCast::from(v).expect("NumCast<i64 -> C>"))
         }
 
@@ -284,11 +285,11 @@ where
             )),
 
             // Mix
-            amount_movables: 200,
-            amount_fixed: 10,
+            amount_movables: 120,
+            amount_fixed: 50,
 
-            // Horizon: 3 days
-            horizon: tp::<T>(4_320_00),
+            // Horizon: 300 days
+            horizon: tp::<T>(115200),
 
             // Arrivals: ≈ 1 ship/hour (Poisson → bursts + gaps)
             lambda_per_time: 0.017,
@@ -498,8 +499,8 @@ where
 
 impl<TimePrimitive, CostPrimitive> Display for InstanceGenConfig<TimePrimitive, CostPrimitive>
 where
-    TimePrimitive: PrimInt + Signed + NumCast + ToPrimitive + Display,
-    CostPrimitive: PrimInt + Signed + NumCast + Copy + Display,
+    TimePrimitive: SolverVariable + NumCast + ToPrimitive,
+    CostPrimitive: SolverVariable + NumCast + Copy,
 {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let max_proc_str = match self.max_processing {
@@ -597,18 +598,18 @@ where
 impl<TimePrimitive, CostPrimitive> Default
     for InstanceGenConfigBuilder<TimePrimitive, CostPrimitive>
 where
-    TimePrimitive: PrimInt + Signed + NumCast + ToPrimitive,
-    CostPrimitive: PrimInt + Signed + NumCast + Copy,
+    TimePrimitive: SolverVariable + NumCast + ToPrimitive,
+    CostPrimitive: SolverVariable + NumCast + Copy,
 {
     fn default() -> Self {
         // Small helpers to construct generic numeric wrappers from i64
-        fn to_time_delta<T: PrimInt + Signed + NumCast>(value: i64) -> TimeDelta<T> {
+        fn to_time_delta<T: SolverVariable + NumCast>(value: i64) -> TimeDelta<T> {
             TimeDelta::new(NumCast::from(value).expect("NumCast<i64 -> T>"))
         }
         fn to_space_length(value: usize) -> SpaceLength {
             SpaceLength::new(value)
         }
-        fn to_cost<C: PrimInt + Signed + NumCast + Copy>(value: i64) -> Cost<C> {
+        fn to_cost<C: SolverVariable + NumCast + Copy>(value: i64) -> Cost<C> {
             Cost::new(NumCast::from(value).expect("NumCast<i64 -> C>"))
         }
 
@@ -696,8 +697,8 @@ impl std::error::Error for InstanceGenConfigBuildError {}
 
 impl<TimePrimitive, CostPrimitive> InstanceGenConfigBuilder<TimePrimitive, CostPrimitive>
 where
-    TimePrimitive: PrimInt + Signed + NumCast + ToPrimitive,
-    CostPrimitive: PrimInt + Signed + NumCast + Copy,
+    TimePrimitive: SolverVariable + NumCast + ToPrimitive,
+    CostPrimitive: SolverVariable + NumCast + Copy,
 {
     #[inline]
     pub fn new() -> Self {
@@ -927,8 +928,8 @@ where
 
 pub struct InstanceGenerator<TimePrimitive, CostPrimitive>
 where
-    TimePrimitive: PrimInt + Signed + NumCast + ToPrimitive + SampleUniform,
-    CostPrimitive: PrimInt + Signed + NumCast + Copy,
+    TimePrimitive: SolverVariable + NumCast + ToPrimitive + SampleUniform,
+    CostPrimitive: SolverVariable + NumCast + Copy,
 {
     config: InstanceGenConfig<TimePrimitive, CostPrimitive>,
     rng: SmallRng,
@@ -939,8 +940,8 @@ where
 impl<TimePrimitive, CostPrimitive> From<InstanceGenConfig<TimePrimitive, CostPrimitive>>
     for InstanceGenerator<TimePrimitive, CostPrimitive>
 where
-    TimePrimitive: PrimInt + Signed + NumCast + ToPrimitive + Debug + SampleUniform,
-    CostPrimitive: PrimInt + Signed + NumCast + Copy + SaturatingAdd + SaturatingMul,
+    TimePrimitive: SolverVariable + NumCast + ToPrimitive + Debug + SampleUniform,
+    CostPrimitive: SolverVariable + NumCast + Copy + SaturatingAdd + SaturatingMul,
 {
     fn from(config: InstanceGenConfig<TimePrimitive, CostPrimitive>) -> Self {
         Self::new(config)
@@ -949,8 +950,8 @@ where
 
 impl<TimePrimitive, CostPrimitive> InstanceGenerator<TimePrimitive, CostPrimitive>
 where
-    TimePrimitive: PrimInt + Signed + NumCast + ToPrimitive + Debug + SampleUniform,
-    CostPrimitive: PrimInt + Signed + NumCast + Copy + SaturatingAdd + SaturatingMul,
+    TimePrimitive: SolverVariable + NumCast + ToPrimitive + Debug + SampleUniform,
+    CostPrimitive: SolverVariable + NumCast + Copy + SaturatingAdd + SaturatingMul,
 {
     pub fn new(config: InstanceGenConfig<TimePrimitive, CostPrimitive>) -> Self {
         let seed = config.seed();

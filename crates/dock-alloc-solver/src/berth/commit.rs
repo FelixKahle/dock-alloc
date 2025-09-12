@@ -20,19 +20,19 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use crate::berth::operations::Operation;
-use num_traits::{PrimInt, Signed};
+use dock_alloc_core::SolverVariable;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BerthOverlayCommit<T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     operations: Vec<Operation<T>>,
 }
 
 impl<T> BerthOverlayCommit<T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     pub fn new(operations: Vec<Operation<T>>) -> Self {
         Self { operations }

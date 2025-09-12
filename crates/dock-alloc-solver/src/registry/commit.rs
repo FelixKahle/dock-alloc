@@ -20,21 +20,21 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use crate::registry::operations::Operation;
-use num_traits::{PrimInt, Signed};
+use dock_alloc_core::SolverVariable;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LedgerOverlayCommit<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     operations: Vec<Operation<'a, T, C>>,
 }
 
 impl<'a, T, C> LedgerOverlayCommit<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     pub fn new(operations: Vec<Operation<'a, T, C>>) -> Self {
         Self { operations }

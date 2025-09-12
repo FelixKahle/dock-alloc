@@ -26,9 +26,11 @@ use crate::{
         state::{ConstructiveSolver, FeasibleSolverState, Solver, SolverState},
     },
 };
-use dock_alloc_core::time::{TimeInterval, TimePoint};
+use dock_alloc_core::{
+    SolverVariable,
+    time::{TimeInterval, TimePoint},
+};
 use dock_alloc_model::model::{AssignmentRef, Problem, SolutionRef};
-use num_traits::{PrimInt, Signed};
 use std::{cmp::Reverse, collections::BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,24 +45,43 @@ impl From<QuaySpaceIntervalOutOfBoundsError> for GreedySolverError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GreedySolver;
+pub struct GreedySolver<T, C, Q>
+where
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
+    Q: QuayRead + QuayWrite,
+{
+    _phantom: std::marker::PhantomData<(T, C, Q)>,
+}
 
-impl Default for GreedySolver {
+impl<T, C, Q> Default for GreedySolver<T, C, Q>
+where
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
+    Q: QuayRead + QuayWrite,
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl GreedySolver {
+impl<T, C, Q> GreedySolver<T, C, Q>
+where
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
+    Q: QuayRead + QuayWrite,
+{
     pub fn new() -> Self {
-        Self
+        Self {
+            _phantom: std::marker::PhantomData,
+        }
     }
 }
 
-impl<T, C, Q> Solver<T, C, Q> for GreedySolver
+impl<T, C, Q> Solver<T, C, Q> for GreedySolver<T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
     Q: QuayRead + QuayWrite,
 {
     type SolveError = GreedySolverError;
@@ -74,10 +95,10 @@ where
     }
 }
 
-impl<T, C, Q> ConstructiveSolver<T, C, Q> for GreedySolver
+impl<T, C, Q> ConstructiveSolver<T, C, Q> for GreedySolver<T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
     Q: QuayRead + QuayWrite,
 {
     type SolveError = GreedySolverError;
@@ -212,8 +233,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::berth::quay::{BTreeMapQuay, BooleanVecQuay};
+
     use super::*;
-    use crate::berth::{prelude::BooleanVecQuay, quay::BTreeMapQuay};
 
     use dock_alloc_core::{
         cost::Cost,
@@ -380,10 +402,8 @@ mod tests {
         pb.add_movable_request(r2.clone()).unwrap();
 
         let problem = pb.build();
-        let mut solver = GreedySolver::new();
-
-        let sol = <GreedySolver as Solver<i64, i64, BooleanVecQuay>>::solve(&mut solver, &problem)
-            .expect("solve");
+        let mut solver: GreedySolver<i64, i64, BooleanVecQuay> = GreedySolver::new();
+        let sol = solver.solve(&problem).expect("solve");
 
         assert_eq!(sol.decisions().len(), 2);
         assert_eq!(sol.stats().total_waiting_time(), TimeDelta::new(0));
@@ -397,7 +417,6 @@ mod tests {
 
     #[test]
     fn test_greedy_infeasible_tight_windows_errors_not_partial() {
-        use crate::berth::prelude::BooleanVecQuay;
         type Tm = i64;
         type Cm = i64;
 
@@ -433,7 +452,7 @@ mod tests {
         pb.add_movable_request(r2).unwrap();
         let problem = pb.build();
 
-        let mut solver = GreedySolver::new();
+        let mut solver: GreedySolver<i64, i64, BooleanVecQuay> = GreedySolver::new();
 
         // build_state must error (cannot assign both)
         let state_res: Result<FeasibleSolverState<'_, Tm, Cm, BooleanVecQuay>, _> =
@@ -445,8 +464,7 @@ mod tests {
         );
 
         // solve must error too (no partial SolutionRef)
-        let solve_res =
-            <GreedySolver as Solver<i64, i64, BooleanVecQuay>>::solve(&mut solver, &problem);
+        let solve_res = solver.solve(&problem);
         assert!(
             solve_res.is_ok(),
             "expected Ok, got error {:?}",

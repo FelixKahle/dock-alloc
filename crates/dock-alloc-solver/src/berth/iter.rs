@@ -27,6 +27,7 @@ use crate::{
     domain::SpaceTimeRectangle,
 };
 use dock_alloc_core::{
+    SolverVariable,
     iter::MaybeIter,
     mem::DoubleBuf,
     space::{SpaceInterval, SpaceLength},
@@ -37,7 +38,7 @@ use std::iter::FusedIterator;
 
 struct CandidateStartIter<'a, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + 'a,
 {
     view: &'a V,
@@ -49,7 +50,7 @@ where
 
 impl<'a, T, V> CandidateStartIter<'a, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + 'a,
 {
     fn new(view: &'a V, time_window: TimeInterval<T>, duration: TimeDelta<T>) -> Self {
@@ -66,7 +67,7 @@ where
 
 impl<'a, T, V> Iterator for CandidateStartIter<'a, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + 'a,
 {
     type Item = TimePoint<T>;
@@ -104,7 +105,7 @@ where
 
 pub struct FreeSlotIter<'a, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + 'a,
 {
     view: &'a V,
@@ -120,7 +121,7 @@ where
 
 impl<'a, T, V> FreeSlotIter<'a, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + 'a,
 {
     #[inline]
@@ -170,7 +171,7 @@ where
 
 impl<'a, T, V> Iterator for FreeSlotIter<'a, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + 'a,
 {
     type Item = FreeSlot<T>;
@@ -200,7 +201,7 @@ where
 
 struct Keys<'v, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + ?Sized + 'v,
 {
     view: &'v V,
@@ -211,7 +212,7 @@ where
 }
 impl<'v, T, V> Keys<'v, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + ?Sized + 'v,
 {
     fn new(view: &'v V, from: TimePoint<T>, to: TimePoint<T>) -> Self {
@@ -226,7 +227,7 @@ where
 }
 impl<'v, T, V> Iterator for Keys<'v, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + ?Sized + 'v,
 {
     type Item = TimePoint<T>;
@@ -253,7 +254,7 @@ fn calculate_breakpoints<T, V>(
     duration: TimeDelta<T>,
 ) -> Vec<TimePoint<T>>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T>,
 {
     let tw_start = time_window.start();
@@ -323,7 +324,7 @@ where
 
 pub struct FeasibleRegionIter<'a, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + 'a,
 {
     view: &'a V,
@@ -340,7 +341,7 @@ where
 
 impl<'a, T, V> FeasibleRegionIter<'a, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + 'a,
 {
     #[inline]
@@ -383,7 +384,7 @@ fn rep_start<T: PrimInt + Signed + Copy + One>(a: TimePoint<T>, b: TimePoint<T>)
 
 impl<'a, T, V> Iterator for FeasibleRegionIter<'a, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + 'a,
 {
     type Item = FreeRegion<T>;
@@ -479,7 +480,7 @@ fn runs_at<'v, T, V>(
     min_len: SpaceLength,
 ) -> impl Iterator<Item = SpaceInterval> + 'v
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     V: SliceView<T> + ?Sized + 'v,
 {
     let inner = (bounds.length() >= min_len).then(|| {
@@ -566,7 +567,7 @@ fn eroded_runs<'v, T, V>(
     min_len: SpaceLength,
     out_runs: &mut DoubleBuf<SpaceInterval>,
 ) where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + ?Sized + 'v,
 {
     let seed_tp = if view.has_key_at(start) {

@@ -33,20 +33,24 @@ use crate::{
     domain::SpaceTimeRectangle,
 };
 use dock_alloc_core::{
+    SolverVariable,
     marker::Brand,
     space::{SpaceInterval, SpaceLength, SpacePosition},
     time::{TimeDelta, TimeInterval, TimePoint},
 };
-use num_traits::{PrimInt, Signed};
-use std::ops::Bound::{Excluded, Unbounded};
 use std::{
     collections::BTreeMap,
     iter::{Copied, FusedIterator, Peekable},
 };
+use std::{
+    fmt::Debug,
+    ops::Bound::{Excluded, Unbounded},
+};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BrandedFreeSlot<'brand, T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     slot: FreeSlot<T>,
     _brand: Brand<'brand>,
@@ -54,7 +58,7 @@ where
 
 impl<'brand, T> BrandedFreeSlot<'brand, T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     #[inline]
     fn new(slot: FreeSlot<T>) -> Self {
@@ -72,7 +76,7 @@ where
 
 pub struct BrandedFreeRegion<'brand, T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     region: FreeRegion<T>,
     _brand: Brand<'brand>,
@@ -80,7 +84,7 @@ where
 
 impl<'brand, T> BrandedFreeRegion<'brand, T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     #[inline]
     fn new(region: FreeRegion<T>) -> Self {
@@ -105,7 +109,7 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BerthOccupancyOverlay<'brand, 'a, T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     Q: QuayRead,
 {
     berth_occupancy: &'a BerthOccupancy<T, Q>,
@@ -117,7 +121,7 @@ where
 
 impl<'brand, 'a, T, Q> SliceView<T> for BerthOccupancyOverlay<'brand, 'a, T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     Q: QuayRead,
 {
     type FreeRunsIter<'s>
@@ -189,14 +193,14 @@ where
 type SpaceIntervalSet = IntervalSet<SpacePosition>;
 
 #[derive(Clone, Debug)]
-struct KeysUnion<'a, T: PrimInt + Signed> {
+struct KeysUnion<'a, T: SolverVariable> {
     free_keys:
         Peekable<Copied<std::collections::btree_map::Keys<'a, TimePoint<T>, SpaceIntervalSet>>>,
     occupied_keys:
         Peekable<Copied<std::collections::btree_map::Keys<'a, TimePoint<T>, SpaceIntervalSet>>>,
 }
 
-impl<'a, T: PrimInt + Signed> KeysUnion<'a, T> {
+impl<'a, T: SolverVariable> KeysUnion<'a, T> {
     #[inline]
     fn new(
         free: &'a BTreeMap<TimePoint<T>, SpaceIntervalSet>,
@@ -209,7 +213,7 @@ impl<'a, T: PrimInt + Signed> KeysUnion<'a, T> {
     }
 }
 
-impl<'a, T: PrimInt + Signed> Iterator for KeysUnion<'a, T> {
+impl<'a, T: SolverVariable> Iterator for KeysUnion<'a, T> {
     type Item = TimePoint<T>;
     fn next(&mut self) -> Option<Self::Item> {
         let free_key = self.free_keys.peek().copied();
@@ -232,11 +236,11 @@ impl<'a, T: PrimInt + Signed> Iterator for KeysUnion<'a, T> {
     }
 }
 
-impl<'a, T: PrimInt + Signed> FusedIterator for KeysUnion<'a, T> {}
+impl<'a, T: SolverVariable> FusedIterator for KeysUnion<'a, T> {}
 
 impl<'brand, 'a, T, Q> BerthOccupancyOverlay<'brand, 'a, T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     Q: QuayRead,
 {
     /// Creates a new, empty overlay for a given `BerthOccupancy`.

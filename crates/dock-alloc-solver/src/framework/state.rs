@@ -21,8 +21,7 @@
 
 use crate::{
     berth::{
-        berthocc::BerthApplyValidationError,
-        prelude::BerthOccupancy,
+        berthocc::{BerthApplyValidationError, BerthOccupancy},
         quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError, QuayWrite},
     },
     domain::SpaceTimeRectangle,
@@ -30,6 +29,7 @@ use crate::{
     registry::ledger::{AssignmentLedger, LedgerApplyValidationError, LedgerError},
 };
 use dock_alloc_core::{
+    SolverVariable,
     space::{SpaceInterval, SpacePosition},
     time::{TimeInterval, TimePoint},
 };
@@ -37,7 +37,6 @@ use dock_alloc_model::model::{
     AssignmentBeforeArrivalTimeError, AssignmentExceedsQuayError,
     AssignmentOutsideSpaceWindowError, AssignmentRef, Kind, Problem, RequestId, SolutionRef,
 };
-use num_traits::{PrimInt, Signed, Zero};
 use std::fmt::{Debug, Display};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,8 +71,8 @@ impl std::error::Error for SolverStateApplyError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SolverState<'p, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     problem: &'p Problem<T, C>,
@@ -83,8 +82,8 @@ where
 
 impl<'p, T, C, Q> SolverState<'p, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     #[inline]
@@ -118,8 +117,8 @@ where
 
 impl<'p, T, C, Q> SolverState<'p, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead + QuayWrite,
 {
     pub fn apply_plan<'a>(
@@ -134,8 +133,8 @@ where
 
 impl<'p, T, C, Q> TryFrom<&'p Problem<T, C>> for SolverState<'p, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead + QuayWrite,
 {
     type Error = QuaySpaceIntervalOutOfBoundsError;
@@ -150,8 +149,8 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FeasibleSolverState<'p, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     problem: &'p Problem<T, C>,
@@ -160,13 +159,13 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SolverStateOverlapError<T: PrimInt + Signed> {
+pub struct SolverStateOverlapError<T: SolverVariable> {
     a: RequestId,
     b: RequestId,
     intersection: SpaceTimeRectangle<T>,
 }
 
-impl<T: PrimInt + Signed> SolverStateOverlapError<T> {
+impl<T: SolverVariable> SolverStateOverlapError<T> {
     #[inline]
     pub fn new(a: RequestId, b: RequestId, intersection: SpaceTimeRectangle<T>) -> Self {
         Self { a, b, intersection }
@@ -188,7 +187,7 @@ impl<T: PrimInt + Signed> SolverStateOverlapError<T> {
     }
 }
 
-impl<T: PrimInt + Signed + Display> std::fmt::Display for SolverStateOverlapError<T> {
+impl<T: SolverVariable + Display> std::fmt::Display for SolverStateOverlapError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -198,10 +197,10 @@ impl<T: PrimInt + Signed + Display> std::fmt::Display for SolverStateOverlapErro
     }
 }
 
-impl<T: PrimInt + Signed + Display + Debug> std::error::Error for SolverStateOverlapError<T> {}
+impl<T: SolverVariable + Display + Debug> std::error::Error for SolverStateOverlapError<T> {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FeasibleStateError<T: PrimInt + Signed> {
+pub enum FeasibleStateError<T: SolverVariable> {
     AssignmentBeforeArrivalTime(AssignmentBeforeArrivalTimeError<T>),
     AssignmentOutsideSpaceWindow(AssignmentOutsideSpaceWindowError),
     AssignmentExceedsQuay(AssignmentExceedsQuayError),
@@ -209,31 +208,31 @@ pub enum FeasibleStateError<T: PrimInt + Signed> {
     UnassignedRequests(Vec<RequestId>),
 }
 
-impl<T: PrimInt + Signed> From<AssignmentBeforeArrivalTimeError<T>> for FeasibleStateError<T> {
+impl<T: SolverVariable> From<AssignmentBeforeArrivalTimeError<T>> for FeasibleStateError<T> {
     fn from(value: AssignmentBeforeArrivalTimeError<T>) -> Self {
         FeasibleStateError::AssignmentBeforeArrivalTime(value)
     }
 }
 
-impl<T: PrimInt + Signed> From<AssignmentOutsideSpaceWindowError> for FeasibleStateError<T> {
+impl<T: SolverVariable> From<AssignmentOutsideSpaceWindowError> for FeasibleStateError<T> {
     fn from(value: AssignmentOutsideSpaceWindowError) -> Self {
         FeasibleStateError::AssignmentOutsideSpaceWindow(value)
     }
 }
 
-impl<T: PrimInt + Signed> From<AssignmentExceedsQuayError> for FeasibleStateError<T> {
+impl<T: SolverVariable> From<AssignmentExceedsQuayError> for FeasibleStateError<T> {
     fn from(value: AssignmentExceedsQuayError) -> Self {
         FeasibleStateError::AssignmentExceedsQuay(value)
     }
 }
 
-impl<T: PrimInt + Signed> From<SolverStateOverlapError<T>> for FeasibleStateError<T> {
+impl<T: SolverVariable> From<SolverStateOverlapError<T>> for FeasibleStateError<T> {
     fn from(value: SolverStateOverlapError<T>) -> Self {
         FeasibleStateError::Overlap(value)
     }
 }
 
-impl<T: PrimInt + Signed + Display + Debug> std::fmt::Display for FeasibleStateError<T> {
+impl<T: SolverVariable + Display + Debug> std::fmt::Display for FeasibleStateError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FeasibleStateError::AssignmentBeforeArrivalTime(e) => {
@@ -258,17 +257,17 @@ impl<T: PrimInt + Signed + Display + Debug> std::fmt::Display for FeasibleStateE
     }
 }
 
-impl<T: PrimInt + Signed + Display + Debug> std::error::Error for FeasibleStateError<T> {}
+impl<T: SolverVariable + Display + Debug> std::error::Error for FeasibleStateError<T> {}
 
 #[derive(Clone, Debug)]
-struct Item<T: PrimInt + Signed> {
+struct Item<T: SolverVariable> {
     req_id: RequestId,
     rect: SpaceTimeRectangle<T>,
     arrival_time: TimePoint<T>,
     feasible_space_window: SpaceInterval,
 }
 
-impl<T: PrimInt + Signed> Item<T> {
+impl<T: SolverVariable> Item<T> {
     fn new(
         req_id: RequestId,
         rect: SpaceTimeRectangle<T>,
@@ -287,8 +286,8 @@ impl<T: PrimInt + Signed> Item<T> {
 fn rect_for_assignment<K, T, C>(a: AssignmentRef<'_, K, T, C>) -> SpaceTimeRectangle<T>
 where
     K: Kind,
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     let t0 = a.start_time();
     let t1 = t0 + a.request().processing_duration();
@@ -299,8 +298,8 @@ where
 
 impl<'p, T, C, Q> FeasibleSolverState<'p, T, C, Q>
 where
-    T: PrimInt + Signed + Zero,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     #[inline]
@@ -470,12 +469,12 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FeasibleSolverStateApplyError<T: PrimInt + Signed> {
+pub enum FeasibleSolverStateApplyError<T: SolverVariable> {
     Berth(BerthApplyValidationError<T>),
     Ledger(LedgerApplyValidationError<T>),
 }
 
-impl<T: PrimInt + Signed + Display + Debug> std::fmt::Display for FeasibleSolverStateApplyError<T> {
+impl<T: SolverVariable + Display + Debug> std::fmt::Display for FeasibleSolverStateApplyError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FeasibleSolverStateApplyError::Berth(e) => write!(f, "Berth error: {}", e),
@@ -484,24 +483,24 @@ impl<T: PrimInt + Signed + Display + Debug> std::fmt::Display for FeasibleSolver
     }
 }
 
-impl<T: PrimInt + Signed> From<BerthApplyValidationError<T>> for FeasibleSolverStateApplyError<T> {
+impl<T: SolverVariable> From<BerthApplyValidationError<T>> for FeasibleSolverStateApplyError<T> {
     fn from(value: BerthApplyValidationError<T>) -> Self {
         FeasibleSolverStateApplyError::Berth(value)
     }
 }
 
-impl<T: PrimInt + Signed> From<LedgerApplyValidationError<T>> for FeasibleSolverStateApplyError<T> {
+impl<T: SolverVariable> From<LedgerApplyValidationError<T>> for FeasibleSolverStateApplyError<T> {
     fn from(value: LedgerApplyValidationError<T>) -> Self {
         FeasibleSolverStateApplyError::Ledger(value)
     }
 }
 
-impl<T: PrimInt + Signed + Display + Debug> std::error::Error for FeasibleSolverStateApplyError<T> {}
+impl<T: SolverVariable + Display + Debug> std::error::Error for FeasibleSolverStateApplyError<T> {}
 
 impl<'p, T, C, Q> FeasibleSolverState<'p, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead + QuayWrite,
 {
     pub fn apply_plan_validated(
@@ -516,8 +515,8 @@ where
 
 impl<'p, T, C, Q> TryFrom<FeasibleSolverState<'p, T, C, Q>> for SolverState<'p, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     type Error = FeasibleStateError<T>;
@@ -529,8 +528,8 @@ where
 
 impl<'p, T, C, Q> From<FeasibleSolverState<'p, T, C, Q>> for SolutionRef<'p, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
     Q: QuayRead,
 {
     fn from(value: FeasibleSolverState<'p, T, C, Q>) -> Self {
@@ -540,8 +539,8 @@ where
 
 pub trait ConstructiveSolver<T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     type SolveError;
@@ -554,8 +553,8 @@ where
 
 pub trait Solver<T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead + QuayWrite,
 {
     type SolveError;

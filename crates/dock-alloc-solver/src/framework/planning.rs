@@ -21,9 +21,9 @@
 
 use crate::{
     berth::{
+        berthocc::BerthOccupancy,
         commit::BerthOverlayCommit,
         overlay::{BerthOccupancyOverlay, BrandedFreeRegion, BrandedFreeSlot},
-        prelude::BerthOccupancy,
         quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError},
     },
     domain::SpaceTimeRectangle,
@@ -38,18 +38,18 @@ use crate::{
     },
 };
 use dock_alloc_core::{
+    SolverVariable,
     cost::Cost,
     space::{SpaceInterval, SpacePosition},
     time::{TimeDelta, TimeInterval, TimePoint},
 };
 use dock_alloc_model::model::{AnyAssignmentRef, AssignmentRef, Fixed, Kind, Problem};
-use num_traits::{PrimInt, Signed};
 use std::fmt::{Debug, Display};
 
 pub struct PlanningContext<'p, 'al, 'bo, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     ledger: &'al AssignmentLedger<'p, T, C>,
@@ -59,8 +59,8 @@ where
 
 impl<'p, 'al, 'bo, T, C, Q> PlanningContext<'p, 'al, 'bo, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     pub fn new(
@@ -100,8 +100,8 @@ where
 
 impl<'al, 'p, T, C> From<&BrandedMovableAssignment<'al, 'p, T, C>> for SpaceTimeRectangle<T>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     fn from(m: &BrandedMovableAssignment<'al, 'p, T, C>) -> Self {
         let a = m.assignment();
@@ -126,8 +126,8 @@ where
 impl<'p, K, T, C> From<AssignmentRef<'p, K, T, C>> for SpaceTimeRectangle<T>
 where
     K: Kind,
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     fn from(a: AssignmentRef<'p, K, T, C>) -> Self {
         // Time
@@ -150,8 +150,8 @@ where
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlanEval<T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     delta_cost: Cost<C>,
     delta_wait: TimeDelta<T>,
@@ -160,8 +160,8 @@ where
 
 impl<T, C> PlanEval<T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     #[inline]
     fn new(delta_cost: Cost<C>, delta_wait: TimeDelta<T>, delta_dev: i64) -> Self {
@@ -191,8 +191,8 @@ where
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plan<'p, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     eval: PlanEval<T, C>,
     berth_commit: BerthOverlayCommit<T>,
@@ -201,8 +201,8 @@ where
 
 impl<'p, T, C> Plan<'p, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     #[inline]
     fn new(
@@ -232,43 +232,43 @@ where
 
 #[repr(transparent)]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FreeRegionViolationError<T: PrimInt + Signed>(SpaceTimeRectangle<T>);
+pub struct FreeRegionViolationError<T: SolverVariable>(SpaceTimeRectangle<T>);
 
-impl<T: PrimInt + Signed> FreeRegionViolationError<T> {
+impl<T: SolverVariable> FreeRegionViolationError<T> {
     #[inline]
     pub fn requested(&self) -> &SpaceTimeRectangle<T> {
         &self.0
     }
 }
 
-impl<T: PrimInt + Signed + Display> Display for FreeRegionViolationError<T> {
+impl<T: SolverVariable + Display> Display for FreeRegionViolationError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Violated free region: {}", self.0)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ProposeError<T: PrimInt + Signed> {
+pub enum ProposeError<T: SolverVariable> {
     Stage(StageError),
     QuaySpaceIntervalOutOfBounds(QuaySpaceIntervalOutOfBoundsError),
     FreeRegionViolation(FreeRegionViolationError<T>),
 }
 
-impl<T: PrimInt + Signed> From<StageError> for ProposeError<T> {
+impl<T: SolverVariable> From<StageError> for ProposeError<T> {
     #[inline]
     fn from(e: StageError) -> Self {
         ProposeError::Stage(e)
     }
 }
 
-impl<T: PrimInt + Signed> From<QuaySpaceIntervalOutOfBoundsError> for ProposeError<T> {
+impl<T: SolverVariable> From<QuaySpaceIntervalOutOfBoundsError> for ProposeError<T> {
     #[inline]
     fn from(e: QuaySpaceIntervalOutOfBoundsError) -> Self {
         ProposeError::QuaySpaceIntervalOutOfBounds(e)
     }
 }
 
-impl<T: PrimInt + Signed + Display> Display for ProposeError<T> {
+impl<T: SolverVariable + Display> Display for ProposeError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ProposeError::Stage(e) => write!(f, "{}", e),
@@ -278,12 +278,12 @@ impl<T: PrimInt + Signed + Display> Display for ProposeError<T> {
     }
 }
 
-impl<T: PrimInt + Signed + Debug + Display> std::error::Error for ProposeError<T> {}
+impl<T: SolverVariable + Debug + Display> std::error::Error for ProposeError<T> {}
 
 pub struct PlanBuilder<'alob, 'boob, 'p, 'bo, 'al, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     problem: &'p Problem<T, C>,
@@ -293,8 +293,8 @@ where
 
 pub struct Explorer<'alob, 'boob, 'p, 'bo, 'al, 'pb, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     assignment_overlay: &'pb AssignmentLedgerOverlay<'alob, 'p, 'al, T, C>,
@@ -303,8 +303,8 @@ where
 
 impl<'alob, 'boob, 'p, 'bo, 'al, 'pb, T, C, Q> Explorer<'alob, 'boob, 'p, 'bo, 'al, 'pb, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     #[inline]
@@ -423,8 +423,8 @@ where
 
 impl<'alob, 'boob, 'p, 'bo, 'al, T, C, Q> PlanBuilder<'alob, 'boob, 'p, 'bo, 'al, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     fn new(
@@ -555,8 +555,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::berth::quay::BooleanVecQuay;
+
     use super::*;
-    use crate::berth::prelude::BooleanVecQuay;
     use dock_alloc_core::{
         space::{SpaceLength, SpacePosition},
         time::TimePoint,

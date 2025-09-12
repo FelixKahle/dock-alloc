@@ -65,7 +65,7 @@ impl<T: Debug + Display> std::error::Error for QuayOutOfBoundsError<T> {}
 
 pub type QuaySpaceIntervalOutOfBoundsError = QuayOutOfBoundsError<SpaceInterval>;
 
-pub trait QuayRead: Eq + Clone {
+pub trait QuayRead: Eq + Clone + Debug {
     fn new(total_space: SpaceLength, initially_free: bool) -> Self
     where
         Self: Sized;

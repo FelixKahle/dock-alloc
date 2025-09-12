@@ -20,14 +20,13 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use crate::domain::SpaceTimeRectangle;
-use dock_alloc_core::{space::SpaceInterval, time::TimePoint};
-use num_traits::{PrimInt, Signed};
+use dock_alloc_core::{SolverVariable, space::SpaceInterval, time::TimePoint};
 use std::fmt::Display;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FreeSlot<T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     start_time: TimePoint<T>,
     space: SpaceInterval,
@@ -35,7 +34,7 @@ where
 
 impl<T> FreeSlot<T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     #[inline]
     pub(crate) fn new(space: SpaceInterval, start_time: TimePoint<T>) -> Self {
@@ -55,7 +54,7 @@ where
 
 impl<T> Display for FreeSlot<T>
 where
-    T: PrimInt + Signed + Display,
+    T: SolverVariable,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "FreeSlot({}, {})", self.space, self.start_time)
@@ -66,11 +65,11 @@ where
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FreeRegion<T>(SpaceTimeRectangle<T>)
 where
-    T: PrimInt + Signed;
+    T: SolverVariable;
 
 impl<T> FreeRegion<T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     #[inline]
     pub fn new(rect: SpaceTimeRectangle<T>) -> Self {
@@ -85,7 +84,7 @@ where
 
 impl<T> Display for FreeRegion<T>
 where
-    T: PrimInt + Signed + Display,
+    T: SolverVariable,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "FreeRegion({})", self.0)
@@ -94,7 +93,7 @@ where
 
 impl<T> From<SpaceTimeRectangle<T>> for FreeRegion<T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     fn from(rect: SpaceTimeRectangle<T>) -> Self {
         Self::new(rect)

@@ -17,26 +17,24 @@
 // NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
 // LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use crate::{
-    berth::quay::QuayRead,
-    framework::planning::{Plan, PlanningContext},
+use dock_alloc_model::{
+    generator::{InstanceGenConfig, InstanceGenerator},
+    model::Problem,
 };
-use dock_alloc_core::SolverVariable;
-use rand::rngs::StdRng;
+use dock_alloc_solver::{
+    berth::quay::BTreeMapQuay, framework::state::Solver, greedy::GreedySolver,
+};
 
-pub trait Operator: Send + Sync {
-    type Time: SolverVariable;
-    type Cost: SolverVariable;
-    type Quay: QuayRead;
+fn main() {
+    // Generate the Problem
+    let mut generator: InstanceGenerator<i64, i64> = InstanceGenConfig::default().into();
+    let problem: Problem<i64, i64> = generator.generate();
+    println!("{}", problem);
 
-    fn name(&self) -> &'static str;
-
-    fn propose<'p, 'al, 'bo>(
-        &self,
-        iteration: usize,
-        rng: &mut StdRng,
-        ctx: PlanningContext<'p, 'al, 'bo, Self::Time, Self::Cost, Self::Quay>,
-    ) -> Plan<'p, Self::Time, Self::Cost>;
+    // Solve the Problem
+    let mut greedy: GreedySolver<i64, i64, BTreeMapQuay> = GreedySolver::new();
+    let solution = greedy.solve(&problem).unwrap();
+    println!("Solution: {}", solution);
 }

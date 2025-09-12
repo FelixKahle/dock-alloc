@@ -21,20 +21,20 @@
 
 use std::fmt::Display;
 
+use dock_alloc_core::SolverVariable;
 use dock_alloc_model::model::{AssignmentRef, Movable};
-use num_traits::{PrimInt, Signed};
 
 #[repr(transparent)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssignOperation<'a, T, C>(AssignmentRef<'a, Movable, T, C>)
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed;
+    T: SolverVariable,
+    C: SolverVariable;
 
 impl<'a, T, C> AssignOperation<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     pub fn new(assignment: AssignmentRef<'a, Movable, T, C>) -> Self {
         Self(assignment)
@@ -47,8 +47,8 @@ where
 
 impl<'a, T, C> From<AssignmentRef<'a, Movable, T, C>> for AssignOperation<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     fn from(assignment: AssignmentRef<'a, Movable, T, C>) -> Self {
         Self::new(assignment)
@@ -57,8 +57,8 @@ where
 
 impl<'a, T, C> Display for AssignOperation<'a, T, C>
 where
-    T: PrimInt + Signed + Display,
-    C: PrimInt + Signed + Display,
+    T: SolverVariable + Display,
+    C: SolverVariable + Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Assign({})", self.0)
@@ -69,13 +69,13 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnassignOperation<'a, T, C>(AssignmentRef<'a, Movable, T, C>)
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed;
+    T: SolverVariable,
+    C: SolverVariable;
 
 impl<'a, T, C> UnassignOperation<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     pub fn new(assignment: AssignmentRef<'a, Movable, T, C>) -> Self {
         Self(assignment)
@@ -88,8 +88,8 @@ where
 
 impl<'a, T, C> From<AssignmentRef<'a, Movable, T, C>> for UnassignOperation<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     fn from(assignment: AssignmentRef<'a, Movable, T, C>) -> Self {
         Self::new(assignment)
@@ -98,8 +98,8 @@ where
 
 impl<'a, T, C> Display for UnassignOperation<'a, T, C>
 where
-    T: PrimInt + Signed + Display,
-    C: PrimInt + Signed + Display,
+    T: SolverVariable + Display,
+    C: SolverVariable + Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Unassign({})", self.0)
@@ -109,8 +109,8 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Operation<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     Assign(AssignOperation<'a, T, C>),
     Unassign(UnassignOperation<'a, T, C>),
@@ -118,8 +118,8 @@ where
 
 impl<'a, T, C> Operation<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     pub fn assignment(&self) -> &AssignmentRef<'a, Movable, T, C> {
         match self {
@@ -131,8 +131,8 @@ where
 
 impl<'a, T, C> From<AssignOperation<'a, T, C>> for Operation<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     fn from(op: AssignOperation<'a, T, C>) -> Self {
         Self::Assign(op)
@@ -141,8 +141,8 @@ where
 
 impl<'a, T, C> From<UnassignOperation<'a, T, C>> for Operation<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     fn from(op: UnassignOperation<'a, T, C>) -> Self {
         Self::Unassign(op)
@@ -151,8 +151,8 @@ where
 
 impl<'a, T, C> Display for Operation<'a, T, C>
 where
-    T: PrimInt + Signed + Display,
-    C: PrimInt + Signed + Display,
+    T: SolverVariable + Display,
+    C: SolverVariable + Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

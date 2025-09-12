@@ -25,7 +25,7 @@ use dock_alloc_core::{
     time::{TimeDelta, TimeInterval, TimePoint},
 };
 use dock_alloc_solver::{
-    berth::{prelude::BerthOccupancy, quay::BTreeMapQuay, slice::SliceView},
+    berth::{berthocc::BerthOccupancy, quay::BTreeMapQuay, slice::SliceView},
     domain::SpaceTimeRectangle,
 };
 use rand::{Rng, SeedableRng, rngs::StdRng};

@@ -24,8 +24,8 @@ use crate::{
         commit::BerthOverlayCommit,
         domain::{FreeRegion, FreeSlot},
         iter::{FeasibleRegionIter, FreeSlotIter},
+        operations::Operation,
         overlay::BerthOccupancyOverlay,
-        prelude::Operation,
         quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError, QuayWrite},
         slice::{SliceView, TimeSliceRef},
     },
@@ -33,12 +33,14 @@ use crate::{
     domain::SpaceTimeRectangle,
 };
 use dock_alloc_core::{
+    SolverVariable,
     space::{SpaceInterval, SpaceLength, SpacePosition},
     time::{TimeDelta, TimeInterval, TimePoint},
 };
 use dock_alloc_model::model::Problem;
-use num_traits::{PrimInt, Signed, Zero};
-use std::ops::Bound::Excluded;
+use num_traits::{PrimInt, Signed};
+use std::{fmt::Debug, ops::Bound::Excluded};
+use tracing::instrument;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BerthApplyValidationError<T: PrimInt + Signed> {
@@ -62,7 +64,7 @@ impl<T: PrimInt + Signed + std::fmt::Display + std::fmt::Debug> std::error::Erro
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Slices<'a, T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     Q: QuayRead,
 {
     berth: &'a BerthOccupancy<T, Q>,
@@ -72,7 +74,7 @@ where
 
 impl<'a, T, Q> Slices<'a, T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     Q: QuayRead,
 {
     #[inline]
@@ -162,7 +164,7 @@ where
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BerthOccupancy<T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     quay_length: SpaceLength,
     timeline: Timeline<TimePoint<T>, Q>,
@@ -170,7 +172,7 @@ where
 
 impl<T, Q> BerthOccupancy<T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     Q: QuayRead + Clone + PartialEq,
 {
     #[inline]
@@ -181,7 +183,7 @@ where
 
 impl<T, Q> SliceView<T> for BerthOccupancy<T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     Q: QuayRead,
 {
     type FreeRunsIter<'s>
@@ -216,7 +218,7 @@ where
 
 impl<T, Q> BerthOccupancy<T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     Q: QuayRead + Clone + PartialEq,
 {
     #[inline]
@@ -270,6 +272,7 @@ where
         self.timeline.at(t)
     }
 
+    #[instrument(level = "debug")]
     #[inline]
     pub fn is_free(
         &self,
@@ -335,7 +338,7 @@ where
 
 impl<T, Q> BerthOccupancy<T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     Q: QuayRead + QuayWrite + Clone + PartialEq,
 {
     fn apply_in<F>(
@@ -428,8 +431,8 @@ where
 
 impl<T, C, Q> TryFrom<&Problem<T, C>> for BerthOccupancy<T, Q>
 where
-    T: PrimInt + Signed + Zero + Copy,
-    C: PrimInt + Signed + Zero + Copy,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead + QuayWrite,
 {
     type Error = QuaySpaceIntervalOutOfBoundsError;
@@ -456,9 +459,10 @@ where
 mod tests {
     use super::*;
     use crate::berth::{
-        prelude::{FreeOperation, OccupyOperation, Operation},
+        operations::{FreeOperation, OccupyOperation},
         quay::BooleanVecQuay,
     };
+    use num_traits::Zero;
 
     type T = i64;
     type BO = BerthOccupancy<T, BooleanVecQuay>;

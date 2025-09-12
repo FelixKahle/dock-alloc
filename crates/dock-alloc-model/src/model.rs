@@ -19,10 +19,10 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+use dock_alloc_core::SolverVariable;
 use dock_alloc_core::cost::Cost;
 use dock_alloc_core::space::{SpaceInterval, SpaceLength, SpacePosition};
 use dock_alloc_core::time::{TimeDelta, TimeInterval, TimePoint};
-use num_traits::{PrimInt, Signed};
 use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::{collections::HashMap, hash::Hash};
@@ -183,8 +183,8 @@ impl std::error::Error for SpaceWindowTooShortError {}
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Request<K: Kind, T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     id: RequestId,
     length: SpaceLength,
@@ -197,7 +197,7 @@ where
     _k: PhantomData<K>,
 }
 
-impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> Request<K, T, C> {
+impl<K: Kind, T: SolverVariable, C: SolverVariable> Request<K, T, C> {
     #[allow(clippy::too_many_arguments)]
     #[inline]
     pub fn new(
@@ -278,7 +278,7 @@ impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> Request<K, T, C> {
     }
 }
 
-impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed + TryFrom<T>> Request<K, T, C> {
+impl<K: Kind, T: SolverVariable, C: SolverVariable + TryFrom<T>> Request<K, T, C> {
     #[inline]
     pub fn waiting_cost(&self, waiting_time: TimeDelta<T>) -> Cost<C> {
         let scalar: C = C::try_from(waiting_time.value())
@@ -288,7 +288,7 @@ impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed + TryFrom<T>> Request<K, 
     }
 }
 
-impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed + TryFrom<usize>> Request<K, T, C> {
+impl<K: Kind, T: SolverVariable, C: SolverVariable + TryFrom<usize>> Request<K, T, C> {
     #[inline]
     pub fn target_position_deviation_cost(&self, deviation: SpaceLength) -> Cost<C> {
         let scalar: C = C::try_from(deviation.value())
@@ -298,7 +298,7 @@ impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed + TryFrom<usize>> Request
     }
 }
 
-impl<K: Kind, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> Display
+impl<K: Kind, T: SolverVariable + Display, C: SolverVariable + Display> Display
     for Request<K, T, C>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -323,15 +323,15 @@ impl<K: Kind, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> Disp
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Assignment<K: Kind, T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     request: Request<K, T, C>,
     start_position: SpacePosition,
     start_time: TimePoint<T>,
 }
 
-impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> Assignment<K, T, C> {
+impl<K: Kind, T: SolverVariable, C: SolverVariable> Assignment<K, T, C> {
     #[inline]
     pub fn new(
         request: Request<K, T, C>,
@@ -418,7 +418,7 @@ impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> Assignment<K, T, C> {
     }
 }
 
-impl<K: Kind, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> Display
+impl<K: Kind, T: SolverVariable + Display, C: SolverVariable + Display> Display
     for Assignment<K, T, C>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -436,15 +436,15 @@ impl<K: Kind, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> Disp
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AssignmentRef<'a, K: Kind, T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     request: &'a Request<K, T, C>,
     start_position: SpacePosition,
     start_time: TimePoint<T>,
 }
 
-impl<'a, K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> AssignmentRef<'a, K, T, C> {
+impl<'a, K: Kind, T: SolverVariable, C: SolverVariable> AssignmentRef<'a, K, T, C> {
     #[inline]
     pub fn new(
         request: &'a Request<K, T, C>,
@@ -536,7 +536,7 @@ impl<'a, K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> AssignmentRef<'a, K,
     }
 }
 
-impl<'a, K: Kind, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> Display
+impl<'a, K: Kind, T: SolverVariable + Display, C: SolverVariable + Display> Display
     for AssignmentRef<'a, K, T, C>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -554,14 +554,14 @@ impl<'a, K: Kind, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AnyRequest<T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     Movable(Request<Movable, T, C>),
     Fixed(Request<Fixed, T, C>),
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
+impl<T: SolverVariable, C: SolverVariable> AnyRequest<T, C> {
     pub fn id(&self) -> RequestId {
         match self {
             AnyRequest::Movable(r) => r.id(),
@@ -634,13 +634,13 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
     }
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Request<Movable, T, C>> for AnyRequest<T, C> {
+impl<T: SolverVariable, C: SolverVariable> From<Request<Movable, T, C>> for AnyRequest<T, C> {
     fn from(r: Request<Movable, T, C>) -> Self {
         AnyRequest::Movable(r)
     }
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Request<Fixed, T, C>> for AnyRequest<T, C> {
+impl<T: SolverVariable, C: SolverVariable> From<Request<Fixed, T, C>> for AnyRequest<T, C> {
     fn from(r: Request<Fixed, T, C>) -> Self {
         AnyRequest::Fixed(r)
     }
@@ -649,8 +649,8 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Request<Fixed, T, C>> for An
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AnyRequestRef<'a, T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     Movable(&'a Request<Movable, T, C>),
     Fixed(&'a Request<Fixed, T, C>),
@@ -658,8 +658,8 @@ where
 
 impl<'a, T, C> AnyRequestRef<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     pub fn id(&self) -> RequestId {
         match self {
@@ -733,7 +733,7 @@ where
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Request<Movable, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<&'a Request<Movable, T, C>>
     for AnyRequestRef<'a, T, C>
 {
     fn from(r: &'a Request<Movable, T, C>) -> Self {
@@ -741,7 +741,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Request<Movable, T, 
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Request<Fixed, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<&'a Request<Fixed, T, C>>
     for AnyRequestRef<'a, T, C>
 {
     fn from(r: &'a Request<Fixed, T, C>) -> Self {
@@ -752,18 +752,30 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Request<Fixed, T, C>
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AnyAssignment<T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     request: AnyRequest<T, C>,
     start_position: SpacePosition,
     start_time: TimePoint<T>,
 }
 
+impl<T: SolverVariable, C: SolverVariable> Display for AnyAssignment<T, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "AnyAssignment(request_id: {}, start_position: {}, start_time: {})",
+            self.request.id(),
+            self.start_position,
+            self.start_time
+        )
+    }
+}
+
 impl<T, C> AnyAssignment<T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     fn new(
         request: AnyRequest<T, C>,
@@ -814,18 +826,32 @@ where
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AnyAssignmentRef<'a, T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     request: AnyRequestRef<'a, T, C>,
     start_position: SpacePosition,
     start_time: TimePoint<T>,
 }
 
+impl<'a, T: SolverVariable + Display, C: SolverVariable + Display> Display
+    for AnyAssignmentRef<'a, T, C>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "AnyAssignmentRef(request_id: {}, start_position: {}, start_time: {})",
+            self.request.id(),
+            self.start_position,
+            self.start_time
+        )
+    }
+}
+
 impl<'a, T, C> AnyAssignmentRef<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     #[inline]
     fn new(
@@ -883,7 +909,7 @@ where
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<Movable, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<&'a Assignment<Movable, T, C>>
     for AnyAssignmentRef<'a, T, C>
 {
     #[inline]
@@ -896,7 +922,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<Movable, 
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<Fixed, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<&'a Assignment<Fixed, T, C>>
     for AnyAssignmentRef<'a, T, C>
 {
     #[inline]
@@ -909,7 +935,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<Fixed, T,
     }
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<Movable, T, C>>
+impl<T: SolverVariable, C: SolverVariable> From<&Assignment<Movable, T, C>>
     for AnyAssignment<T, C>
 {
     #[inline]
@@ -922,9 +948,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<Movable, T, C>>
     }
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<Fixed, T, C>>
-    for AnyAssignment<T, C>
-{
+impl<T: SolverVariable, C: SolverVariable> From<&Assignment<Fixed, T, C>> for AnyAssignment<T, C> {
     #[inline]
     fn from(a: &Assignment<Fixed, T, C>) -> Self {
         AnyAssignment::new(
@@ -935,9 +959,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<Fixed, T, C>>
     }
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<Movable, T, C>>
-    for AnyAssignment<T, C>
-{
+impl<T: SolverVariable, C: SolverVariable> From<Assignment<Movable, T, C>> for AnyAssignment<T, C> {
     fn from(a: Assignment<Movable, T, C>) -> Self {
         AnyAssignment::new(
             AnyRequest::Movable(a.request().clone()),
@@ -947,9 +969,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<Movable, T, C>>
     }
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<Fixed, T, C>>
-    for AnyAssignment<T, C>
-{
+impl<T: SolverVariable, C: SolverVariable> From<Assignment<Fixed, T, C>> for AnyAssignment<T, C> {
     fn from(a: Assignment<Fixed, T, C>) -> Self {
         AnyAssignment::new(
             AnyRequest::Fixed(a.request().clone()),
@@ -959,7 +979,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<Fixed, T, C>>
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a AssignmentRef<'a, Movable, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<&'a AssignmentRef<'a, Movable, T, C>>
     for AnyAssignmentRef<'a, T, C>
 {
     #[inline]
@@ -972,7 +992,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a AssignmentRef<'a, Mo
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a AssignmentRef<'a, Fixed, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<&'a AssignmentRef<'a, Fixed, T, C>>
     for AnyAssignmentRef<'a, T, C>
 {
     #[inline]
@@ -985,7 +1005,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a AssignmentRef<'a, Fi
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&AssignmentRef<'a, Movable, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<&AssignmentRef<'a, Movable, T, C>>
     for AnyAssignment<T, C>
 {
     #[inline]
@@ -998,7 +1018,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&AssignmentRef<'a, Movab
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&AssignmentRef<'a, Fixed, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<&AssignmentRef<'a, Fixed, T, C>>
     for AnyAssignment<T, C>
 {
     #[inline]
@@ -1011,7 +1031,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&AssignmentRef<'a, Fixed
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Movable, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<AssignmentRef<'a, Movable, T, C>>
     for AnyAssignment<T, C>
 {
     fn from(a: AssignmentRef<'a, Movable, T, C>) -> Self {
@@ -1023,7 +1043,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Movabl
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Fixed, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<AssignmentRef<'a, Fixed, T, C>>
     for AnyAssignment<T, C>
 {
     fn from(a: AssignmentRef<'a, Fixed, T, C>) -> Self {
@@ -1035,7 +1055,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Fixed,
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Movable, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<AssignmentRef<'a, Movable, T, C>>
     for AnyAssignmentRef<'a, T, C>
 {
     fn from(a: AssignmentRef<'a, Movable, T, C>) -> Self {
@@ -1047,7 +1067,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Movabl
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Fixed, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<AssignmentRef<'a, Fixed, T, C>>
     for AnyAssignmentRef<'a, T, C>
 {
     fn from(a: AssignmentRef<'a, Fixed, T, C>) -> Self {
@@ -1060,13 +1080,13 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Fixed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct AssignmentBeforeArrivalTimeError<T: PrimInt + Signed> {
+pub struct AssignmentBeforeArrivalTimeError<T: SolverVariable> {
     id: RequestId,
     arrival_time: TimePoint<T>,
     assigned_start_time: TimePoint<T>,
 }
 
-impl<T: PrimInt + Signed> AssignmentBeforeArrivalTimeError<T> {
+impl<T: SolverVariable> AssignmentBeforeArrivalTimeError<T> {
     #[inline]
     pub fn new(
         id: RequestId,
@@ -1096,7 +1116,7 @@ impl<T: PrimInt + Signed> AssignmentBeforeArrivalTimeError<T> {
     }
 }
 
-impl<T: PrimInt + Signed + Display> std::fmt::Display for AssignmentBeforeArrivalTimeError<T> {
+impl<T: SolverVariable + Display> std::fmt::Display for AssignmentBeforeArrivalTimeError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -1106,7 +1126,7 @@ impl<T: PrimInt + Signed + Display> std::fmt::Display for AssignmentBeforeArriva
     }
 }
 
-impl<T: PrimInt + Signed + Debug + Display> std::error::Error
+impl<T: SolverVariable + Debug + Display> std::error::Error
     for AssignmentBeforeArrivalTimeError<T>
 {
 }
@@ -1238,7 +1258,7 @@ impl Display for PreassignedOverlapError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ProblemBuildError<T: PrimInt + Signed> {
+pub enum ProblemBuildError<T: SolverVariable> {
     DuplicateRequestId(RequestId),
     AssignmentBeforeArrivalTime(AssignmentBeforeArrivalTimeError<T>),
     AssignmentOutsideSpaceWindow(AssignmentOutsideSpaceWindowError),
@@ -1246,7 +1266,7 @@ pub enum ProblemBuildError<T: PrimInt + Signed> {
     PreassignedOverlap(PreassignedOverlapError),
 }
 
-impl<T: PrimInt + Signed + Display> Display for ProblemBuildError<T> {
+impl<T: SolverVariable + Display> Display for ProblemBuildError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ProblemBuildError::DuplicateRequestId(id) => write!(f, "Duplicate request ID: {}", id),
@@ -1258,13 +1278,13 @@ impl<T: PrimInt + Signed + Display> Display for ProblemBuildError<T> {
     }
 }
 
-impl<T: PrimInt + Signed + Debug + Display> std::error::Error for ProblemBuildError<T> {}
+impl<T: SolverVariable + Debug + Display> std::error::Error for ProblemBuildError<T> {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Problem<T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     movables: Vec<Request<Movable, T, C>>,
     movable_index: HashMap<MovableRequestId, usize>,
@@ -1275,7 +1295,7 @@ where
     quay_length: SpaceLength,
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> Problem<T, C> {
+impl<T: SolverVariable, C: SolverVariable> Problem<T, C> {
     #[inline]
     pub fn quay_length(&self) -> SpaceLength {
         self.quay_length
@@ -1331,17 +1351,33 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> Problem<T, C> {
     }
 }
 
+impl<T: SolverVariable, C: SolverVariable> Display for Problem<T, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Problem:")?;
+        writeln!(f, "  Quay length: {}", self.quay_length)?;
+        writeln!(f, "  Movable requests ({}):", self.movables.len())?;
+        for r in &self.movables {
+            writeln!(f, "    {}", r)?;
+        }
+        writeln!(f, "  Preassigned ({}):", self.preassigned.len())?;
+        for a in &self.preassigned {
+            writeln!(f, "    {}", a)?;
+        }
+        Ok(())
+    }
+}
+
 pub struct ProblemBuilder<T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     movables: HashMap<MovableRequestId, Request<Movable, T, C>>,
     preassigned: HashMap<FixedRequestId, Assignment<Fixed, T, C>>,
     quay_length: SpaceLength,
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> ProblemBuilder<T, C> {
+impl<T: SolverVariable, C: SolverVariable> ProblemBuilder<T, C> {
     #[inline]
     pub fn new(quay_length: SpaceLength) -> Self {
         Self {
@@ -1466,15 +1502,33 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> ProblemBuilder<T, C> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SolutionStats<T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     total_cost: Cost<C>,
     total_waiting_time: TimeDelta<T>,
     total_target_position_deviation: SpaceLength,
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> SolutionStats<T, C> {
+impl<T, C> Display for SolutionStats<T, C>
+where
+    T: SolverVariable,
+    C: SolverVariable,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Solution statistics:")?;
+        writeln!(f, "  Total cost: {}", self.total_cost)?;
+        writeln!(f, "  Total waiting time: {}", self.total_waiting_time)?;
+        writeln!(
+            f,
+            "  Total target position deviation: {}",
+            self.total_target_position_deviation
+        )?;
+        Ok(())
+    }
+}
+
+impl<T: SolverVariable, C: SolverVariable> SolutionStats<T, C> {
     #[inline]
     fn new(
         total_cost: Cost<C>,
@@ -1506,17 +1560,32 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> SolutionStats<T, C> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnedSolution<T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     decisions: HashMap<RequestId, AnyAssignment<T, C>>,
     stats: SolutionStats<T, C>,
 }
 
+impl<T, C> Display for OwnedSolution<T, C>
+where
+    T: SolverVariable,
+    C: SolverVariable,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Solution:")?;
+        for a in self.decisions.values() {
+            writeln!(f, "{}", a)?;
+        }
+        writeln!(f)?;
+        write!(f, "{}", self.stats)
+    }
+}
+
 impl<T, C> OwnedSolution<T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     #[inline]
     fn new(decisions: HashMap<RequestId, AnyAssignment<T, C>>, stats: SolutionStats<T, C>) -> Self {
@@ -1537,17 +1606,32 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SolutionRef<'a, T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     decisions: HashMap<RequestId, AnyAssignmentRef<'a, T, C>>,
     stats: SolutionStats<T, C>,
 }
 
+impl<T, C> Display for SolutionRef<'_, T, C>
+where
+    T: SolverVariable,
+    C: SolverVariable,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Solution:")?;
+        for a in self.decisions.values() {
+            writeln!(f, "{}", a)?;
+        }
+        writeln!(f)?;
+        write!(f, "{}", self.stats)
+    }
+}
+
 impl<'a, T, C> SolutionRef<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
 {
     #[inline]
     pub fn new(
@@ -1611,8 +1695,8 @@ where
 
 impl<'a, T, C> SolutionRef<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     #[inline]
     pub fn to_owned(&self) -> OwnedSolution<T, C> {
@@ -1639,8 +1723,8 @@ where
 
 impl<'a, T, C> From<&SolutionRef<'a, T, C>> for OwnedSolution<T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     #[inline]
     fn from(s: &SolutionRef<'a, T, C>) -> Self {

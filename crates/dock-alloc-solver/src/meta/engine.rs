@@ -19,8 +19,8 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use dock_alloc_core::cost::Cost;
-use num_traits::{PrimInt, Signed, Zero};
+use dock_alloc_core::{SolverVariable, cost::Cost};
+use num_traits::Zero;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use rayon::prelude::*;
 use std::{
@@ -41,7 +41,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct OperatorStats<C: PrimInt + Signed> {
+pub struct OperatorStats<C: SolverVariable> {
     attempts: u64,
     accepted: u64,
     ewma_reward: f64,
@@ -50,7 +50,7 @@ pub struct OperatorStats<C: PrimInt + Signed> {
     emwa_eval_ns_per_proposal: f64,
 }
 
-impl<C: PrimInt + Signed + Zero> Default for OperatorStats<C> {
+impl<C: SolverVariable + Zero> Default for OperatorStats<C> {
     fn default() -> Self {
         Self {
             attempts: 0,
@@ -63,7 +63,7 @@ impl<C: PrimInt + Signed + Zero> Default for OperatorStats<C> {
     }
 }
 
-impl<C: PrimInt + Signed + Zero> OperatorStats<C> {
+impl<C: SolverVariable + Zero> OperatorStats<C> {
     pub fn on_attempt(&mut self) {
         self.attempts += 1;
     }
@@ -83,8 +83,8 @@ impl<C: PrimInt + Signed + Zero> OperatorStats<C> {
 
 pub struct OperatorRecord<T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     operator: Box<dyn Operator<Time = T, Cost = C, Quay = Q>>,
@@ -93,8 +93,8 @@ where
 
 impl<T, C, Q> OperatorRecord<T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     pub fn new(operator: Box<dyn Operator<Time = T, Cost = C, Quay = Q>>) -> Self {
@@ -119,8 +119,8 @@ where
 
 struct Candidate<'p, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     op_idx: usize,
     plan: Plan<'p, T, C>,
@@ -130,8 +130,8 @@ where
 
 pub struct MetaEngine<T, C, Q, S>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead + QuayWrite,
     S: ConstructiveSolver<T, C, Q>,
 {
@@ -143,8 +143,8 @@ where
 #[derive(Debug, Clone, PartialEq)]
 pub enum MetaEngineError<T, C, Q, S>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead + QuayWrite,
     S: ConstructiveSolver<T, C, Q>,
 {
@@ -154,8 +154,8 @@ where
 
 impl<T, C, Q, S> From<FeasibleSolverStateApplyError<T>> for MetaEngineError<T, C, Q, S>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead + QuayWrite,
     S: ConstructiveSolver<T, C, Q>,
 {
@@ -166,8 +166,8 @@ where
 
 impl<T, C, Q, S> MetaEngine<T, C, Q, S>
 where
-    T: PrimInt + Signed + Send + Sync + Debug,
-    C: PrimInt + Signed + Send + Sync + Display,
+    T: SolverVariable + Send + Sync + Debug,
+    C: SolverVariable + Send + Sync + Display,
     Q: QuayRead + QuayWrite + Send + Sync,
     S: ConstructiveSolver<T, C, Q> + Sync,
 {
@@ -357,8 +357,8 @@ where
 
 impl<T, C, Q, S> Solver<T, C, Q> for MetaEngine<T, C, Q, S>
 where
-    T: PrimInt + Signed + Send + Sync + Debug,
-    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize> + Send + Sync + Display,
+    T: SolverVariable + Send + Sync + Debug,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize> + Send + Sync + Display,
     Q: QuayRead + QuayWrite + Send + Sync,
     S: ConstructiveSolver<T, C, Q> + Sync,
 {
@@ -411,7 +411,7 @@ fn ewma(prev: f64, x: f64, alpha: f64) -> f64 {
     }
 }
 
-fn proposals_per_task<C: PrimInt + Signed>(
+fn proposals_per_task<C: SolverVariable>(
     stats: &OperatorStats<C>,
     shard: &ShardConfig,
     stats_cfg: &StatsConfig,
@@ -422,7 +422,7 @@ fn proposals_per_task<C: PrimInt + Signed>(
     target.clamp(shard.min_proposals_per_task, shard.max_proposals_per_task)
 }
 
-fn softmax_alloc<C: PrimInt + Signed>(
+fn softmax_alloc<C: SolverVariable>(
     stats: &[OperatorStats<C>],
     alloc: &AllocationConfig,
     stats_cfg: &StatsConfig,
@@ -469,7 +469,7 @@ mod tests {
     type T = i64;
     type C = i64;
     type Q = BTreeMapQuay;
-    type S = GreedySolver;
+    type S = GreedySolver<T, C, Q>;
 
     assert_type_eq_all!(T, i64);
     assert_type_eq_all!(C, i64);
