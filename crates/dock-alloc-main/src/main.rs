@@ -23,16 +23,12 @@ use dock_alloc_model::{
     generator::{InstanceGenConfig, InstanceGenerator},
     model::Problem,
 };
+use dock_alloc_solver::meta::oplib::{self};
 use dock_alloc_solver::{
     berth::quay::BTreeMapQuay,
     framework::state::Solver,
     greedy::GreedySolver,
-    meta::{
-        config::MetaConfig,
-        engine::MetaEngine,
-        operator::Operator,
-        oplib::{RandomDestroyRepairOperator, RandomSwapOperator, RelocateLocal},
-    },
+    meta::{config::MetaConfig, engine::MetaEngine},
 };
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 
@@ -61,17 +57,7 @@ fn main() {
     let greedy_solution = greedy.solve(&problem).unwrap();
 
     let greedy: GreedySolver<i64, i64, BTreeMapQuay> = GreedySolver::new();
-    let operators: Vec<
-        Box<dyn Operator<Time = i64, Cost = i64, Quay = BTreeMapQuay> + Send + Sync>,
-    > = vec![
-        Box::new(RandomSwapOperator::<i64, i64, BTreeMapQuay>::from_problem(
-            &problem,
-        )),
-        Box::new(RandomDestroyRepairOperator::<i64, i64, BTreeMapQuay>::from_problem(&problem)),
-        Box::new(RelocateLocal::<i64, i64, BTreeMapQuay>::from_problem(
-            &problem,
-        )),
-    ];
+    let operators = oplib::prelude::op_list::<i64, i64, BTreeMapQuay>(&problem);
     let mut meta: MetaEngine<i64, i64, BTreeMapQuay, GreedySolver<i64, i64, BTreeMapQuay>> =
         MetaEngine::new(MetaConfig::default(), operators, greedy);
     let meta_solution = meta.solve(&problem).unwrap();

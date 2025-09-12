@@ -88,7 +88,7 @@ impl Default for AnnealingConfig {
     fn default() -> Self {
         Self {
             initial_temperature: 1.0,
-            cooling_rate: 0.995,
+            cooling_rate: 0.9995,
             min_temperature: 1e-9,
         }
     }
@@ -126,7 +126,7 @@ pub struct MetaConfig {
 impl Default for MetaConfig {
     fn default() -> Self {
         Self {
-            max_solver_time_ms: 120000,
+            max_solver_time_ms: 60000,
             stats: StatsConfig::default(),
             alloc: AllocationConfig::default(),
             anneal: AnnealingConfig::default(),

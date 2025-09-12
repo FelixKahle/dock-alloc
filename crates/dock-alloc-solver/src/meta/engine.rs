@@ -262,6 +262,7 @@ where
             .collect();
         let base_seed = rng_cfg.seed_base_task ^ (iteration as u64);
 
+        #[allow(clippy::type_complexity)]
         let candidates: Vec<(usize, Plan<'_, T, C>, f64, f64, Cost<C>)> = jobs
             .par_iter()
             .filter_map(|&(op_idx, k)| {
@@ -332,6 +333,7 @@ where
             stats_cfg.gen_time_alpha,
             stats_cfg.eval_time_alpha,
         );
+        println!("Winner Operator: {}", rec.operator.name());
 
         if state.apply_plan_validated(&w_plan).is_ok() {
             rec.stats_mut().on_accept(-w_delta, stats_cfg.reward_alpha);
@@ -386,6 +388,12 @@ where
         let final_state = best_state.unwrap_or(state);
         println!("Iterations: {}", iter);
         println!("Proposals made: {}", self.proposals_made);
+        println!("Temperature: {:.3}", {
+            let anneal = &self.config.anneal;
+
+            (anneal.initial_temperature * anneal.cooling_rate.powi(iter as i32))
+                .max(anneal.min_temperature)
+        });
         Ok(final_state.into())
     }
 }
