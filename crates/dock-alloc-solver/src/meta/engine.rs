@@ -31,7 +31,7 @@ use std::{
 use crate::{
     berth::quay::{QuayRead, QuayWrite},
     framework::{
-        planning::Plan,
+        planning::{Plan, PlanningContext},
         state::{ConstructiveSolver, FeasibleSolverState, FeasibleSolverStateApplyError, Solver},
     },
     meta::{
@@ -138,6 +138,7 @@ where
     config: MetaConfig,
     operator_records: Vec<OperatorRecord<T, C, Q>>,
     construction_solver: S,
+    proposals_made: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -173,13 +174,19 @@ where
 {
     pub fn new(
         config: MetaConfig,
-        operator_records: Vec<OperatorRecord<T, C, Q>>,
+        ops: impl IntoIterator<Item = Box<dyn Operator<Time = T, Cost = C, Quay = Q> + Send + Sync>>,
         construction_solver: S,
     ) -> Self {
+        let operator_records = ops
+            .into_iter()
+            .map(|op| OperatorRecord::new(op)) // <-- closure enables coercion
+            .collect();
+
         Self {
             config,
             operator_records,
             construction_solver,
+            proposals_made: 0,
         }
     }
 
@@ -213,18 +220,14 @@ where
         let shard_cfg = &self.config.shard;
         let rng_cfg = &self.config.random;
 
-        // temperature + softmax tau mapping
-        let temp = (self.config.anneal.initial_temperature
-            * self.config.anneal.cooling_rate.powi(iteration as i32))
-        .max(anneal.min_temperature);
-
-        // normalize by initial T to map into [tau_min, tau_max]
+        // ——— temperature & tau ———
+        let temp = (anneal.initial_temperature * anneal.cooling_rate.powi(iteration as i32))
+            .max(anneal.min_temperature);
         let norm = (temp / anneal.initial_temperature).clamp(0.0, 1.0);
-        // sharper as we cool: tau = tau_min at low temp, tau_max at high temp
         let tau = alloc_cfg.softmax_tau_min
             + (alloc_cfg.softmax_tau_max - alloc_cfg.softmax_tau_min) * norm;
 
-        // budget per op
+        // ——— allocate proposal budget per operator ———
         let alloc: Vec<usize> = softmax_alloc(
             &self
                 .operator_records
@@ -236,7 +239,7 @@ where
             tau,
         );
 
-        // build tasks by chunking
+        // ——— build tasks (chunking) ———
         #[derive(Clone, Copy)]
         struct Task {
             op_idx: usize,
@@ -262,15 +265,18 @@ where
                 remaining -= take;
             }
         }
+
         if tasks.is_empty() {
             return Ok(None);
         }
 
-        // parallel generation
+        // ——— parallel candidate generation ———
         let candidates: Vec<Candidate<'_, T, C>> = tasks
             .into_par_iter()
             .filter_map(|task| {
                 let rec = &self.operator_records[task.op_idx];
+
+                // stable-ish per-task RNG
                 let mut rng = StdRng::seed_from_u64(
                     rng_cfg.seed_base_task
                         ^ (task.op_idx as u64)
@@ -279,15 +285,23 @@ where
                 );
 
                 let mut best: Option<Candidate<'_, T, C>> = None;
+
                 for _ in 0..task.proposals {
-                    let ctx =
-                        crate::framework::planning::PlanningContext::new(ledger, berth, problem);
+                    // fresh planning context each attempt (lightweight overlays inside)
+                    let ctx = PlanningContext::new(ledger, berth, problem);
 
                     let t0 = Instant::now();
                     let plan = rec.operator.propose(iteration, &mut rng, ctx);
                     let gen_ns = t0.elapsed().as_nanos() as f64;
 
+                    // discard true no-ops quickly
+                    if plan.ledger_commit().operations().is_empty() {
+                        continue;
+                    }
+
+                    // touch eval so we can time + compare (delta already computed in PlanBuilder::build)
                     let t1 = Instant::now();
+                    let _delta = plan.eval().delta_cost();
                     let eval_ns = t1.elapsed().as_nanos() as f64;
 
                     let cand = Candidate {
@@ -296,6 +310,8 @@ where
                         gen_ns,
                         eval_ns,
                     };
+
+                    // keep the best (lowest) delta within this task
                     let better = match &best {
                         None => true,
                         Some(b) => cand.plan.eval().delta_cost() < b.plan.eval().delta_cost(),
@@ -304,6 +320,7 @@ where
                         best = Some(cand);
                     }
                 }
+
                 best
             })
             .collect();
@@ -312,34 +329,40 @@ where
             return Ok(None);
         }
 
+        self.proposals_made += candidates.len() as u64;
+
+        // ——— SA selection (accept worse with prob exp(-Δ/T)) ———
+        // Start from the first candidate, then do pairwise Metropolis tournament.
         let mut rng = StdRng::seed_from_u64(rng_cfg.seed_base_select ^ iteration as u64);
         let mut winner_idx = 0usize;
+
         for (i, cand) in candidates.iter().enumerate().skip(1) {
+            // Compare candidate i against current winner
             let w = &candidates[winner_idx];
             let d = cand.plan.eval().delta_cost() - w.plan.eval().delta_cost();
-            let accept = d.value() < C::zero() || {
+
+            let accept = if d.value() < C::zero() {
+                true // strictly better → accept
+            } else if d.value() > C::zero() {
+                // worse → accept with probability exp(-d/T)
                 let dv = d.value().to_f64().unwrap_or(0.0);
                 let p = (-dv / temp).exp();
                 rng.random::<f64>() < p
+            } else {
+                // equal delta: reject to reduce churn
+                false
             };
+
             if accept {
                 winner_idx = i;
             }
         }
-        let winner = candidates
-            .into_iter()
-            .nth(winner_idx)
-            .expect("nonempty candidates");
 
+        let winner = candidates.into_iter().nth(winner_idx).unwrap();
         let delta = winner.plan.eval().delta_cost();
+
+        // minimal stats/timing update on the chosen op
         let rec = &mut self.operator_records[winner.op_idx];
-
-        eprintln!(
-            "Operator {} produced delta {}",
-            rec.operator.name(),
-            winner.plan.eval().delta_cost()
-        );
-
         rec.stats_mut().on_attempt();
         rec.stats_mut().on_timing(
             winner.gen_ns,
@@ -347,7 +370,10 @@ where
             stats_cfg.gen_time_alpha,
             stats_cfg.eval_time_alpha,
         );
+
+        // ——— apply only if valid on the real state ———
         if state.apply_plan_validated(&winner.plan).is_ok() {
+            // improvement tracked as positive → pass -delta
             rec.stats_mut().on_accept(-delta, stats_cfg.reward_alpha);
             return Ok(Some(delta));
         }
@@ -398,6 +424,8 @@ where
             }
         }
         let final_state = best_state.unwrap_or(state);
+        println!("Iterations: {}", iter);
+        println!("Proposals made: {}", self.proposals_made);
         Ok(final_state.into())
     }
 }

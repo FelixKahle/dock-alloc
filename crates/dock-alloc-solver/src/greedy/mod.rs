@@ -136,6 +136,7 @@ where
                 });
 
                 ready_order.sort_by_key(|&(_id, len_key, arr_key)| (len_key, arr_key));
+                //ready_order.sort_by_key(|&(_id, len_key, arr_key)| (arr_key, len_key));
                 let mut deps = Vec::new();
 
                 for (rid, _len_key, _arr_key) in ready_order {

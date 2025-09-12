@@ -469,9 +469,48 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MismatchedOperationsAmountsError {
+    unassigned_amount: usize,
+    assigned_amount: usize,
+}
+
+impl MismatchedOperationsAmountsError {
+    #[inline]
+    pub fn new(unassigned_amount: usize, assigned_amount: usize) -> Self {
+        Self {
+            unassigned_amount,
+            assigned_amount,
+        }
+    }
+
+    #[inline]
+    pub fn unassigned_amount(&self) -> usize {
+        self.unassigned_amount
+    }
+
+    #[inline]
+    pub fn assigned_amount(&self) -> usize {
+        self.assigned_amount
+    }
+}
+
+impl std::fmt::Display for MismatchedOperationsAmountsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Mismatched amounts: unassigned amount is {}, but assigned amount is {}",
+            self.unassigned_amount, self.assigned_amount
+        )
+    }
+}
+
+impl std::error::Error for MismatchedOperationsAmountsError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FeasibleSolverStateApplyError<T: SolverVariable> {
     Berth(BerthApplyValidationError<T>),
     Ledger(LedgerApplyValidationError<T>),
+    MismatchedAmounts(MismatchedOperationsAmountsError),
 }
 
 impl<T: SolverVariable + Display + Debug> std::fmt::Display for FeasibleSolverStateApplyError<T> {
@@ -479,6 +518,7 @@ impl<T: SolverVariable + Display + Debug> std::fmt::Display for FeasibleSolverSt
         match self {
             FeasibleSolverStateApplyError::Berth(e) => write!(f, "Berth error: {}", e),
             FeasibleSolverStateApplyError::Ledger(e) => write!(f, "Ledger error: {}", e),
+            FeasibleSolverStateApplyError::MismatchedAmounts(e) => write!(f, "{}", e),
         }
     }
 }
@@ -507,8 +547,69 @@ where
         &mut self,
         plan: &Plan<'p, T, C>,
     ) -> Result<(), FeasibleSolverStateApplyError<T>> {
-        self.ledger.apply_validated(plan.ledger_commit())?;
-        self.berth.apply_validated(plan.berth_commit())?;
+        // 0) Balanced ops? (typo fix: assigned vs unassigned)
+        let a = plan.ledger_commit().amount_assigned();
+        let u = plan.ledger_commit().amount_unassigned();
+        if a != u {
+            return Err(FeasibleSolverStateApplyError::MismatchedAmounts(
+                MismatchedOperationsAmountsError::new(u, a),
+            ));
+        }
+
+        {
+            let mut tmp_ledger = self.ledger.clone();
+            tmp_ledger
+                .apply_validated(plan.ledger_commit())
+                .map_err(FeasibleSolverStateApplyError::Ledger)?;
+        }
+
+        {
+            let mut ov = self.berth.overlay();
+            for op in plan.berth_commit().operations() {
+                match op {
+                    crate::berth::operations::Operation::Occupy(occ) => {
+                        let rect = occ.rectangle();
+                        match ov.is_free(rect) {
+                            Ok(true) => {
+                                ov.occupy(rect).map_err(|e| {
+                                    FeasibleSolverStateApplyError::Berth(
+                                        crate::berth::berthocc::BerthApplyValidationError::Quay(e),
+                                    )
+                                })?;
+                            }
+                            Ok(false) => {
+                                return Err(FeasibleSolverStateApplyError::Berth(
+                                    crate::berth::berthocc::BerthApplyValidationError::NotFree(
+                                        *rect,
+                                    ),
+                                ));
+                            }
+                            Err(e) => {
+                                return Err(FeasibleSolverStateApplyError::Berth(
+                                    crate::berth::berthocc::BerthApplyValidationError::Quay(e),
+                                ));
+                            }
+                        }
+                    }
+                    crate::berth::operations::Operation::Free(fr) => {
+                        ov.free(fr.rectangle()).map_err(|e| {
+                            FeasibleSolverStateApplyError::Berth(
+                                crate::berth::berthocc::BerthApplyValidationError::Quay(e),
+                            )
+                        })?;
+                    }
+                }
+            }
+        }
+
+        // Valid! Apply for real
+        self.ledger.apply(plan.ledger_commit()).map_err(|e| {
+            FeasibleSolverStateApplyError::Ledger(LedgerApplyValidationError::Ledger(e))
+        })?;
+
+        self.berth.apply(plan.berth_commit()).map_err(|e| {
+            FeasibleSolverStateApplyError::Berth(BerthApplyValidationError::Quay(e))
+        })?;
         Ok(())
     }
 }

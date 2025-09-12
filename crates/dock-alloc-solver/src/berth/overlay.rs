@@ -46,6 +46,7 @@ use std::{
     fmt::Debug,
     ops::Bound::{Excluded, Unbounded},
 };
+use tracing::instrument;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BrandedFreeSlot<'brand, T>
@@ -74,6 +75,7 @@ where
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BrandedFreeRegion<'brand, T>
 where
     T: SolverVariable,
@@ -299,6 +301,7 @@ where
     }
 
     /// Marks a spatio-temporal rectangle as occupied in the overlay.
+    #[instrument(level = "debug", skip_all)]
     pub fn occupy(
         &mut self,
         rect: &SpaceTimeRectangle<T>,
@@ -369,6 +372,7 @@ where
     }
 
     /// Marks a spatio-temporal rectangle as free in the overlay.
+    #[instrument(level = "debug", skip_all)]
     pub fn free(
         &mut self,
         rect: &SpaceTimeRectangle<T>,
@@ -466,6 +470,7 @@ where
     }
 
     /// Checks if a given spatio-temporal rectangle is completely free, considering the overlay.
+    #[instrument(level = "debug", skip_all)]
     pub fn is_free(
         &self,
         rect: &SpaceTimeRectangle<T>,
@@ -490,6 +495,7 @@ where
     }
 
     /// Checks if a given spatio-temporal rectangle is occupied, considering the overlay.
+    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn is_occupied(
         &self,
@@ -499,6 +505,7 @@ where
     }
 
     /// Returns an iterator over all `FreeSlot`s, considering the overlay.
+    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn iter_free_slots(
         &'a self,
@@ -515,6 +522,7 @@ where
     }
 
     /// Returns an iterator over all feasible `SpaceTimeRectangle` regions, considering the overlay.
+    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn iter_free_regions(
         &'a self,

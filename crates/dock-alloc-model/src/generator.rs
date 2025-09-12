@@ -268,10 +268,11 @@ where
             Cost::new(NumCast::from(v).expect("NumCast<i64 -> C>"))
         }
 
-        let quay_length = SpaceLength::new(2_400); // large quay face
+        let quay_length = SpaceLength::new(1000); // large quay face
         let min_len = SpaceLength::new(140); // feeder / small container ship
         let max_len = SpaceLength::new(400); // Panamax/Neo-Panamax
-        let seed = rand::rng().random();
+        //let seed = rand::rng().random();
+        let seed = 42; // fixed seed for reproducibility
 
         Self {
             // Geometry
@@ -285,11 +286,11 @@ where
             )),
 
             // Mix
-            amount_movables: 120,
-            amount_fixed: 50,
+            amount_movables: 70,
+            amount_fixed: 5,
 
             // Horizon: 300 days
-            horizon: tp::<T>(115200),
+            horizon: tp::<T>(11520),
 
             // Arrivals: ≈ 1 ship/hour (Poisson → bursts + gaps)
             lambda_per_time: 0.017,

@@ -17,7 +17,7 @@
 // NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
 // LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE..
+// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use dock_alloc_core::{
     SolverVariable,
@@ -192,6 +192,10 @@ where
     #[inline]
     pub fn assignment(&self) -> AssignmentRef<'a, Movable, T, C> {
         self.assignment
+    }
+
+    pub fn branded_request(&self) -> BrandedMovableRequest<'brand, 'a, T, C> {
+        BrandedMovableRequest::new(self.assignment.request())
     }
 
     #[inline]
@@ -504,6 +508,9 @@ where
     }
 
     pub fn into_commit(&self) -> LedgerOverlayCommit<'a, T, C> {
+        let mut amount_assigned = 0;
+        let mut amount_unassigned = 0;
+
         let mut unassign_ids: BTreeSet<MovableRequestId> = BTreeSet::new();
         for id in self.staged_uncommits.keys() {
             unassign_ids.insert(*id);
@@ -520,6 +527,7 @@ where
         for id in unassign_ids {
             if let Some(asg) = self.ledger.committed().get(&id) {
                 ops.push(Operation::from(UnassignOperation::new(*asg)));
+                amount_unassigned += 1;
             } else {
                 panic!(
                     "into_commit: base assignment for {:?} missing while unassigning",
@@ -530,9 +538,10 @@ where
 
         for bma in self.staged_commits.values() {
             ops.push(Operation::from(AssignOperation::new(bma.assignment())));
+            amount_assigned += 1;
         }
 
-        LedgerOverlayCommit::new(ops)
+        LedgerOverlayCommit::new(ops, amount_unassigned, amount_assigned)
     }
 }
 

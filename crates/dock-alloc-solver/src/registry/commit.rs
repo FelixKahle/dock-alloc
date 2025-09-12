@@ -28,6 +28,8 @@ where
     T: SolverVariable,
     C: SolverVariable,
 {
+    amount_unassigned: usize,
+    amount_assigned: usize,
     operations: Vec<Operation<'a, T, C>>,
 }
 
@@ -36,13 +38,15 @@ where
     T: SolverVariable,
     C: SolverVariable,
 {
-    pub fn new(operations: Vec<Operation<'a, T, C>>) -> Self {
-        Self { operations }
-    }
-
-    pub fn with_capacity(capacity: usize) -> Self {
+    pub fn new(
+        operations: Vec<Operation<'a, T, C>>,
+        amount_unassigned: usize,
+        amount_assigned: usize,
+    ) -> Self {
         Self {
-            operations: Vec::with_capacity(capacity),
+            operations,
+            amount_unassigned,
+            amount_assigned,
         }
     }
 
@@ -52,6 +56,14 @@ where
 
     pub fn is_empty(&self) -> bool {
         self.operations.is_empty()
+    }
+
+    pub fn amount_unassigned(&self) -> usize {
+        self.amount_unassigned
+    }
+
+    pub fn amount_assigned(&self) -> usize {
+        self.amount_assigned
     }
 }
 

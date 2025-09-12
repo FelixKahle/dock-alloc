@@ -277,7 +277,7 @@ where
     }
 
     #[inline]
-    fn validate_assignment_in_request_windows(
+    pub(crate) fn validate_assignment_in_request_windows(
         assignment: &AssignmentRef<'a, Movable, T, C>,
     ) -> Result<(), LedgerApplyValidationError<T>> {
         let r = assignment.request();

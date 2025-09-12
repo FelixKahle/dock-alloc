@@ -22,4 +22,4 @@
 pub mod config;
 pub mod engine;
 pub mod operator;
-//pub mod oplib;
+pub mod oplib;
