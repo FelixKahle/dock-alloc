@@ -315,6 +315,12 @@ where
     }
 
     #[inline]
+    pub fn absorb(&mut self, child: Self) {
+        debug_assert!(std::ptr::eq(self.ledger, child.ledger));
+        *self = child;
+    }
+
+    #[inline]
     fn stage_commit_asg(
         &mut self,
         asg: AssignmentRef<'a, Movable, T, C>,

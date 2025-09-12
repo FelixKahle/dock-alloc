@@ -267,10 +267,17 @@ where
         &self.operations
     }
 
+    #[inline]
     pub fn clear(&mut self) {
         self.free_by_time.clear();
         self.occupied_by_time.clear();
         self.operations.clear();
+    }
+
+    #[inline]
+    pub fn absorb(&mut self, child: Self) {
+        debug_assert!(std::ptr::eq(self.berth_occupancy, child.berth_occupancy));
+        *self = child;
     }
 
     /// Records an occupied space at a specific time point in the overlay.

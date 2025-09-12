@@ -35,21 +35,6 @@ use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 use tracing::instrument;
 
-/// Safe helper: choose two distinct *owned* items from a slice (uniform), or None if len < 2.
-/// Requires T: Clone so we can return owned values compatible with engine expectations.
-fn pick_two_distinct_owned<T: Clone>(v: &[T], rng: &mut ChaCha8Rng) -> Option<(T, T)> {
-    let n = v.len();
-    if n < 2 {
-        return None;
-    }
-    let i = rng.random_range(0..n);
-    let mut j = rng.random_range(0..(n - 1));
-    if j >= i {
-        j += 1; // j in 0..n and j != i
-    }
-    Some((v[i].clone(), v[j].clone()))
-}
-
 /// Reservoir sampling (k = 1) over Explorer::iter_movable_assignments().
 /// Uniform single draw, total (never panics).
 pub fn pick_random_asg<'alob, 'boob, 'p, 'bo, 'al, 'pb, T, C, Q, R>(
@@ -198,23 +183,26 @@ where
         ctx: PlanningContext<'p, 'al, 'bo, T, C, Q>,
     ) -> Plan<'p, T, C> {
         ctx.with_builder(|mut b| {
-            let asgs = b.with_explorer(|ex| ex.iter_movable_assignments().collect::<Vec<_>>());
-            if asgs.len() < 2 {
-                return b.build(); // no-op
+            // quick check without a txn (read-only, no borrow hazard)
+            let n = b.with_explorer(|ex| ex.iter_movable_assignments().count());
+            if n < 2 {
+                return b.build();
             }
 
             for _ in 0..self.attempts {
-                let pair = b
-                    .with_explorer(|ex| pick_two_random_asgs(ex, rng))
-                    .or_else(|| pick_two_distinct_owned(&asgs, rng));
+                // fresh txn per attempt; if we don't call commit(), changes are discarded
+                let mut tx = b.begin();
+
+                // pick a pair from the child overlay view
+                let pair = tx.with_explorer(|ex| pick_two_random_asgs(ex, rng));
                 let Some((a, bmv)) = pair else {
-                    return b.build();
+                    continue; // nothing to try in this attempt
                 };
 
                 let req_a = a.branded_request();
                 let req_b = bmv.branded_request();
 
-                // must have identical footprint
+                // identical footprint
                 if req_a.length() != req_b.length()
                     || req_a.processing_duration() != req_b.processing_duration()
                 {
@@ -239,7 +227,7 @@ where
                     continue;
                 }
 
-                // strict improvement pre-check
+                // quick improvement gate
                 let old_cost = a.assignment().cost() + bmv.assignment().cost();
                 let a_if_at_b =
                     dock_alloc_model::model::AssignmentRef::new(req_a.request(), b_s, b_t);
@@ -249,61 +237,36 @@ where
                     continue;
                 }
 
-                // --- Stage with precise rollbacks ---
-                // Unassign A
-                let reg_a = match b.propose_unassign(&a) {
+                // do the swap inside the txn; failures just cause this attempt to be discarded
+                let reg_a = match tx.propose_unassign(&a) {
                     Ok(r) => r,
-                    Err(_) => continue, // nothing changed yet
+                    Err(_) => continue,
                 };
-
-                // Unassign B (rollback A if we fail)
-                let reg_b = match b.propose_unassign(&bmv) {
+                let reg_b = match tx.propose_unassign(&bmv) {
                     Ok(r) => r,
-                    Err(_) => {
-                        let _ = b.propose_assign_at(&req_a, &reg_a, a_t, a_s);
-                        continue;
-                    }
+                    Err(_) => continue,
                 };
 
-                // Place A at B's spot (capture new handle)
-                let a_new = match b.propose_assign_at(&req_a, &reg_b, b_t, b_s) {
-                    Ok(h) => h,
-                    Err(_) => {
-                        // put both back
-                        let _ = b.propose_assign_at(&req_a, &reg_a, a_t, a_s);
-                        let _ = b.propose_assign_at(&req_b, &reg_b, b_t, b_s);
-                        continue;
-                    }
-                };
-
-                // Place B at A's spot (capture new handle)
-                let b_new = match b.propose_assign_at(&req_b, &reg_a, a_t, a_s) {
-                    Ok(h) => h,
-                    Err(_) => {
-                        // undo A-at-B, then restore originals
-                        let _ = b.propose_unassign(&a_new);
-                        let _ = b.propose_assign_at(&req_a, &reg_a, a_t, a_s);
-                        let _ = b.propose_assign_at(&req_b, &reg_b, b_t, b_s);
-                        continue;
-                    }
-                };
-
-                // Full-assignment gate (paranoia)
-                let fully_assigned =
-                    b.with_explorer(|ex| ex.iter_unassigned_requests().next().is_none());
-                if !fully_assigned {
-                    // rollback swap completely
-                    let _ = b.propose_unassign(&a_new);
-                    let _ = b.propose_unassign(&b_new);
-                    let _ = b.propose_assign_at(&req_a, &reg_a, a_t, a_s);
-                    let _ = b.propose_assign_at(&req_b, &reg_b, b_t, b_s);
+                if tx.propose_assign_at(&req_a, &reg_b, b_t, b_s).is_err() {
+                    continue;
+                }
+                if tx.propose_assign_at(&req_b, &reg_a, a_t, a_s).is_err() {
                     continue;
                 }
 
-                // success
+                // full-assignment check
+                let fully_assigned =
+                    tx.with_explorer(|ex| ex.iter_unassigned_requests().next().is_none());
+                if !fully_assigned {
+                    continue;
+                }
+
+                // success → merge into parent overlays
+                tx.commit();
                 return b.build();
             }
 
+            // no improving swap found
             b.build()
         })
     }
@@ -377,7 +340,7 @@ where
         let horizon_end = stats.latest_completion_time().value();
 
         // trials ~ O(log m)
-        let trials = (usize::ilog2(m as usize).max(1) as usize * 8).clamp(16, 96);
+        let trials = (usize::ilog2(m).max(1) as usize * 8).clamp(16, 96);
 
         Self {
             remove_frac: frac,
@@ -413,25 +376,30 @@ where
         ctx: PlanningContext<'p, 'al, 'bo, Self::Time, Self::Cost, Self::Quay>,
     ) -> Plan<'p, Self::Time, Self::Cost> {
         ctx.with_builder(|mut b| {
+            let mut tx = b.begin();
+
+            // gather current assignments through txn view
             let assignments =
-                b.with_explorer(|ex| ex.iter_movable_assignments().collect::<Vec<_>>());
+                tx.with_explorer(|ex| ex.iter_movable_assignments().collect::<Vec<_>>());
             let n = assignments.len();
             if n == 0 {
                 return b.build();
             }
 
-            // dynamic horizon: max(current latest end + buffer, configured horizon_end)
-            let latest_end = b.with_explorer(|ex| {
+            // dynamic horizon from txn view
+            let latest_end = tx.with_explorer(|ex| {
                 ex.iter_assignments()
                     .map(|a| a.start_time() + a.request().processing_duration())
                     .max()
             });
-            let dyn_hi = latest_end.unwrap_or(TimePoint::new(T::zero()))
-                + dock_alloc_core::time::TimeDelta::new(T::from(1_000).unwrap_or(T::zero()));
+            let dyn_hi = latest_end.unwrap_or(TimePoint::new(Self::Time::zero()))
+                + dock_alloc_core::time::TimeDelta::new(
+                    Self::Time::from(1_000).unwrap_or(Self::Time::zero()),
+                );
             let hi = TimePoint::new(core::cmp::max(self.horizon_end, dyn_hi.value()));
-            let time_window = TimeInterval::new(TimePoint::new(T::zero()), hi);
+            let time_window = TimeInterval::new(TimePoint::new(Self::Time::zero()), hi);
 
-            // Sample k victims without replacement (Fisher–Yates prefix)
+            // sample victims
             let frac = self.remove_frac.clamp(0.0, 1.0);
             let mut k = ((n as f64) * frac).round() as usize;
             k = k.clamp(self.min_remove.min(n), self.max_remove.unwrap_or(n).min(n));
@@ -444,6 +412,7 @@ where
                 idxs.swap(i, j);
             }
 
+            // destroy & repair inside the txn
             for &ix in idxs.iter().take(k) {
                 let picked = assignments[ix].clone();
                 let old_t = picked.start_time();
@@ -451,8 +420,8 @@ where
                 let req = picked.branded_request();
                 let space_window = req.feasible_space_window();
 
-                // ---------- (A) Peek while assigned ----------
-                let alt_slot_peek = b.with_explorer(|ex| {
+                // (A) peek alternative while still assigned
+                let alt_slot_peek = tx.with_explorer(|ex| {
                     ex.iter_slots_for_request_within(&req, time_window, space_window)
                         .filter(|slot| {
                             let s = slot.slot().space().start();
@@ -464,23 +433,21 @@ where
                 });
 
                 if let Some(slot) = alt_slot_peek {
-                    // unassign -> try assign -> rollback if needed
-                    if let Ok(region) = b.propose_unassign(&picked) {
-                        if b.propose_assign(&req, slot).is_err() {
-                            let _ = b.propose_assign_at(&req, &region, old_t, old_s);
-                        }
-                    } else {
-                        // failed to unassign; keep going
+                    if let Ok(region) = tx.propose_unassign(&picked) {
+                        // return the result of propose_assign_at so types align
+                        let _ = tx.propose_assign(&req, slot).or_else(|_| {
+                            // best-effort restore inside the same txn
+                            tx.propose_assign_at(&req, &region, old_t, old_s)
+                        });
                     }
                     continue;
                 }
 
-                // ---------- (B) Unassign then search ----------
-                let Ok(region) = b.propose_unassign(&picked) else {
+                // (B) unassign then search
+                let Ok(region) = tx.propose_unassign(&picked) else {
                     continue;
                 };
-
-                let alt_slot_after_free = b.with_explorer(|ex| {
+                let alt_slot_after_free = tx.with_explorer(|ex| {
                     ex.iter_slots_for_request_within(&req, time_window, space_window)
                         .take(self.max_trials_per_request)
                         .find(|slot| {
@@ -491,22 +458,22 @@ where
                 });
 
                 if let Some(slot) = alt_slot_after_free {
-                    if b.propose_assign(&req, slot).is_err() {
-                        let _ = b.propose_assign_at(&req, &region, old_t, old_s);
-                    }
+                    let _ = tx
+                        .propose_assign(&req, slot)
+                        .or_else(|_| tx.propose_assign_at(&req, &region, old_t, old_s));
                 } else {
-                    // Nothing better even after freeing → restore
-                    let _ = b.propose_assign_at(&req, &region, old_t, old_s);
+                    let _ = tx.propose_assign_at(&req, &region, old_t, old_s);
                 }
             }
 
-            // full-assignment gate
+            // full assignment gate
             let fully_assigned =
-                b.with_explorer(|ex| ex.iter_unassigned_requests().next().is_none());
+                tx.with_explorer(|ex| ex.iter_unassigned_requests().next().is_none());
             if !fully_assigned {
                 return b.build();
             }
 
+            tx.commit();
             b.build()
         })
     }
@@ -566,12 +533,12 @@ where
         // time radius = ~1.5 * p50 proc time
         let p50_proc = s.p50_processing_time().value();
         let time_radius = {
-            let tr = p50_proc + (p50_proc / T::from(2).unwrap_or(T::zero()));
-            tr
+            
+            p50_proc + (p50_proc / T::from(2).unwrap_or(T::zero()))
         };
 
         // trials ~ O(log m)
-        let trials = (usize::ilog2(m as usize).max(1) as usize * 4).clamp(8, 64);
+        let trials = (usize::ilog2(m).max(1) as usize * 4).clamp(8, 64);
 
         Self {
             time_radius,
@@ -604,7 +571,11 @@ where
         ctx: PlanningContext<'p, 'al, 'bo, T, C, Q>,
     ) -> Plan<'p, T, C> {
         ctx.with_builder(|mut b| {
-            let Some(cur) = b.with_explorer(|ex| ex.iter_movable_assignments().next()) else {
+            let quay_len = b.problem().quay_length().value();
+
+            let mut tx = b.begin();
+
+            let Some(cur) = tx.with_explorer(|ex| ex.iter_movable_assignments().next()) else {
                 return b.build();
             };
 
@@ -614,7 +585,6 @@ where
             let req = cur.branded_request();
 
             // local windows
-            let quay_len = b.problem().quay_length().value();
             let s_min = SpacePosition::new(old_s.value().saturating_sub(self.space_radius));
             let s_max =
                 SpacePosition::new((old_s.value().saturating_add(self.space_radius)).min(quay_len));
@@ -630,9 +600,9 @@ where
             }
             let time_window = TimeInterval::new(t_lo, t_hi);
 
-            // find best improving slot (borrow via explorer)
+            // search best improving slot via txn view
             let mut best: Option<(dock_alloc_core::cost::Cost<C>, BrandedFreeSlot<'_, T>)> = None;
-            b.with_explorer(|ex| {
+            tx.with_explorer(|ex| {
                 for slot in ex
                     .iter_slots_for_request_within(&req, time_window, space_bounds)
                     .filter(|s| {
@@ -658,33 +628,20 @@ where
                 return b.build();
             };
 
-            // unassign current, try assign to chosen; rollback on failure
-            let Ok(region) = b.propose_unassign(&cur) else {
+            if tx.propose_unassign(&cur).is_err() {
                 return b.build();
-            };
-
-            if b.propose_assign(&req, chosen_slot).is_err() {
-                let _ = b.propose_assign_at(&req, &region, old_t, old_s);
+            }
+            if tx.propose_assign(&req, chosen_slot).is_err() {
                 return b.build();
             }
 
-            // gate: remain fully assigned
             let fully_assigned =
-                b.with_explorer(|ex| ex.iter_unassigned_requests().next().is_none());
+                tx.with_explorer(|ex| ex.iter_unassigned_requests().next().is_none());
             if !fully_assigned {
-                // rollback move
-                if let Ok(new_handle) = b.with_explorer(|ex| {
-                    // locate the (only) assignment for this request after the attempted move
-                    ex.iter_movable_assignments()
-                        .find(|m| m.branded_request().id() == req.id())
-                        .ok_or(())
-                }) {
-                    let _ = b.propose_unassign(&new_handle);
-                }
-                let _ = b.propose_assign_at(&req, &region, old_t, old_s);
                 return b.build();
             }
 
+            tx.commit();
             b.build()
         })
     }

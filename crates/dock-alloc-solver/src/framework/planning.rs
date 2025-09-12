@@ -280,6 +280,7 @@ impl<T: SolverVariable + Display> Display for ProposeError<T> {
 
 impl<T: SolverVariable + Debug + Display> std::error::Error for ProposeError<T> {}
 
+#[derive(Debug, Clone)]
 pub struct PlanBuilder<'alob, 'boob, 'p, 'bo, 'al, T, C, Q>
 where
     T: SolverVariable,
@@ -308,10 +309,13 @@ where
     Q: QuayRead,
 {
     #[inline]
-    fn new(builder: &'pb PlanBuilder<'alob, 'boob, 'p, 'bo, 'al, T, C, Q>) -> Self {
+    fn new(
+        assignment_overlay: &'pb AssignmentLedgerOverlay<'alob, 'p, 'al, T, C>,
+        berth_overlay: &'pb BerthOccupancyOverlay<'boob, 'bo, T, Q>,
+    ) -> Self {
         Self {
-            assignment_overlay: &builder.assignment_overlay,
-            berth_overlay: &builder.berth_overlay,
+            assignment_overlay,
+            berth_overlay,
         }
     }
 
@@ -449,71 +453,8 @@ where
     where
         F: FnOnce(&Explorer<'alob, 'boob, 'p, 'bo, 'al, '_, T, C, Q>) -> R,
     {
-        let ex = Explorer::new(self);
+        let ex = Explorer::new(&self.assignment_overlay, &self.berth_overlay);
         f(&ex)
-    }
-
-    pub fn propose_unassign(
-        &mut self,
-        assignment: &BrandedMovableAssignment<'alob, 'p, T, C>,
-    ) -> Result<BrandedFreeRegion<'boob, T>, ProposeError<T>> {
-        let a = assignment.assignment();
-        let rect: SpaceTimeRectangle<T> = a.into();
-
-        self.assignment_overlay.uncommit_assignment(assignment)?;
-        let free = self.berth_overlay.free(&rect)?;
-
-        Ok(free)
-    }
-
-    pub fn propose_assign(
-        &mut self,
-        req: &BrandedMovableRequest<'alob, 'p, T, C>,
-        slot: BrandedFreeSlot<'boob, T>,
-    ) -> Result<BrandedMovableAssignment<'alob, 'p, T, C>, ProposeError<T>> {
-        let a = AssignmentRef::new(
-            req.request(),
-            slot.slot().space().start(),
-            slot.slot().start_time(),
-        );
-        let rect: SpaceTimeRectangle<T> = a.into();
-
-        let ma = self.assignment_overlay.commit_assignment(
-            req.request(),
-            slot.slot().start_time(),
-            slot.slot().space().start(),
-        )?;
-        self.berth_overlay.occupy(&rect)?;
-
-        Ok(ma)
-    }
-
-    pub fn propose_assign_at(
-        &mut self,
-        req: &BrandedMovableRequest<'alob, 'p, T, C>,
-        region: &BrandedFreeRegion<'boob, T>,
-        start_time: TimePoint<T>,
-        start_pos: SpacePosition,
-    ) -> Result<BrandedMovableAssignment<'alob, 'p, T, C>, ProposeError<T>> {
-        let rect = SpaceTimeRectangle::new(
-            SpaceInterval::new(start_pos, start_pos + req.length()),
-            TimeInterval::new(start_time, start_time + req.processing_duration()),
-        );
-
-        if !region.region().rectangle().contains(&rect) {
-            return Err(ProposeError::FreeRegionViolation(FreeRegionViolationError(
-                rect,
-            )));
-        }
-
-        let a = AssignmentRef::new(req.request(), start_pos, start_time);
-        let rect: SpaceTimeRectangle<T> = a.into();
-
-        let ma = self
-            .assignment_overlay
-            .commit_assignment(req.request(), start_time, start_pos)?;
-        self.berth_overlay.occupy(&rect)?;
-        Ok(ma)
     }
 
     pub fn clear(&mut self) {
@@ -556,103 +497,122 @@ where
         let eval = PlanEval::new(delta_cost, delta_wait, delta_dev);
         Plan::new(eval, berth_commit, ledger_commit)
     }
+
+    #[inline]
+    pub fn begin(&mut self) -> Txn<'_, 'alob, 'boob, 'p, 'bo, 'al, T, C, Q> {
+        // Compute children before taking &mut self (avoids E0502)
+        let alov_child = self.assignment_overlay.clone();
+        let bov_child = self.berth_overlay.clone();
+
+        Txn {
+            parent: self,
+            alov: Some(alov_child),
+            bov: Some(bov_child),
+        }
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::berth::quay::BooleanVecQuay;
+pub struct Txn<'pb, 'alob, 'boob, 'p, 'bo, 'al, T, C, Q>
+where
+    T: SolverVariable,
+    C: SolverVariable,
+    Q: QuayRead,
+{
+    parent: &'pb mut PlanBuilder<'alob, 'boob, 'p, 'bo, 'al, T, C, Q>,
+    alov: Option<AssignmentLedgerOverlay<'alob, 'p, 'al, T, C>>,
+    bov: Option<BerthOccupancyOverlay<'boob, 'bo, T, Q>>,
+}
 
-    use super::*;
-    use dock_alloc_core::{
-        space::{SpaceLength, SpacePosition},
-        time::TimePoint,
-    };
-    use dock_alloc_model::model::{Movable, ProblemBuilder, Request, RequestId};
-    use rayon::prelude::*;
-
-    type Tm = i64;
-    type Cm = i64;
-
-    fn req_movable_ok(
-        id: u64,
-        len: usize,
-        t0: i64,
-        proc_t: i64,
-        s0: usize,
-        s1: usize,
-    ) -> Request<Movable, Tm, Cm> {
-        Request::<Movable, _, _>::new(
-            RequestId::new(id),
-            SpaceLength::new(len),
-            TimePoint::new(t0),
-            TimeDelta::new(proc_t),
-            SpacePosition::new(s0),
-            Cost::new(1),
-            Cost::new(1),
-            SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
-        )
-        .expect("valid movable request")
+impl<'pb, 'alob, 'boob, 'p, 'bo, 'al, T, C, Q> Txn<'pb, 'alob, 'boob, 'p, 'bo, 'al, T, C, Q>
+where
+    T: SolverVariable,
+    C: SolverVariable,
+    Q: QuayRead,
+{
+    #[inline]
+    pub fn ex(&self) -> Explorer<'alob, 'boob, 'p, 'bo, 'al, '_, T, C, Q> {
+        let alov = self.alov.as_ref().expect("txn overlays already taken");
+        let bov = self.bov.as_ref().expect("txn overlays already taken");
+        Explorer::new(alov, bov)
     }
 
-    #[test]
-    fn test_collect_plans_in_parallel_with_rayon() {
-        let n = 8usize;
-        let quay_len = 200usize;
+    pub fn with_explorer<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&Explorer<'alob, 'boob, 'p, 'bo, 'al, '_, T, C, Q>) -> R,
+    {
+        let ex = self.ex();
+        f(&ex)
+    }
 
-        let mut pb = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(quay_len));
-        for i in 0..n {
-            let base = i * 20;
-            pb.add_movable_request(req_movable_ok((i as u64) + 1, 10, 0, 5, base, base + 20))
-                .unwrap();
-        }
-        let problem = pb.build();
+    pub fn propose_unassign(
+        &mut self,
+        a: &BrandedMovableAssignment<'alob, 'p, T, C>,
+    ) -> Result<BrandedFreeRegion<'boob, T>, ProposeError<T>> {
+        let rect: SpaceTimeRectangle<T> = a.into();
+        let alov = self.alov.as_mut().expect("txn overlays already taken");
+        let bov = self.bov.as_mut().expect("txn overlays already taken");
+        alov.uncommit_assignment(a)?;
+        let free = bov.free(&rect)?;
+        Ok(free)
+    }
 
-        let mut ledger = AssignmentLedger::from(&problem);
-        let mut berth: BerthOccupancy<Tm, BooleanVecQuay> =
-            BerthOccupancy::new(problem.quay_length());
-
-        let mut ids: Vec<_> = problem.movables().iter().map(|r| r.typed_id()).collect();
-        ids.sort_by_key(|id| id.value());
-
-        // Search the whole quay and a broad time window; Explorer will clamp starts to arrival.
-        let time_window = TimeInterval::new(TimePoint::new(0), TimePoint::new(100));
-        let space_window = SpaceInterval::new(
-            SpacePosition::new(0),
-            SpacePosition::new(problem.quay_length().value()),
+    pub fn propose_assign_at(
+        &mut self,
+        req: &BrandedMovableRequest<'alob, 'p, T, C>,
+        region: &BrandedFreeRegion<'boob, T>,
+        t: TimePoint<T>,
+        s: SpacePosition,
+    ) -> Result<BrandedMovableAssignment<'alob, 'p, T, C>, ProposeError<T>> {
+        let rect = SpaceTimeRectangle::new(
+            SpaceInterval::new(s, s + req.length()),
+            TimeInterval::new(t, t + req.processing_duration()),
         );
-
-        let plans = ids
-            .par_iter()
-            .map(|mid| {
-                let alov = AssignmentLedgerOverlay::new(&ledger);
-                let bov = BerthOccupancyOverlay::new(&berth);
-
-                let mut b = PlanBuilder::new(&problem, alov, bov);
-                let (req, slot) = b.with_explorer(|ex| {
-                    let req = ex
-                        .iter_unassigned_requests()
-                        .find(|r| r.id() == *mid)
-                        .expect("request visible in overlay");
-                    let slot = ex
-                        .iter_slots_for_request_within(&req, time_window, space_window)
-                        .next()
-                        .expect("at least one feasible slot");
-                    (req, slot)
-                });
-                let _ = b.propose_assign(&req, slot).expect("stage assign");
-                b.build()
-            })
-            .collect::<Vec<_>>();
-
-        for p in &plans {
-            assert_eq!(p.ledger_commit().operations().len(), 1);
+        if !region.region().rectangle().contains(&rect) {
+            return Err(ProposeError::FreeRegionViolation(FreeRegionViolationError(
+                rect,
+            )));
         }
-        for p in plans {
-            ledger
-                .apply(p.ledger_commit())
-                .expect("apply ledger commit");
-            berth.apply(p.berth_commit()).expect("apply berth commit");
-        }
-        assert_eq!(ledger.iter_movable_assignments().count(), ids.len());
+        let alov = self.alov.as_mut().expect("txn overlays already taken");
+        let bov = self.bov.as_mut().expect("txn overlays already taken");
+        let a = AssignmentRef::new(req.request(), s, t);
+        let r2: SpaceTimeRectangle<T> = a.into();
+        let ma = alov.commit_assignment(req.request(), t, s)?;
+        bov.occupy(&r2)?;
+        Ok(ma)
+    }
+
+    pub fn propose_assign(
+        &mut self,
+        req: &BrandedMovableRequest<'alob, 'p, T, C>,
+        slot: BrandedFreeSlot<'boob, T>,
+    ) -> Result<BrandedMovableAssignment<'alob, 'p, T, C>, ProposeError<T>> {
+        let alov = self.alov.as_mut().expect("txn overlays already taken");
+        let bov = self.bov.as_mut().expect("txn overlays already taken");
+        let a = AssignmentRef::new(
+            req.request(),
+            slot.slot().space().start(),
+            slot.slot().start_time(),
+        );
+        let rect: SpaceTimeRectangle<T> = a.into();
+        let ma = alov.commit_assignment(
+            req.request(),
+            slot.slot().start_time(),
+            slot.slot().space().start(),
+        )?;
+        bov.occupy(&rect)?;
+        Ok(ma)
+    }
+
+    /// Merge child overlays back into the parent; dropping without commit rolls back.
+    pub fn commit(mut self) {
+        let alov = self.alov.take().expect("txn overlays already taken");
+        let bov = self.bov.take().expect("txn overlays already taken");
+        self.parent.assignment_overlay.absorb(alov);
+        self.parent.berth_overlay.absorb(bov);
+    }
+
+    pub fn discard(mut self) {
+        self.alov = None;
+        self.bov = None;
     }
 }

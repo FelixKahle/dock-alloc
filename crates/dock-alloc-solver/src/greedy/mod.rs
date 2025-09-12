@@ -122,7 +122,14 @@ where
             let ctx = PlanningContext::new(state.ledger(), state.berth(), problem);
 
             let (plan_opt, departures) = ctx.with_builder(|mut b| {
-                let mut ready_order = b.with_explorer(|ex| {
+                // Start a transactional child over the current overlays
+                let mut tx = b.begin();
+
+                // Decide using the (old) read facade over the parent overlay:
+                // For this greedy example we don't need to "see" incremental txn changes while we place,
+                // so using b.with_explorer(...) is fine. (If you later need reads to see txn deltas,
+                // add an Explorer::new_from(&alov, &bov) and call tx.ex().)
+                let mut ready_order = tx.with_explorer(|ex| {
                     ex.iter_unassigned_requests()
                         .filter(|req| req.request().arrival_time() <= t)
                         .map(|req| {
@@ -136,11 +143,11 @@ where
                 });
 
                 ready_order.sort_by_key(|&(_, len_key, arr_key)| (len_key, arr_key));
-                //ready_order.sort_by_key(|&(_id, len_key, arr_key)| (arr_key, len_key));
+
                 let mut deps = Vec::new();
 
                 for (req, _len_key, _arr_key) in ready_order {
-                    let decision = b.with_explorer(|ex| {
+                    let decision = tx.with_explorer(|ex| {
                         let proc = req.processing_duration();
                         let swin = req.feasible_space_window();
 
@@ -188,11 +195,11 @@ where
 
                         match (best_now_cost, best_later_cost) {
                             (None, None) => None,
-                            (Some(_), None) => Some((req, best_now_slot.unwrap(), proc)),
+                            (Some(_), None) => Some((req.clone(), best_now_slot.unwrap(), proc)),
                             (None, Some(_)) => None,
                             (Some(c_now), Some(c_later)) => {
                                 if c_now <= c_later {
-                                    Some((req, best_now_slot.unwrap(), proc))
+                                    Some((req.clone(), best_now_slot.unwrap(), proc))
                                 } else {
                                     None
                                 }
@@ -200,14 +207,18 @@ where
                         }
                     });
 
-                    if let Some((req, slot, proc)) = decision
-                        && b.propose_assign(&req, slot).is_ok()
-                    {
-                        deps.push(t + proc);
+                    if let Some((req2, slot, proc)) = decision {
+                        // Stage using the NEW transactional API
+                        if tx.propose_assign(&req2, slot).is_ok() {
+                            deps.push(t + proc);
+                        }
                     }
                 }
 
+                // Merge txn changes back into the builder overlays and build the plan
+                tx.commit();
                 let built = b.build();
+
                 let plan = if built.ledger_commit().operations().is_empty() {
                     None
                 } else {
