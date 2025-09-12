@@ -22,8 +22,10 @@
 use dock_alloc_core::{SolverVariable, cost::Cost};
 use num_traits::Zero;
 use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
 use std::{
+    cell::RefCell,
     fmt::{Debug, Display},
     time::{Duration, Instant},
 };
@@ -35,7 +37,7 @@ use crate::{
         state::{ConstructiveSolver, FeasibleSolverState, FeasibleSolverStateApplyError, Solver},
     },
     meta::{
-        config::{AllocationConfig, MetaConfig, ShardConfig, StatsConfig},
+        config::{AllocationConfig, MetaConfig, StatsConfig},
         operator::Operator,
     },
 };
@@ -64,10 +66,12 @@ impl<C: SolverVariable + Zero> Default for OperatorStats<C> {
 }
 
 impl<C: SolverVariable + Zero> OperatorStats<C> {
+    #[inline]
     pub fn on_attempt(&mut self) {
         self.attempts += 1;
     }
 
+    #[inline]
     pub fn on_accept(&mut self, improvement: Cost<C>, reward_alpha: f64) {
         self.accepted += 1;
         self.total_improvement += improvement;
@@ -75,9 +79,15 @@ impl<C: SolverVariable + Zero> OperatorStats<C> {
         self.ewma_reward = ewma(self.ewma_reward, r, reward_alpha);
     }
 
+    #[inline]
     pub fn on_timing(&mut self, gen_ns: f64, eval_ns: f64, gen_alpha: f64, eval_alpha: f64) {
-        self.emwa_gen_ns_per_proposal = ewma(self.emwa_gen_ns_per_proposal, gen_ns, gen_alpha);
-        self.emwa_eval_ns_per_proposal = ewma(self.emwa_eval_ns_per_proposal, eval_ns, eval_alpha);
+        if gen_ns > 0.0 {
+            self.emwa_gen_ns_per_proposal = ewma(self.emwa_gen_ns_per_proposal, gen_ns, gen_alpha);
+        }
+        if eval_ns > 0.0 {
+            self.emwa_eval_ns_per_proposal =
+                ewma(self.emwa_eval_ns_per_proposal, eval_ns, eval_alpha);
+        }
     }
 }
 
@@ -104,28 +114,20 @@ where
         }
     }
 
+    #[inline]
     pub fn operator(&self) -> &dyn Operator<Time = T, Cost = C, Quay = Q> {
         self.operator.as_ref()
     }
 
+    #[inline]
     pub fn stats(&self) -> &OperatorStats<C> {
         &self.stats
     }
 
+    #[inline]
     pub fn stats_mut(&mut self) -> &mut OperatorStats<C> {
         &mut self.stats
     }
-}
-
-struct Candidate<'p, T, C>
-where
-    T: SolverVariable,
-    C: SolverVariable,
-{
-    op_idx: usize,
-    plan: Plan<'p, T, C>,
-    gen_ns: f64,
-    eval_ns: f64,
 }
 
 pub struct MetaEngine<T, C, Q, S>
@@ -139,6 +141,12 @@ where
     operator_records: Vec<OperatorRecord<T, C, Q>>,
     construction_solver: S,
     proposals_made: u64,
+}
+
+thread_local! {
+    static THREAD_RNG: RefCell<StdRng> = RefCell::new(StdRng::seed_from_u64(
+        0x9E37_79B1_85EB_CA87u64 ^ (rayon::current_thread_index().unwrap_or(0) as u64)
+    ));
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -165,6 +173,15 @@ where
     }
 }
 
+#[inline]
+fn make_job_rng(base_seed: u64, op_idx: usize, k: usize, iter: usize) -> ChaCha8Rng {
+    let s = base_seed
+        ^ ((op_idx as u64).wrapping_mul(0x9E37_79B1_85EB_CA87))
+        ^ ((k as u64).rotate_left(17))
+        ^ ((iter as u64).wrapping_mul(0xD134_2543_DE82_E285));
+    ChaCha8Rng::seed_from_u64(s)
+}
+
 impl<T, C, Q, S> MetaEngine<T, C, Q, S>
 where
     T: SolverVariable + Send + Sync + Debug,
@@ -177,11 +194,7 @@ where
         ops: impl IntoIterator<Item = Box<dyn Operator<Time = T, Cost = C, Quay = Q> + Send + Sync>>,
         construction_solver: S,
     ) -> Self {
-        let operator_records = ops
-            .into_iter()
-            .map(|op| OperatorRecord::new(op)) // <-- closure enables coercion
-            .collect();
-
+        let operator_records = ops.into_iter().map(|op| OperatorRecord::new(op)).collect();
         Self {
             config,
             operator_records,
@@ -190,10 +203,12 @@ where
         }
     }
 
+    #[inline]
     pub fn construction_solver(&self) -> &S {
         &self.construction_solver
     }
 
+    #[inline]
     pub fn operator_records(&self) -> &[OperatorRecord<T, C, Q>] {
         &self.operator_records
     }
@@ -217,17 +232,14 @@ where
         let anneal = &self.config.anneal;
         let stats_cfg = &self.config.stats;
         let alloc_cfg = &self.config.alloc;
-        let shard_cfg = &self.config.shard;
         let rng_cfg = &self.config.random;
 
-        // ——— temperature & tau ———
         let temp = (anneal.initial_temperature * anneal.cooling_rate.powi(iteration as i32))
             .max(anneal.min_temperature);
         let norm = (temp / anneal.initial_temperature).clamp(0.0, 1.0);
         let tau = alloc_cfg.softmax_tau_min
             + (alloc_cfg.softmax_tau_max - alloc_cfg.softmax_tau_min) * norm;
 
-        // ——— allocate proposal budget per operator ———
         let alloc: Vec<usize> = softmax_alloc(
             &self
                 .operator_records
@@ -239,117 +251,69 @@ where
             tau,
         );
 
-        // ——— build tasks (chunking) ———
-        #[derive(Clone, Copy)]
-        struct Task {
-            op_idx: usize,
-            proposals: usize,
-        }
-        let mut tasks = Vec::with_capacity(alloc.iter().sum());
-        for (op_idx, (rec, &quota)) in self.operator_records.iter().zip(&alloc).enumerate() {
-            if quota == 0 {
-                continue;
-            }
-            let preferred = proposals_per_task(&rec.stats, shard_cfg, stats_cfg) as usize;
-            let chunk = preferred
-                .max(shard_cfg.min_proposals_per_task as usize)
-                .min(shard_cfg.max_proposals_per_task as usize)
-                .max(1);
-            let mut remaining = quota;
-            while remaining > 0 {
-                let take = remaining.min(chunk);
-                tasks.push(Task {
-                    op_idx,
-                    proposals: take,
-                });
-                remaining -= take;
-            }
-        }
-
-        if tasks.is_empty() {
+        let total: usize = alloc.iter().sum();
+        if total == 0 {
             return Ok(None);
         }
+        let jobs: Vec<(usize, usize)> = alloc
+            .iter()
+            .enumerate()
+            .flat_map(|(op_idx, &n)| (0..n).map(move |k| (op_idx, k)))
+            .collect();
+        let base_seed = rng_cfg.seed_base_task ^ (iteration as u64);
 
-        // ——— parallel candidate generation ———
-        let candidates: Vec<Candidate<'_, T, C>> = tasks
-            .into_par_iter()
-            .filter_map(|task| {
-                let rec = &self.operator_records[task.op_idx];
-
-                // stable-ish per-task RNG
-                let mut rng = StdRng::seed_from_u64(
-                    rng_cfg.seed_base_task
-                        ^ (task.op_idx as u64)
-                        ^ (task.proposals as u64)
-                        ^ (iteration as u64),
-                );
-
-                let mut best: Option<Candidate<'_, T, C>> = None;
-
-                for _ in 0..task.proposals {
-                    // fresh planning context each attempt (lightweight overlays inside)
-                    let ctx = PlanningContext::new(ledger, berth, problem);
-
+        let candidates: Vec<(usize, Plan<'_, T, C>, f64, f64, Cost<C>)> = jobs
+            .par_iter()
+            .filter_map(|&(op_idx, k)| {
+                let rec = &self.operator_records[op_idx];
+                let ctx = PlanningContext::new(ledger, berth, problem);
+                let do_sample = (((base_seed as usize) ^ op_idx ^ k) & 0x7) == 0;
+                if do_sample {
                     let t0 = Instant::now();
+                    let mut rng = make_job_rng(base_seed, op_idx, k, iteration);
                     let plan = rec.operator.propose(iteration, &mut rng, ctx);
                     let gen_ns = t0.elapsed().as_nanos() as f64;
 
-                    // discard true no-ops quickly
                     if plan.ledger_commit().operations().is_empty() {
-                        continue;
+                        return None;
                     }
 
-                    // touch eval so we can time + compare (delta already computed in PlanBuilder::build)
                     let t1 = Instant::now();
-                    let _delta = plan.eval().delta_cost();
+                    let delta = plan.eval().delta_cost();
                     let eval_ns = t1.elapsed().as_nanos() as f64;
 
-                    let cand = Candidate {
-                        op_idx: task.op_idx,
-                        plan,
-                        gen_ns,
-                        eval_ns,
-                    };
-
-                    // keep the best (lowest) delta within this task
-                    let better = match &best {
-                        None => true,
-                        Some(b) => cand.plan.eval().delta_cost() < b.plan.eval().delta_cost(),
-                    };
-                    if better {
-                        best = Some(cand);
+                    Some((op_idx, plan, gen_ns, eval_ns, delta))
+                } else {
+                    let mut rng = make_job_rng(base_seed, op_idx, k, iteration);
+                    let plan = rec.operator.propose(iteration, &mut rng, ctx);
+                    if plan.ledger_commit().operations().is_empty() {
+                        return None;
                     }
+                    let delta = plan.eval().delta_cost();
+                    Some((op_idx, plan, 0.0, 0.0, delta))
                 }
-
-                best
             })
             .collect();
 
         if candidates.is_empty() {
             return Ok(None);
         }
-
+        // Collect useful stats from candidates
         self.proposals_made += candidates.len() as u64;
 
-        // ——— SA selection (accept worse with prob exp(-Δ/T)) ———
-        // Start from the first candidate, then do pairwise Metropolis tournament.
         let mut rng = StdRng::seed_from_u64(rng_cfg.seed_base_select ^ iteration as u64);
         let mut winner_idx = 0usize;
-
         for (i, cand) in candidates.iter().enumerate().skip(1) {
-            // Compare candidate i against current winner
             let w = &candidates[winner_idx];
-            let d = cand.plan.eval().delta_cost() - w.plan.eval().delta_cost();
+            let d = cand.4 - w.4;
 
             let accept = if d.value() < C::zero() {
-                true // strictly better → accept
+                true
             } else if d.value() > C::zero() {
-                // worse → accept with probability exp(-d/T)
                 let dv = d.value().to_f64().unwrap_or(0.0);
                 let p = (-dv / temp).exp();
                 rng.random::<f64>() < p
             } else {
-                // equal delta: reject to reduce churn
                 false
             };
 
@@ -358,24 +322,20 @@ where
             }
         }
 
-        let winner = candidates.into_iter().nth(winner_idx).unwrap();
-        let delta = winner.plan.eval().delta_cost();
-
-        // minimal stats/timing update on the chosen op
-        let rec = &mut self.operator_records[winner.op_idx];
+        let (w_op_idx, w_plan, w_gen_ns, w_eval_ns, w_delta) =
+            candidates.into_iter().nth(winner_idx).unwrap();
+        let rec = &mut self.operator_records[w_op_idx];
         rec.stats_mut().on_attempt();
         rec.stats_mut().on_timing(
-            winner.gen_ns,
-            winner.eval_ns,
+            w_gen_ns,
+            w_eval_ns,
             stats_cfg.gen_time_alpha,
             stats_cfg.eval_time_alpha,
         );
 
-        // ——— apply only if valid on the real state ———
-        if state.apply_plan_validated(&winner.plan).is_ok() {
-            // improvement tracked as positive → pass -delta
-            rec.stats_mut().on_accept(-delta, stats_cfg.reward_alpha);
-            return Ok(Some(delta));
+        if state.apply_plan_validated(&w_plan).is_ok() {
+            rec.stats_mut().on_accept(-w_delta, stats_cfg.reward_alpha);
+            return Ok(Some(w_delta));
         }
         Ok(None)
     }
@@ -439,17 +399,6 @@ fn ewma(prev: f64, x: f64, alpha: f64) -> f64 {
     }
 }
 
-fn proposals_per_task<C: SolverVariable>(
-    stats: &OperatorStats<C>,
-    shard: &ShardConfig,
-    stats_cfg: &StatsConfig,
-) -> u64 {
-    let ns_per = (stats.emwa_gen_ns_per_proposal + stats.emwa_eval_ns_per_proposal)
-        .max(stats_cfg.min_ns_per_proposal);
-    let target = (shard.target_task_ns as f64 / ns_per).floor() as u64;
-    target.clamp(shard.min_proposals_per_task, shard.max_proposals_per_task)
-}
-
 fn softmax_alloc<C: SolverVariable>(
     stats: &[OperatorStats<C>],
     alloc: &AllocationConfig,
@@ -461,6 +410,7 @@ fn softmax_alloc<C: SolverVariable>(
         return vec![];
     }
 
+    // base scores from speed and success
     let raw: Vec<f64> = stats
         .iter()
         .map(|s| {
@@ -477,15 +427,32 @@ fn softmax_alloc<C: SolverVariable>(
         .collect();
 
     let maxv = raw.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let t = tau.max(1e-6); // numerical guard, could also be another knob
+    let t = tau.max(1e-6); // guard
     let exps: Vec<f64> = raw.iter().map(|&v| ((v - maxv) / t).exp()).collect();
     let sum: f64 = exps.iter().sum::<f64>().max(alloc.softmax_eps);
 
-    exps.into_iter()
+    let mut out: Vec<usize> = exps
+        .into_iter()
         .map(|w| (w / sum) * alloc.target_total_proposals_per_round as f64)
         .map(|x| x.round() as usize)
         .map(|a| a.clamp(alloc.min_per_op, alloc.max_per_op))
-        .collect()
+        .collect();
+
+    // optional: exploration mass (uniform) — simple mix
+    if alloc.explore_frac > 0.0 {
+        let total: usize = out.iter().sum();
+        if total > 0 {
+            let explore = ((alloc.explore_frac * alloc.target_total_proposals_per_round as f64)
+                .round() as usize)
+                .max(n); // at least 1 each
+            let base = explore / n;
+            for v in &mut out {
+                *v = (*v + base).clamp(alloc.min_per_op, alloc.max_per_op);
+            }
+        }
+    }
+
+    out
 }
 
 #[cfg(test)]
@@ -513,7 +480,4 @@ mod tests {
     assert_impl_all!(Plan<'static, T, C>: Send);
     assert_impl_all!(PlanEval<T, C>: Send);
     assert_impl_all!(OperatorStats<C>: Send, Sync);
-
-    #[allow(dead_code)]
-    type MetaSolverType = MetaEngine<T, C, Q, S>;
 }

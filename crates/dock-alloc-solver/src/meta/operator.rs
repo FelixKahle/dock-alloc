@@ -24,7 +24,7 @@ use crate::{
     framework::planning::{Plan, PlanningContext},
 };
 use dock_alloc_core::SolverVariable;
-use rand::rngs::StdRng;
+use rand_chacha::ChaCha8Rng;
 
 pub trait Operator: Send + Sync {
     type Time: SolverVariable;
@@ -36,7 +36,7 @@ pub trait Operator: Send + Sync {
     fn propose<'p, 'al, 'bo>(
         &self,
         iteration: usize,
-        rng: &mut StdRng,
+        rng: &mut ChaCha8Rng,
         ctx: PlanningContext<'p, 'al, 'bo, Self::Time, Self::Cost, Self::Quay>,
     ) -> Plan<'p, Self::Time, Self::Cost>;
 }

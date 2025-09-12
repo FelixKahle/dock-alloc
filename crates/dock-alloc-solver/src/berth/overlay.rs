@@ -267,6 +267,12 @@ where
         &self.operations
     }
 
+    pub fn clear(&mut self) {
+        self.free_by_time.clear();
+        self.occupied_by_time.clear();
+        self.operations.clear();
+    }
+
     /// Records an occupied space at a specific time point in the overlay.
     #[inline]
     fn add_occupy(

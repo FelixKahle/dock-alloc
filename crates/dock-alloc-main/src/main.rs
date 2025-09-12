@@ -49,7 +49,7 @@ fn enable_tracing() {
 }
 
 fn main() {
-    enable_tracing();
+    //enable_tracing();
 
     // Generate the Problem
     let mut generator: InstanceGenerator<i64, i64> = InstanceGenConfig::default().into();
@@ -64,9 +64,13 @@ fn main() {
     let operators: Vec<
         Box<dyn Operator<Time = i64, Cost = i64, Quay = BTreeMapQuay> + Send + Sync>,
     > = vec![
-        Box::new(RandomSwapOperator::<i64, i64, BTreeMapQuay>::default()),
-        Box::new(RandomDestroyRepairOperator::<i64, i64, BTreeMapQuay>::default()),
-        Box::new(RelocateLocal::<i64, i64, BTreeMapQuay>::default()),
+        Box::new(RandomSwapOperator::<i64, i64, BTreeMapQuay>::from_problem(
+            &problem,
+        )),
+        Box::new(RandomDestroyRepairOperator::<i64, i64, BTreeMapQuay>::from_problem(&problem)),
+        Box::new(RelocateLocal::<i64, i64, BTreeMapQuay>::from_problem(
+            &problem,
+        )),
     ];
     let mut meta: MetaEngine<i64, i64, BTreeMapQuay, GreedySolver<i64, i64, BTreeMapQuay>> =
         MetaEngine::new(MetaConfig::default(), operators, greedy);

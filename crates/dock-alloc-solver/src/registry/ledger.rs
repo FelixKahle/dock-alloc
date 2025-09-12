@@ -34,7 +34,7 @@ use dock_alloc_model::model::{
 };
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AssignmentLedger<'a, T: SolverVariable, C: SolverVariable> {
     problem: &'a Problem<T, C>,
     committed: HashMap<MovableRequestId, AssignmentRef<'a, Movable, T, C>>,

@@ -240,7 +240,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AssignmentLedgerOverlay<'brand, 'a, 'l, T, C>
 where
     T: SolverVariable,
@@ -301,6 +301,17 @@ where
             staged_uncommits,
             _brand: Brand::new(),
         }
+    }
+
+    #[inline]
+    pub fn ledger(&self) -> &'l AssignmentLedger<'a, T, C> {
+        self.ledger
+    }
+
+    #[inline]
+    pub fn clear(&mut self) {
+        self.staged_commits.clear();
+        self.staged_uncommits.clear();
     }
 
     #[inline]

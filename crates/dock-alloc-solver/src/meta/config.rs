@@ -5,12 +5,9 @@
 // "Software"), to deal in the Software without restriction, including
 // without limitation the rights to use, copy, modify, merge, publish,
 // distribute, sublicense, and/or sell copies of the Software, and to
-// permit persons to whom the Software is furnished to do so, subject to
-// the following conditions:
-//
+// permit persons to do so, subject to the following conditions:
 // The above copyright notice and this permission notice shall be
 // included in all copies or substantial portions of the Software.
-//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
 // EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
 // MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
@@ -18,6 +15,8 @@
 // LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+// ========================= config.rs =========================
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatsConfig {
@@ -42,24 +41,33 @@ impl Default for StatsConfig {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AllocationConfig {
+    /// Target number of proposal attempts per meta-iteration (round).
     pub target_total_proposals_per_round: usize,
+    /// Lower bound on proposals assigned to each operator (after softmax).
     pub min_per_op: usize,
+    /// Upper bound on proposals assigned to each operator (after softmax).
     pub max_per_op: usize,
+    /// Fraction of proposals reserved for uniform exploration (0..=1).
     pub explore_frac: f64,
+    /// Weight of speed signal (1 / time per proposal) in softmax.
     pub speed_weight: f64,
+    /// Weight of success rate in softmax.
     pub success_weight: f64,
+    /// Minimum temperature for softmax (τ).
     pub softmax_tau_min: f64,
+    /// Maximum temperature for softmax (τ).
     pub softmax_tau_max: f64,
+    /// Numerical epsilon to guard division-by-zero / underflow.
     pub softmax_eps: f64,
 }
 
 impl Default for AllocationConfig {
     fn default() -> Self {
         Self {
-            target_total_proposals_per_round: 128,
-            min_per_op: 1,
-            max_per_op: 64,
-            explore_frac: 0.0,
+            target_total_proposals_per_round: 4096,
+            min_per_op: 8,
+            max_per_op: 4096,
+            explore_frac: 0.15,
             speed_weight: 0.7,
             success_weight: 0.3,
             softmax_tau_min: 0.02,
@@ -102,39 +110,23 @@ impl Default for RandomConfig {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ShardConfig {
-    pub target_task_ns: u64,
-    pub min_proposals_per_task: u64,
-    pub max_proposals_per_task: u64,
-    pub max_tasks_per_round_factor: u64,
-}
-
-impl Default for ShardConfig {
-    fn default() -> Self {
-        Self {
-            target_task_ns: 1_000_000,
-            min_proposals_per_task: 10,
-            max_proposals_per_task: 1_000,
-            max_tasks_per_round_factor: 10,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct MetaConfig {
+    /// Hard time budget for the whole meta solve (milliseconds).
     pub max_solver_time_ms: u64,
-    pub shard: ShardConfig,
+    /// Stats / smoothing configuration.
     pub stats: StatsConfig,
+    /// Allocation / softmax configuration.
     pub alloc: AllocationConfig,
+    /// Simulated annealing parameters used in selection.
     pub anneal: AnnealingConfig,
+    /// RNG seeds.
     pub random: RandomConfig,
 }
 
 impl Default for MetaConfig {
     fn default() -> Self {
         Self {
-            max_solver_time_ms: 9_000,
-            shard: ShardConfig::default(),
+            max_solver_time_ms: 120000,
             stats: StatsConfig::default(),
             alloc: AllocationConfig::default(),
             anneal: AnnealingConfig::default(),

@@ -68,7 +68,7 @@ impl std::fmt::Display for SolverStateApplyError {
 
 impl std::error::Error for SolverStateApplyError {}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SolverState<'p, T, C, Q>
 where
     T: SolverVariable,
@@ -146,7 +146,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FeasibleSolverState<'p, T, C, Q>
 where
     T: SolverVariable,
@@ -547,7 +547,6 @@ where
         &mut self,
         plan: &Plan<'p, T, C>,
     ) -> Result<(), FeasibleSolverStateApplyError<T>> {
-        // 0) Balanced ops? (typo fix: assigned vs unassigned)
         let a = plan.ledger_commit().amount_assigned();
         let u = plan.ledger_commit().amount_unassigned();
         if a != u {
@@ -602,7 +601,6 @@ where
             }
         }
 
-        // Valid! Apply for real
         self.ledger.apply(plan.ledger_commit()).map_err(|e| {
             FeasibleSolverStateApplyError::Ledger(LedgerApplyValidationError::Ledger(e))
         })?;

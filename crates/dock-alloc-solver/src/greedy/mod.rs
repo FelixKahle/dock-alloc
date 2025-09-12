@@ -127,7 +127,7 @@ where
                         .filter(|req| req.request().arrival_time() <= t)
                         .map(|req| {
                             (
-                                req.id(),
+                                req.clone(),
                                 Reverse(req.length().value()),
                                 req.request().arrival_time().value(),
                             )
@@ -135,13 +135,12 @@ where
                         .collect::<Vec<_>>()
                 });
 
-                ready_order.sort_by_key(|&(_id, len_key, arr_key)| (len_key, arr_key));
+                ready_order.sort_by_key(|&(_, len_key, arr_key)| (len_key, arr_key));
                 //ready_order.sort_by_key(|&(_id, len_key, arr_key)| (arr_key, len_key));
                 let mut deps = Vec::new();
 
-                for (rid, _len_key, _arr_key) in ready_order {
+                for (req, _len_key, _arr_key) in ready_order {
                     let decision = b.with_explorer(|ex| {
-                        let req = ex.iter_unassigned_requests().find(|r| r.id() == rid)?;
                         let proc = req.processing_duration();
                         let swin = req.feasible_space_window();
 

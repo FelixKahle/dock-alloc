@@ -26,7 +26,9 @@ use dock_alloc_core::{
     space::{SpaceInterval, SpaceLength, SpacePosition},
     time::{TimeDelta, TimePoint},
 };
-use num_traits::{NumCast, PrimInt, SaturatingAdd, SaturatingMul, Signed, ToPrimitive};
+use num_traits::{
+    FromPrimitive, NumCast, PrimInt, SaturatingAdd, SaturatingMul, Signed, ToPrimitive,
+};
 use rand::{Rng, SeedableRng, rngs::SmallRng};
 use rand_distr::{Distribution, Exp, Normal, Uniform, uniform::SampleUniform};
 use std::{
@@ -941,7 +943,13 @@ where
 impl<TimePrimitive, CostPrimitive> From<InstanceGenConfig<TimePrimitive, CostPrimitive>>
     for InstanceGenerator<TimePrimitive, CostPrimitive>
 where
-    TimePrimitive: SolverVariable + NumCast + ToPrimitive + Debug + SampleUniform,
+    TimePrimitive: SolverVariable
+        + NumCast
+        + ToPrimitive
+        + Debug
+        + SampleUniform
+        + ToPrimitive
+        + FromPrimitive,
     CostPrimitive: SolverVariable + NumCast + Copy + SaturatingAdd + SaturatingMul,
 {
     fn from(config: InstanceGenConfig<TimePrimitive, CostPrimitive>) -> Self {
@@ -951,7 +959,13 @@ where
 
 impl<TimePrimitive, CostPrimitive> InstanceGenerator<TimePrimitive, CostPrimitive>
 where
-    TimePrimitive: SolverVariable + NumCast + ToPrimitive + Debug + SampleUniform,
+    TimePrimitive: SolverVariable
+        + NumCast
+        + ToPrimitive
+        + Debug
+        + SampleUniform
+        + ToPrimitive
+        + FromPrimitive,
     CostPrimitive: SolverVariable + NumCast + Copy + SaturatingAdd + SaturatingMul,
 {
     pub fn new(config: InstanceGenConfig<TimePrimitive, CostPrimitive>) -> Self {

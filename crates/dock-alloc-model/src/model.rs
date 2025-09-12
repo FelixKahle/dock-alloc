@@ -23,6 +23,7 @@ use dock_alloc_core::SolverVariable;
 use dock_alloc_core::cost::Cost;
 use dock_alloc_core::space::{SpaceInterval, SpaceLength, SpacePosition};
 use dock_alloc_core::time::{TimeDelta, TimeInterval, TimePoint};
+use num_traits::{FromPrimitive, ToPrimitive};
 use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::{collections::HashMap, hash::Hash};
@@ -1280,7 +1281,63 @@ impl<T: SolverVariable + Display> Display for ProblemBuildError<T> {
 
 impl<T: SolverVariable + Debug + Display> std::error::Error for ProblemBuildError<T> {}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProblemStats<T: SolverVariable> {
+    /// Total quay length (space) as a typed length.
+    quay_length: SpaceLength,
+    /// Number of movable requests.
+    movable_count: usize,
+    /// 50th percentile of request lengths (typed).
+    p50_request_length: SpaceLength,
+    /// 90th percentile of request lengths (typed).
+    p90_request_length: SpaceLength,
+    /// 50th percentile of processing durations (typed).
+    p50_processing_time: TimeDelta<T>,
+    /// Proxy for instance horizon: latest known completion time among fixed and movable ETA+proc.
+    latest_completion_time: TimePoint<T>,
+    /// Crude congestion: total area demand / (quay_length * horizon),
+    /// capped to [0, 2] for stability. Dimensionless.
+    rho: f64,
+}
+
+impl<T: SolverVariable> ProblemStats<T> {
+    #[inline]
+    pub fn quay_length(&self) -> SpaceLength {
+        self.quay_length
+    }
+
+    #[inline]
+    pub fn movable_count(&self) -> usize {
+        self.movable_count
+    }
+
+    #[inline]
+    pub fn p50_request_length(&self) -> SpaceLength {
+        self.p50_request_length
+    }
+
+    #[inline]
+    pub fn p90_request_length(&self) -> SpaceLength {
+        self.p90_request_length
+    }
+
+    #[inline]
+    pub fn p50_processing_time(&self) -> TimeDelta<T> {
+        self.p50_processing_time
+    }
+
+    #[inline]
+    pub fn latest_completion_time(&self) -> TimePoint<T> {
+        self.latest_completion_time
+    }
+
+    #[inline]
+    pub fn rho(&self) -> f64 {
+        self.rho
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Problem<T = i64, C = i64>
 where
     T: SolverVariable,
@@ -1288,11 +1345,10 @@ where
 {
     movables: Vec<Request<Movable, T, C>>,
     movable_index: HashMap<MovableRequestId, usize>,
-
     preassigned: Vec<Assignment<Fixed, T, C>>,
     preassigned_index: HashMap<FixedRequestId, usize>,
-
     quay_length: SpaceLength,
+    stats: ProblemStats<T>,
 }
 
 impl<T: SolverVariable, C: SolverVariable> Problem<T, C> {
@@ -1349,6 +1405,41 @@ impl<T: SolverVariable, C: SolverVariable> Problem<T, C> {
     pub fn iter_fixed_assignments(&self) -> impl Iterator<Item = &Assignment<Fixed, T, C>> {
         self.preassigned.iter()
     }
+
+    #[inline]
+    pub fn stats(&self) -> &ProblemStats<T> {
+        &self.stats
+    }
+
+    #[inline]
+    pub fn congestion_rho(&self) -> f64 {
+        self.stats.rho()
+    }
+
+    #[inline]
+    pub fn latest_completion_time(&self) -> TimePoint<T> {
+        self.stats.latest_completion_time()
+    }
+
+    #[inline]
+    pub fn p50_processing_time(&self) -> TimeDelta<T> {
+        self.stats.p50_processing_time()
+    }
+
+    #[inline]
+    pub fn p50_request_length(&self) -> SpaceLength {
+        self.stats.p50_request_length()
+    }
+
+    #[inline]
+    pub fn p90_request_length(&self) -> SpaceLength {
+        self.stats.p90_request_length()
+    }
+
+    #[inline]
+    pub fn movable_count(&self) -> usize {
+        self.stats.movable_count()
+    }
 }
 
 impl<T: SolverVariable, C: SolverVariable> Display for Problem<T, C> {
@@ -1369,7 +1460,7 @@ impl<T: SolverVariable, C: SolverVariable> Display for Problem<T, C> {
 
 pub struct ProblemBuilder<T = i64, C = i64>
 where
-    T: SolverVariable,
+    T: SolverVariable + ToPrimitive + FromPrimitive,
     C: SolverVariable,
 {
     movables: HashMap<MovableRequestId, Request<Movable, T, C>>,
@@ -1377,7 +1468,7 @@ where
     quay_length: SpaceLength,
 }
 
-impl<T: SolverVariable, C: SolverVariable> ProblemBuilder<T, C> {
+impl<T: SolverVariable + ToPrimitive + FromPrimitive, C: SolverVariable> ProblemBuilder<T, C> {
     #[inline]
     pub fn new(quay_length: SpaceLength) -> Self {
         Self {
@@ -1462,8 +1553,62 @@ impl<T: SolverVariable, C: SolverVariable> ProblemBuilder<T, C> {
         Ok(self)
     }
 
+    fn percentile_space_length(mut v: Vec<SpaceLength>, p: f64) -> SpaceLength {
+        if v.is_empty() {
+            return SpaceLength::new(0);
+        }
+        v.sort_unstable_by_key(|x| x.value());
+        let n = v.len();
+        if n == 1 {
+            return v[0];
+        }
+
+        let p = p.clamp(0.0, 1.0);
+        let q = p * (n as f64 - 1.0);
+        let lo = q.floor() as usize;
+        let hi = q.ceil() as usize;
+        if lo == hi {
+            return v[lo];
+        }
+
+        let lo_v = v[lo].value() as f64;
+        let hi_v = v[hi].value() as f64;
+        let frac = q - lo as f64;
+        let interp = lo_v + (hi_v - lo_v) * frac;
+        SpaceLength::new(interp.round() as usize)
+    }
+
+    fn percentile_time_delta(mut v: Vec<TimeDelta<T>>, p: f64) -> TimeDelta<T> {
+        if v.is_empty() {
+            return TimeDelta::new(T::zero());
+        }
+        v.sort_unstable_by_key(|x| x.value());
+        let n = v.len();
+        if n == 1 {
+            return v[0];
+        }
+
+        let p = p.clamp(0.0, 1.0);
+        let q = p * (n as f64 - 1.0);
+        let lo = q.floor() as usize;
+        let hi = q.ceil() as usize;
+        if lo == hi {
+            return v[lo];
+        }
+
+        let lo_v = v[lo].value().to_f64().unwrap_or(0.0);
+        let hi_v = v[hi].value().to_f64().unwrap_or(lo_v);
+        let frac = q - lo as f64;
+        let interp = lo_v + (hi_v - lo_v) * frac;
+        let rounded = interp.round();
+
+        let t = T::from_f64(rounded).unwrap_or_else(T::zero);
+        TimeDelta::new(t)
+    }
+
     #[inline]
     pub fn build(&self) -> Problem<T, C> {
+        // ---- assemble ordered movables + index
         let mut movable_pairs: Vec<(MovableRequestId, Request<Movable, T, C>)> =
             self.movables.iter().map(|(k, v)| (*k, v.clone())).collect();
         movable_pairs.sort_by_key(|(id, _)| id.value());
@@ -1475,6 +1620,7 @@ impl<T: SolverVariable, C: SolverVariable> ProblemBuilder<T, C> {
             movables.push(req);
         }
 
+        // ---- assemble ordered fixed assignments + index
         let mut fixed_pairs: Vec<(FixedRequestId, Assignment<Fixed, T, C>)> = self
             .preassigned
             .iter()
@@ -1489,12 +1635,78 @@ impl<T: SolverVariable, C: SolverVariable> ProblemBuilder<T, C> {
             preassigned.push(asg);
         }
 
+        // ---- compute ProblemStats from the assembled parts (typed end-to-end)
+        // Percentiles over movables
+        let lengths: Vec<SpaceLength> = movables.iter().map(|r| r.length()).collect();
+        let procs: Vec<TimeDelta<T>> = movables.iter().map(|r| r.processing_duration()).collect();
+
+        let p50_len = Self::percentile_space_length(lengths.clone(), 0.50);
+        let p90_len = Self::percentile_space_length(lengths, 0.90);
+        let p50_proc = Self::percentile_time_delta(procs, 0.50);
+
+        // Latest completion time across fixed (start+proc) and movable (arrival+proc)
+        let mut latest_end = TimePoint::new(T::zero());
+        for a in &preassigned {
+            let end = a.start_time() + a.request().processing_duration();
+            if end > latest_end {
+                latest_end = end;
+            }
+        }
+        for r in &movables {
+            let end = r.arrival_time() + r.processing_duration();
+            if end > latest_end {
+                latest_end = end;
+            }
+        }
+
+        // Area demand (sum length * proc) for movables + fixed; capacity = quay_length * horizon
+        let mut total_area: i128 = 0;
+        for r in &movables {
+            total_area += (r.length().value() as i128)
+                * (r.processing_duration().value().to_i128().unwrap_or(0));
+        }
+        for a in &preassigned {
+            total_area += (a.request().length().value() as i128)
+                * (a.request()
+                    .processing_duration()
+                    .value()
+                    .to_i128()
+                    .unwrap_or(0));
+        }
+        let horizon: i128 = latest_end.value().to_i128().unwrap_or(0).max(1);
+        let capacity: i128 = (self.quay_length.value() as i128) * horizon;
+        let rho = if capacity > 0 {
+            (total_area as f64 / capacity as f64).clamp(0.0, 2.0)
+        } else {
+            0.0
+        };
+
+        let stats = ProblemStats {
+            quay_length: self.quay_length,
+            movable_count: movables.len(),
+            p50_request_length: if p50_len.value() == 0 {
+                SpaceLength::new(1)
+            } else {
+                p50_len
+            },
+            p90_request_length: if p90_len.value() == 0 {
+                SpaceLength::new(1)
+            } else {
+                p90_len
+            },
+            p50_processing_time: p50_proc,
+            latest_completion_time: latest_end,
+            rho,
+        };
+
+        // ---- finalize Problem with embedded stats
         Problem {
             movables,
             movable_index,
             preassigned,
             preassigned_index,
             quay_length: self.quay_length,
+            stats,
         }
     }
 }
@@ -1986,5 +2198,32 @@ mod tests {
             b.add_preassigned(a),
             Err(ProblemBuildError::AssignmentBeforeArrivalTime(_))
         ));
+    }
+
+    #[test]
+    fn problem_build_embeds_stats() {
+        let mut b = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
+        let r2 = req_movable_ok(2, 20, 0, 7, 0, 100);
+        let rf = req_fixed_ok(10, 10, 60, 5, 60, 100);
+
+        b.add_movable_request(r1).unwrap();
+        b.add_movable_request(r2).unwrap();
+        b.add_preassigned(Assignment::new(
+            rf,
+            SpacePosition::new(60),
+            TimePoint::new(60),
+        ))
+        .unwrap();
+
+        let p = b.build();
+        let s = p.stats();
+
+        assert_eq!(s.quay_length(), SpaceLength::new(100));
+        assert_eq!(s.movable_count(), 2);
+        assert_eq!(s.p50_request_length().value(), 15); // median of [10,20]
+        assert_eq!(s.p50_processing_time().value(), 6); // median of [5,7]
+        assert!(s.latest_completion_time().value() >= 65); // fixed ends at 60+5
+        assert!(s.rho() >= 0.0 && s.rho() <= 2.0);
     }
 }

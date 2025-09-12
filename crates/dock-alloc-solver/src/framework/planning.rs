@@ -516,6 +516,11 @@ where
         Ok(ma)
     }
 
+    pub fn clear(&mut self) {
+        self.assignment_overlay.clear();
+        self.berth_overlay.clear();
+    }
+
     pub fn build(self) -> Plan<'p, T, C>
     where
         C: TryFrom<T> + TryFrom<usize>,
