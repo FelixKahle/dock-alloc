@@ -601,13 +601,14 @@ where
             }
         }
 
-        self.ledger.apply(plan.ledger_commit()).map_err(|e| {
-            FeasibleSolverStateApplyError::Ledger(LedgerApplyValidationError::Ledger(e))
-        })?;
+        self.ledger
+            .apply_validated(plan.ledger_commit())
+            .expect("Cannot recover from partial ledger apply");
 
-        self.berth.apply(plan.berth_commit()).map_err(|e| {
-            FeasibleSolverStateApplyError::Berth(BerthApplyValidationError::Quay(e))
-        })?;
+        self.berth
+            .apply_validated(plan.berth_commit())
+            .expect("Cannot recover from partial berth apply");
+
         Ok(())
     }
 }

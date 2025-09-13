@@ -133,7 +133,18 @@ where
 
     #[inline]
     fn pred(&self, time_point: TimePoint<T>) -> Option<TimePoint<T>> {
-        self.berth_occupancy.slice_predecessor_timepoint(time_point)
+        let base = self.berth_occupancy.slice_predecessor_timepoint(time_point);
+        let free = self
+            .free_by_time
+            .range(..time_point)
+            .next_back()
+            .map(|(t, _)| *t);
+        let occ = self
+            .occupied_by_time
+            .range(..time_point)
+            .next_back()
+            .map(|(t, _)| *t);
+        [base, free, occ].into_iter().flatten().max()
     }
 
     #[inline]
@@ -878,5 +889,160 @@ mod tests {
         let err = ov.is_free(&out_of_bounds).unwrap_err();
         // spot check: error references the offending interval length via Display/Debug not required
         let _ = err; // just assert it returns Err
+    }
+
+    // ------- More tests for iter_free_regions -------
+
+    #[test]
+    fn test_regions_empty_base_single_band() {
+        // Fully free quay of length 10
+        let berth = BO::new(len(10));
+        let ov = BerthOccupancyOverlay::new(&berth);
+
+        // With duration=3, feasible starts are [0,7); space runs should be the whole [0,10)
+        assert_regions_match_slots_overlay(&ov, ti(0, 10), TimeDelta::new(3), len(2), si(0, 10));
+    }
+
+    #[test]
+    fn test_regions_split_by_base_occupy() {
+        // Base: occupy [4,9)×[3,7), introducing base keys and a blocked spatial band
+        let mut berth = BO::new(len(10));
+        berth.occupy(&rect(ti(4, 9), si(3, 7))).unwrap();
+
+        let ov = BerthOccupancyOverlay::new(&berth);
+
+        // Regions should split across the base keys (including predecessor)
+        // and in [4,9) the space runs must exclude [3,7).
+        assert_regions_match_slots_overlay(&ov, ti(0, 12), TimeDelta::new(2), len(2), si(0, 10));
+    }
+
+    #[test]
+    fn test_regions_respect_space_window_clipping() {
+        // Base is fully free, but we restrict the space window to [3,8).
+        let berth = BO::new(len(10));
+        let ov = BerthOccupancyOverlay::new(&berth);
+
+        // Required length 3 must fit entirely inside [3,8); slots/regions should reflect this clip.
+        assert_regions_match_slots_overlay(&ov, ti(0, 10), TimeDelta::new(2), len(3), si(3, 8));
+    }
+
+    #[test]
+    fn test_regions_zero_duration() {
+        // Duration = 0 should be treated as admissible (degenerate rectangles);
+        // regions and slots should still match.
+        let berth = BO::new(len(10));
+        let ov = BerthOccupancyOverlay::new(&berth);
+
+        assert_regions_match_slots_overlay(&ov, ti(2, 7), TimeDelta::new(0), len(2), si(0, 10));
+    }
+
+    #[test]
+    fn test_regions_required_space_too_large_yields_empty() {
+        // Required space larger than quay/window → no feasible regions.
+        let berth = BO::new(len(10));
+        let ov = BerthOccupancyOverlay::new(&berth);
+
+        let bands = collect_overlay_bands(&ov, ti(0, 10), TimeDelta::new(3), len(11), si(0, 10));
+        assert!(
+            bands.is_empty(),
+            "Expected no feasible regions when required space exceeds quay/window"
+        );
+    }
+
+    #[test]
+    fn test_regions_with_overlay_free_and_occupy_mix() {
+        // Base: occupy middle band to create constraints
+        let mut berth = BO::new(len(12));
+        berth.occupy(&rect(ti(3, 9), si(4, 8))).unwrap(); // keys 0,3,9
+
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+        // Overlay: free a subrange inside the base-occupied band and also add a new occupy elsewhere
+        ov.add_free(tp(3), si(5, 7)).unwrap(); // carve a usable corridor inside [4,8)
+        ov.add_free(tp(0), si(5, 7)).unwrap(); // predecessor slice must reflect it as well
+        ov.add_occupy(tp(6), si(0, 2)).unwrap(); // create a new overlay-only obstacle
+
+        // Check consistency with slots across a window overlapping all keys
+        assert_regions_match_slots_overlay(&ov, ti(2, 10), TimeDelta::new(2), len(2), si(0, 12));
+    }
+
+    #[test]
+    fn test_regions_apply_overlay_change_exactly_at_window_start() {
+        // Base boundary at 7 with occupation [2,6)
+        let mut berth = BO::new(len(10));
+        berth.occupy(&rect(ti(7, 9), si(2, 6))).unwrap(); // keys 0,7,9
+
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+        // Occupy at predecessor; free exactly at the window start=5 (overlay-only key)
+        ov.add_occupy(tp(0), si(2, 6)).unwrap();
+        ov.add_free(tp(5), si(2, 6)).unwrap();
+
+        // Regions should include a band starting at 5 that exposes [2,6)
+        assert_regions_match_slots_overlay(&ov, ti(5, 8), TimeDelta::new(2), len(3), si(0, 10));
+
+        // Additionally, ensure at least one region band starts at 5 and contains [2,6)
+        let bands = collect_overlay_bands(&ov, ti(5, 8), TimeDelta::new(2), len(3), si(0, 10));
+        let has_expected = bands
+            .iter()
+            .any(|(&(ts, _te), spaces)| ts == 5 && spaces.iter().any(|&(a, b)| a <= 2 && b >= 6));
+        assert!(
+            has_expected,
+            "Expected a region band starting at 5 that includes space interval [2,6)"
+        );
+    }
+
+    #[test]
+    fn test_regions_band_splits_on_overlay_only_key() {
+        // Base: fully free, only base origin key
+        let berth = BO::new(len(10));
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+
+        // Introduce an overlay-only key at t=6 by occupying a small segment
+        ov.add_occupy(tp(6), si(1, 2)).unwrap();
+
+        // Expect region bands to split at t=6 (overlay key) within [0,10)
+        assert_regions_match_slots_overlay(&ov, ti(0, 10), TimeDelta::new(2), len(1), si(0, 10));
+
+        // Check that we indeed have bands on both sides of t=6
+        let bands = collect_overlay_bands(&ov, ti(0, 10), TimeDelta::new(2), len(1), si(0, 10));
+        let left_band_exists = bands.keys().any(|&(ts, te)| ts <= 0 && te > 0 && te <= 6);
+        let right_band_exists = bands.keys().any(|&(ts, te)| ts >= 6 && te >= 8);
+        assert!(
+            left_band_exists && right_band_exists,
+            "Expected region bands split by overlay key at t=6"
+        );
+    }
+
+    #[test]
+    fn test_regions_zero_duration_overlay_key_at_start_and_end() {
+        let mut b = BO::new(len(10));
+        // base keys 0 and 10
+        b.occupy(&rect(ti(0, 10), si(9, 10))).unwrap();
+
+        let mut ov = BerthOccupancyOverlay::new(&b);
+        // overlay key exactly at window start
+        ov.add_occupy(tp(0), si(0, 1)).unwrap();
+        // overlay key exactly at window end (should appear as candidate for duration==0)
+        ov.add_free(tp(10), si(0, 10)).unwrap();
+
+        // duration 0 over [0,10): expect candidate bands split at 0 and 10 and match slots
+        assert_regions_match_slots_overlay(&ov, ti(0, 10), TimeDelta::new(0), len(1), si(0, 10));
+    }
+
+    #[test]
+    fn test_regions_single_start_with_overlay_pred_and_key_at_start() {
+        // Only one admissible start: [5,10), dur=5 -> start must be 5
+        let mut b = BO::new(len(10));
+        b.occupy(&rect(ti(0, 5), si(0, 1))).unwrap(); // ensures key at 0 and 5
+
+        let mut ov = BerthOccupancyOverlay::new(&b);
+        // overlay change exactly at start=5
+        ov.add_free(tp(5), si(2, 4)).unwrap();
+
+        let bands = collect_overlay_bands(&ov, ti(5, 10), TimeDelta::new(5), len(1), si(0, 10));
+        assert_eq!(bands.len(), 1);
+        let ((ts, te), spaces) = bands.into_iter().next().unwrap();
+        assert_eq!((ts, te), (5, 6)); // “single-start band”
+        let slots = slot_set_for_start_overlay(&ov, tp(5), TimeDelta::new(5), len(1), si(0, 10));
+        assert_eq!(spaces, slots);
     }
 }
