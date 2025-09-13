@@ -38,28 +38,8 @@ use dock_alloc_core::{
     time::{TimeDelta, TimeInterval, TimePoint},
 };
 use dock_alloc_model::model::Problem;
-use num_traits::{PrimInt, Signed};
 use std::{fmt::Debug, ops::Bound::Excluded};
 use tracing::instrument;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BerthApplyValidationError<T: PrimInt + Signed> {
-    Quay(QuaySpaceIntervalOutOfBoundsError),
-    NotFree(SpaceTimeRectangle<T>),
-}
-
-impl<T: PrimInt + Signed + std::fmt::Display> std::fmt::Display for BerthApplyValidationError<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BerthApplyValidationError::Quay(e) => write!(f, "{}", e),
-            BerthApplyValidationError::NotFree(r) => write!(f, "Rectangle {} is not free", r),
-        }
-    }
-}
-impl<T: PrimInt + Signed + std::fmt::Display + std::fmt::Debug> std::error::Error
-    for BerthApplyValidationError<T>
-{
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Slices<'a, T, Q>
@@ -408,31 +388,6 @@ where
     ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
         for op in commit.operations() {
             self.push_operation(op)?;
-        }
-        Ok(())
-    }
-
-    #[instrument(level = "debug", skip_all)]
-    #[inline]
-    pub fn apply_validated(
-        &mut self,
-        commit: &crate::berth::commit::BerthOverlayCommit<T>,
-    ) -> Result<(), BerthApplyValidationError<T>> {
-        for op in commit.operations() {
-            match op {
-                Operation::Occupy(occ) => {
-                    let rect = occ.rectangle();
-                    match self.is_free(rect) {
-                        Ok(true) => self.occupy(rect).map_err(BerthApplyValidationError::Quay)?,
-                        Ok(false) => return Err(BerthApplyValidationError::NotFree(*rect)),
-                        Err(e) => return Err(BerthApplyValidationError::Quay(e)),
-                    }
-                }
-                Operation::Free(fr) => {
-                    self.free(fr.rectangle())
-                        .map_err(BerthApplyValidationError::Quay)?;
-                }
-            }
         }
         Ok(())
     }
@@ -998,42 +953,6 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_validated_second_occupy_conflicts_and_we_keep_first_change() {
-        let mut b = BO::new(len(10));
-        let r = rect(ti(2, 6), si(3, 7));
-
-        let ops = vec![
-            Operation::Occupy(OccupyOperation::new(r)),
-            Operation::Occupy(OccupyOperation::new(r)), // should fail under validated
-        ];
-        let commit = BerthOverlayCommit::new(ops);
-
-        let res = b.apply_validated(&commit);
-        assert!(
-            res.is_err(),
-            "second occupy should fail under validated apply"
-        );
-
-        // The first occupy still persists (partial application behavior).
-        assert!(b.is_occupied(&r).unwrap());
-    }
-
-    #[test]
-    fn test_apply_validated_out_of_bounds_fails_without_mutation() {
-        let mut b = BO::new(len(10));
-        // Space interval exceeds quay length (10), e.g. [9, 12)
-        let r_oob = rect(ti(1, 3), si(9, 12));
-
-        let commit = BerthOverlayCommit::new(vec![Operation::Occupy(OccupyOperation::new(r_oob))]);
-        let res = b.apply_validated(&commit);
-        assert!(res.is_err());
-
-        // No mutation should have occurred for the failing single-op commit
-        assert_eq!(b.time_event_count(), 1);
-        assert!(b.is_free(&rect(ti(0, 100), si(0, 10))).unwrap());
-    }
-
-    #[test]
     fn test_apply_out_of_bounds_fails_without_mutation() {
         let mut b = BO::new(len(10));
         let r_oob = rect(ti(1, 3), si(9, 12));
@@ -1073,22 +992,6 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_validated_free_unoccupied_then_occupy_ok() {
-        let mut b = BO::new(len(10));
-        let r = rect(ti(2, 5), si(3, 6));
-
-        // Free first (no effect), then occupy — both should succeed under validated apply.
-        let ops = vec![
-            Operation::Free(FreeOperation::new(r)),
-            Operation::Occupy(OccupyOperation::new(r)),
-        ];
-        let commit = BerthOverlayCommit::new(ops);
-
-        b.apply_validated(&commit).unwrap();
-        assert!(b.is_occupied(&r).unwrap());
-    }
-
-    #[test]
     fn test_apply_noop_on_empty_rectangles_via_commit() {
         let mut b = BO::new(len(10));
 
@@ -1109,36 +1012,6 @@ mod tests {
         // Nothing should have changed
         assert_eq!(b.time_event_count(), 1);
         assert!(b.is_free(&rect(ti(0, 100), si(0, 10))).unwrap());
-    }
-
-    #[test]
-    fn test_apply_validated_overlapping_occupies_fail_on_second() {
-        let mut b = BO::new(len(10));
-        let r1 = rect(ti(2, 6), si(3, 7));
-        // r2 overlaps r1 in [4,6)×[5,7)
-        let r2 = rect(ti(4, 8), si(5, 9));
-
-        let ops = vec![
-            Operation::Occupy(OccupyOperation::new(r1)),
-            Operation::Occupy(OccupyOperation::new(r2)), // should fail under validated apply
-        ];
-        let commit = BerthOverlayCommit::new(ops);
-
-        let res = b.apply_validated(&commit);
-        assert!(
-            res.is_err(),
-            "second occupy should fail under validated apply"
-        );
-
-        // The first occupy remains applied.
-        assert!(b.is_occupied(&r1).unwrap());
-
-        // The overlapping core is still occupied due to r1.
-        assert!(b.is_occupied(&rect(ti(4, 6), si(5, 7))).unwrap());
-
-        // A unique, non-overlapping tail of r2 must remain free (proves r2 wasn't applied).
-        // Any sub-rectangle fully inside r2 but outside r1 works; pick [6,8)×[7,9).
-        assert!(b.is_free(&rect(ti(6, 8), si(7, 9))).unwrap());
     }
 
     #[test]
@@ -1189,26 +1062,162 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_validated_free_then_reoccupy_same_hole_in_one_commit() {
+    fn test_adjacent_time_occupies_coalesce() {
+        // Same space, adjacent time windows should merge into one band.
+        let mut b = BO::new(len(10));
+
+        let a = rect(ti(5, 10), si(2, 5));
+        let b2 = rect(ti(10, 15), si(2, 5));
+        b.occupy(&a).unwrap();
+        b.occupy(&b2).unwrap();
+
+        // Expect continuous occupancy over [5,15) and only 0,5,15 time events.
+        assert!(b.is_occupied(&rect(ti(5, 15), si(2, 5))).unwrap());
+        assert!(b.is_free(&rect(ti(0, 5), si(2, 5))).unwrap());
+        assert!(b.is_free(&rect(ti(15, 20), si(2, 5))).unwrap());
+        assert_eq!(b.time_event_count(), 3);
+    }
+
+    #[test]
+    fn test_adjacent_space_occupies_coalesce() {
+        // Same time band, adjacent space segments should merge.
         let mut b = BO::new(len(12));
-        // Pre-occupy a larger block
-        let base = rect(ti(2, 8), si(3, 10));
-        b.apply(&BerthOverlayCommit::new(vec![Operation::Occupy(
-            OccupyOperation::new(base),
-        )]))
-        .unwrap();
 
-        // Free a hole then re-occupy the exact same hole in the same validated commit
-        let hole = rect(ti(4, 6), si(5, 7));
+        let t = ti(3, 7);
+        b.occupy(&rect(t, si(2, 5))).unwrap();
+        b.occupy(&rect(t, si(5, 8))).unwrap();
+
+        assert!(b.is_occupied(&rect(t, si(2, 8))).unwrap());
+        assert!(b.is_free(&rect(t, si(0, 2))).unwrap());
+        assert!(b.is_free(&rect(t, si(8, 12))).unwrap());
+    }
+
+    #[test]
+    fn test_apply_empty_commit_is_noop() {
+        let mut b = BO::new(len(10));
+        let before = b.time_event_count();
+        let empty = BerthOverlayCommit::<T>::new(Vec::new());
+        b.apply(&empty).unwrap();
+        assert_eq!(b.time_event_count(), before);
+        assert!(b.is_free(&rect(ti(0, 100), si(0, 10))).unwrap());
+    }
+
+    #[test]
+    fn test_apply_partial_failure_keeps_prior_effects() {
+        // First op is valid, second op is OOB -> apply() returns Err after first mutated state.
+        let mut b = BO::new(len(10));
+
+        let ok = Operation::Occupy(OccupyOperation::new(rect(ti(2, 6), si(1, 3))));
+        let oob = Operation::Occupy(OccupyOperation::new(rect(ti(4, 7), si(9, 12))));
+        let commit = BerthOverlayCommit::new(vec![ok, oob]);
+
+        let res = b.apply(&commit);
+        assert!(res.is_err(), "second operation should fail OOB");
+
+        // The first op must have taken effect.
+        assert!(b.is_occupied(&rect(ti(2, 6), si(1, 3))).unwrap());
+        // And the OOB region must still be free in-bounds portion
+        assert!(b.is_free(&rect(ti(4, 7), si(8, 10))).unwrap());
+    }
+
+    #[test]
+    fn test_slices_within_keys_are_inclusive_of_start_and_end_key() {
+        let mut b = BO::new(len(10));
+        // Create keys at 3, 5, 9
+        b.occupy(&rect(ti(3, 4), si(0, 1))).unwrap();
+        b.occupy(&rect(ti(5, 8), si(0, 1))).unwrap();
+        b.occupy(&rect(ti(9, 10), si(0, 1))).unwrap();
+
+        let keys: Vec<_> = b
+            .slices(tp(3), tp(9))
+            .within_keys()
+            .map(|t| t.value())
+            .collect();
+        assert_eq!(keys, vec![3, 4, 5, 8]); // half-open: [start, end)
+    }
+
+    #[test]
+    fn test_iter_free_slots_with_tight_space_window() {
+        let b = BO::new(len(10));
+        // Only consider [2,5) and require it fully.
+        let slots = collect_free_iter(&b, ti(0, 10), TimeDelta::new(2), len(3), si(2, 5));
+        assert_eq!(slots, vec![(0, (2, 5))]);
+    }
+
+    #[test]
+    fn test_duration_equals_band_width_single_start_base() {
+        let mut b = BO::new(len(10));
+        // Create a single continuous free band [3,9) by blocking outside it at predecessor keys.
+        b.occupy(&rect(ti(0, 3), si(0, 10))).unwrap();
+        b.free(&rect(ti(3, 9), si(0, 10))).unwrap();
+        b.occupy(&rect(ti(9, 12), si(0, 10))).unwrap();
+
+        let starts: Vec<_> = b
+            .iter_free_slots(ti(0, 12), TimeDelta::new(6), len(2), si(0, 10))
+            .map(|f| f.start_time().value())
+            .collect();
+        assert_eq!(starts, vec![3]);
+    }
+
+    #[test]
+    fn test_push_operation_sequence_matches_apply() {
+        let mut b1 = BO::new(len(12));
+        let mut b2 = BO::new(len(12));
+
+        let a = rect(ti(2, 6), si(1, 5));
+        let hole = rect(ti(4, 5), si(2, 4));
+        let c = rect(ti(7, 9), si(0, 2));
+
+        // Use push_operation
+        b1.push_operation(&Operation::Occupy(OccupyOperation::new(a)))
+            .unwrap();
+        b1.push_operation(&Operation::Free(FreeOperation::new(hole)))
+            .unwrap();
+        b1.push_operation(&Operation::Occupy(OccupyOperation::new(c)))
+            .unwrap();
+
+        // Use a commit
         let commit = BerthOverlayCommit::new(vec![
+            Operation::Occupy(OccupyOperation::new(a)),
             Operation::Free(FreeOperation::new(hole)),
-            Operation::Occupy(OccupyOperation::new(hole)),
+            Operation::Occupy(OccupyOperation::new(c)),
         ]);
+        b2.apply(&commit).unwrap();
 
-        // Should succeed: free is always fine; re-occupy is free again immediately.
-        b.apply_validated(&commit).unwrap();
+        // A couple of probes to ensure parity
+        assert_eq!(
+            b1.is_occupied(&rect(ti(2, 4), si(1, 5))).unwrap(),
+            b2.is_occupied(&rect(ti(2, 4), si(1, 5))).unwrap()
+        );
+        assert_eq!(b1.is_free(&hole).unwrap(), b2.is_free(&hole).unwrap());
+        assert_eq!(b1.is_occupied(&c).unwrap(), b2.is_occupied(&c).unwrap());
+    }
 
-        // Final state equals original (base remains fully occupied)
-        assert!(b.is_occupied(&base).unwrap());
+    #[test]
+    fn test_free_on_already_free_is_noop_for_state() {
+        let mut b = BO::new(len(10));
+        let before = b.time_event_count();
+
+        // Free a region that’s already free and disjoint in time.
+        let r = rect(ti(5, 7), si(2, 4));
+        b.free(&r).unwrap();
+
+        // State must remain effectively unchanged.
+        assert!(b.is_free(&rect(ti(0, 100), si(0, 10))).unwrap());
+        // It’s OK if the timeline internally reuses/merges keys—assert state not events.
+        // (Optionally, keep this weaker to avoid false negatives:)
+        assert!(b.time_event_count() >= 1);
+        assert!(b.time_event_count() <= before + 2);
+    }
+
+    #[test]
+    fn test_iter_free_slots_clip_to_bounds_not_just_runs() {
+        // Make a big occupied middle so only side windows are free.
+        let mut b = BO::new(len(12));
+        b.occupy(&rect(ti(3, 8), si(3, 9))).unwrap();
+
+        // Tight bounds force the free slot to be exactly that window
+        let slots = collect_free_iter(&b, ti(0, 12), TimeDelta::new(2), len(3), si(0, 3));
+        assert!(slots.iter().all(|&(_, (a, b))| a == 0 && b == 3));
     }
 }

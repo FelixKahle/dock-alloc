@@ -21,9 +21,11 @@
 
 pub mod destruct;
 pub mod noop;
+pub mod pull;
+pub mod relocate;
 
 pub mod prelude {
-    pub use super::{destruct::*, noop::*};
+    pub use super::{destruct::*, noop::*, pull::*, relocate::*};
     use crate::meta::operator::Operator;
     use dock_alloc_model::model::Problem;
     use num_traits::FromPrimitive;
@@ -42,6 +44,8 @@ pub mod prelude {
         vec![
             Box::new(NoOpOperator::<T, C, Q>::default()),
             Box::new(DestructOperator::<T, C, Q>::default()),
+            Box::new(RelocateGreedyOperator::<T, C, Q>::default()),
+            Box::new(PullForwardOperator::<T, C, Q>::default()),
         ]
     }
 }

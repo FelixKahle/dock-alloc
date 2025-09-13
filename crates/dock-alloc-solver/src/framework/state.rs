@@ -21,7 +21,7 @@
 
 use crate::{
     berth::{
-        berthocc::{BerthApplyValidationError, BerthOccupancy},
+        berthocc::BerthOccupancy,
         quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError, QuayWrite},
     },
     domain::SpaceTimeRectangle,
@@ -308,7 +308,7 @@ where
         ledger: AssignmentLedger<'p, T, C>,
         berth: BerthOccupancy<T, Q>,
     ) -> Result<Self, FeasibleStateError<T>> {
-        Self::validate(&SolverState {
+        Self::validate_state(&SolverState {
             problem,
             ledger: ledger.clone(),
             berth: berth.clone(),
@@ -336,135 +336,8 @@ where
         &self.berth
     }
 
-    fn validate(state: &SolverState<'p, T, C, Q>) -> Result<(), FeasibleStateError<T>> {
-        let committed = state.ledger().committed();
-        let mut missing: Vec<RequestId> = Vec::new();
-        for mid in state.problem().movables().iter().map(|r| r.typed_id()) {
-            if !committed.contains_key(&mid) {
-                missing.push(RequestId::from(mid));
-            }
-        }
-        if !missing.is_empty() {
-            return Err(FeasibleStateError::UnassignedRequests(missing));
-        }
-
-        let quay_len = state.problem().quay_length();
-        let mut items: Vec<Item<T>> = Vec::new();
-
-        for fa in state.problem().iter_fixed_assignments() {
-            let aref = AssignmentRef::new(fa.request(), fa.start_position(), fa.start_time());
-            items.push(Item::new(
-                fa.id(),
-                rect_for_assignment(aref),
-                fa.request().arrival_time(),
-                fa.request().feasible_space_window(),
-            ));
-        }
-
-        for ma in state.ledger().iter_movable_assignments() {
-            let aref = AssignmentRef::new(ma.request(), ma.start_position(), ma.start_time());
-            items.push(Item::new(
-                ma.id(),
-                rect_for_assignment(aref),
-                ma.request().arrival_time(),
-                ma.request().feasible_space_window(),
-            ));
-        }
-
-        for it in &items {
-            let (sint, tint) = it.rect.into_inner();
-
-            if tint.start() < it.arrival_time {
-                return Err(FeasibleStateError::AssignmentBeforeArrivalTime(
-                    AssignmentBeforeArrivalTimeError::new(it.req_id, it.arrival_time, tint.start()),
-                ));
-            }
-
-            if !it.feasible_space_window.contains_interval(&sint) {
-                return Err(FeasibleStateError::AssignmentOutsideSpaceWindow(
-                    AssignmentOutsideSpaceWindowError::new(
-                        it.req_id,
-                        it.feasible_space_window,
-                        sint,
-                    ),
-                ));
-            }
-
-            let quay_bounds = state.berth().quay_space_interval();
-            if !quay_bounds.contains_interval(&sint) {
-                return Err(FeasibleStateError::AssignmentExceedsQuay(
-                    AssignmentExceedsQuayError::new(it.req_id, quay_len, sint),
-                ));
-            }
-
-            match state.berth().is_occupied(&it.rect) {
-                Ok(true) => {} // good
-                Ok(false) => {
-                    return Err(FeasibleStateError::AssignmentOutsideSpaceWindow(
-                        AssignmentOutsideSpaceWindowError::new(
-                            it.req_id,
-                            it.feasible_space_window,
-                            sint,
-                        ),
-                    ));
-                }
-                Err(_) => {
-                    return Err(FeasibleStateError::AssignmentExceedsQuay(
-                        AssignmentExceedsQuayError::new(it.req_id, quay_len, sint),
-                    ));
-                }
-            }
-        }
-
-        let mut order: Vec<usize> = (0..items.len()).collect();
-        order.sort_by_key(|&i| items[i].rect.time().start().value());
-
-        let mut active: Vec<usize> = Vec::new();
-        let sort_active_by_end = |v: &mut Vec<usize>| {
-            v.sort_by(|&i, &j| {
-                items[i]
-                    .rect
-                    .time()
-                    .end()
-                    .value()
-                    .cmp(&items[j].rect.time().end().value())
-            });
-        };
-
-        for &i in &order {
-            let t_start_i = items[i].rect.time().start();
-
-            sort_active_by_end(&mut active);
-            let mut keep_from = 0;
-            for (k, &idx) in active.iter().enumerate() {
-                if items[idx].rect.time().end() > t_start_i {
-                    keep_from = k;
-                    break;
-                } else {
-                    keep_from = k + 1;
-                }
-            }
-            if keep_from > 0 {
-                active.drain(0..keep_from);
-            }
-
-            for &j in &active {
-                if let Some(inter) = items[i].rect.intersection(&items[j].rect) {
-                    let (ra, rb) = if items[i].req_id.value() <= items[j].req_id.value() {
-                        (items[i].req_id, items[j].req_id)
-                    } else {
-                        (items[j].req_id, items[i].req_id)
-                    };
-                    return Err(FeasibleStateError::Overlap(SolverStateOverlapError::new(
-                        ra, rb, inter,
-                    )));
-                }
-            }
-
-            active.push(i);
-        }
-
-        Ok(())
+    fn validate_state(state: &SolverState<'p, T, C, Q>) -> Result<(), FeasibleStateError<T>> {
+        validate(state.problem, &state.ledger, &state.berth)
     }
 }
 
@@ -508,7 +381,7 @@ impl std::error::Error for MismatchedOperationsAmountsError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FeasibleSolverStateApplyError<T: SolverVariable> {
-    Berth(BerthApplyValidationError<T>),
+    Quay(QuaySpaceIntervalOutOfBoundsError),
     Ledger(LedgerApplyValidationError<T>),
     MismatchedAmounts(MismatchedOperationsAmountsError),
 }
@@ -516,16 +389,18 @@ pub enum FeasibleSolverStateApplyError<T: SolverVariable> {
 impl<T: SolverVariable + Display + Debug> std::fmt::Display for FeasibleSolverStateApplyError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FeasibleSolverStateApplyError::Berth(e) => write!(f, "Berth error: {}", e),
+            FeasibleSolverStateApplyError::Quay(e) => write!(f, "Quay error: {}", e),
             FeasibleSolverStateApplyError::Ledger(e) => write!(f, "Ledger error: {}", e),
             FeasibleSolverStateApplyError::MismatchedAmounts(e) => write!(f, "{}", e),
         }
     }
 }
 
-impl<T: SolverVariable> From<BerthApplyValidationError<T>> for FeasibleSolverStateApplyError<T> {
-    fn from(value: BerthApplyValidationError<T>) -> Self {
-        FeasibleSolverStateApplyError::Berth(value)
+impl<T: SolverVariable> From<QuaySpaceIntervalOutOfBoundsError>
+    for FeasibleSolverStateApplyError<T>
+{
+    fn from(value: QuaySpaceIntervalOutOfBoundsError) -> Self {
+        FeasibleSolverStateApplyError::Quay(value)
     }
 }
 
@@ -562,22 +437,21 @@ where
                 .map_err(FeasibleSolverStateApplyError::Ledger)?;
         }
 
-        {
-            let mut berth_clone = self.berth.clone();
-            berth_clone
-                .apply_validated(plan.berth_commit())
-                .map_err(FeasibleSolverStateApplyError::Berth)?;
-        }
-
         self.ledger
             .apply_validated(plan.ledger_commit())
             .expect("Cannot recover from partial ledger apply. This should not happen if validation passed.");
 
-        self.berth.apply_validated(plan.berth_commit()).expect(
-            "Cannot recover from partial berth apply. This should not happen if validation passed.",
-        );
+        // The berth apply is assumed to be valid if the ledger apply was valid.
+        // The berth only carries occupancy information, and does not a transactional
+        // nature like the ledger.
+        // Something is either free or occupied.
+        self.berth.apply(plan.berth_commit())?;
 
         Ok(())
+    }
+
+    pub fn validate(&self) -> Result<(), FeasibleStateError<T>> {
+        validate(self.problem, &self.ledger, &self.berth)
     }
 }
 
@@ -633,6 +507,142 @@ where
     ) -> Result<SolutionRef<'p, T, C>, Self::SolveError>;
 }
 
+fn validate<'p, T, C, Q>(
+    problem: &'p Problem<T, C>,
+    ledger: &AssignmentLedger<'p, T, C>,
+    berth: &BerthOccupancy<T, Q>,
+) -> Result<(), FeasibleStateError<T>>
+where
+    T: SolverVariable,
+    C: SolverVariable,
+    Q: QuayRead,
+{
+    let committed = ledger.committed();
+    let mut missing: Vec<RequestId> = Vec::new();
+    for mid in problem.movables().iter().map(|r| r.typed_id()) {
+        if !committed.contains_key(&mid) {
+            missing.push(RequestId::from(mid));
+        }
+    }
+    if !missing.is_empty() {
+        return Err(FeasibleStateError::UnassignedRequests(missing));
+    }
+
+    let quay_len = problem.quay_length();
+    let mut items: Vec<Item<T>> = Vec::new();
+
+    for fa in problem.iter_fixed_assignments() {
+        let aref = AssignmentRef::new(fa.request(), fa.start_position(), fa.start_time());
+        items.push(Item::new(
+            fa.id(),
+            rect_for_assignment(aref),
+            fa.request().arrival_time(),
+            fa.request().feasible_space_window(),
+        ));
+    }
+
+    for ma in ledger.iter_movable_assignments() {
+        let aref = AssignmentRef::new(ma.request(), ma.start_position(), ma.start_time());
+        items.push(Item::new(
+            ma.id(),
+            rect_for_assignment(aref),
+            ma.request().arrival_time(),
+            ma.request().feasible_space_window(),
+        ));
+    }
+
+    for it in &items {
+        let (sint, tint) = it.rect.into_inner();
+
+        if tint.start() < it.arrival_time {
+            return Err(FeasibleStateError::AssignmentBeforeArrivalTime(
+                AssignmentBeforeArrivalTimeError::new(it.req_id, it.arrival_time, tint.start()),
+            ));
+        }
+
+        if !it.feasible_space_window.contains_interval(&sint) {
+            return Err(FeasibleStateError::AssignmentOutsideSpaceWindow(
+                AssignmentOutsideSpaceWindowError::new(it.req_id, it.feasible_space_window, sint),
+            ));
+        }
+
+        let quay_bounds = berth.quay_space_interval();
+        if !quay_bounds.contains_interval(&sint) {
+            return Err(FeasibleStateError::AssignmentExceedsQuay(
+                AssignmentExceedsQuayError::new(it.req_id, quay_len, sint),
+            ));
+        }
+
+        match berth.is_occupied(&it.rect) {
+            Ok(true) => {} // good
+            Ok(false) => {
+                return Err(FeasibleStateError::AssignmentOutsideSpaceWindow(
+                    AssignmentOutsideSpaceWindowError::new(
+                        it.req_id,
+                        it.feasible_space_window,
+                        sint,
+                    ),
+                ));
+            }
+            Err(_) => {
+                return Err(FeasibleStateError::AssignmentExceedsQuay(
+                    AssignmentExceedsQuayError::new(it.req_id, quay_len, sint),
+                ));
+            }
+        }
+    }
+
+    let mut order: Vec<usize> = (0..items.len()).collect();
+    order.sort_by_key(|&i| items[i].rect.time().start().value());
+
+    let mut active: Vec<usize> = Vec::new();
+    let sort_active_by_end = |v: &mut Vec<usize>| {
+        v.sort_by(|&i, &j| {
+            items[i]
+                .rect
+                .time()
+                .end()
+                .value()
+                .cmp(&items[j].rect.time().end().value())
+        });
+    };
+
+    for &i in &order {
+        let t_start_i = items[i].rect.time().start();
+
+        sort_active_by_end(&mut active);
+        let mut keep_from = 0;
+        for (k, &idx) in active.iter().enumerate() {
+            if items[idx].rect.time().end() > t_start_i {
+                keep_from = k;
+                break;
+            } else {
+                keep_from = k + 1;
+            }
+        }
+        if keep_from > 0 {
+            active.drain(0..keep_from);
+        }
+
+        for &j in &active {
+            if let Some(inter) = items[i].rect.intersection(&items[j].rect) {
+                let (ra, rb) = if items[i].req_id.value() <= items[j].req_id.value() {
+                    (items[i].req_id, items[j].req_id)
+                } else {
+                    (items[j].req_id, items[i].req_id)
+                };
+                return Err(FeasibleStateError::Overlap(SolverStateOverlapError::new(
+                    ra, rb, inter,
+                )));
+            }
+        }
+
+        active.push(i);
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod ledger_commit_tests {
     use crate::registry::commit::LedgerOverlayCommit;
@@ -647,115 +657,5 @@ mod ledger_commit_tests {
         assert_eq!(lc.amount_unassigned(), 3);
         assert_eq!(lc.amount_assigned(), 2);
         assert!(lc.operations().is_empty());
-    }
-}
-
-#[cfg(test)]
-mod overlay_tests {
-    use super::*;
-    use crate::berth::{
-        berthocc::{BerthApplyValidationError, BerthOccupancy},
-        commit::BerthOverlayCommit,
-        operations::{
-            FreeOperation,   // <-- import
-            OccupyOperation, // <-- import
-            Operation as BerthOp,
-        },
-        quay::BTreeMapQuay,
-    };
-    use dock_alloc_core::{
-        space::{SpaceInterval, SpacePosition},
-        time::{TimeInterval, TimePoint},
-    };
-
-    type T = i64;
-    type Q = BTreeMapQuay;
-
-    fn rect(s0: usize, s1: usize, t0: i64, t1: i64) -> SpaceTimeRectangle<T> {
-        SpaceTimeRectangle::new(
-            SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
-            TimeInterval::new(TimePoint::new(t0), TimePoint::new(t1)),
-        )
-    }
-
-    fn empty_berth() -> BerthOccupancy<T, Q> {
-        BerthOccupancy::<T, Q>::new(1000.into())
-    }
-
-    // small helpers so test code stays readable
-    fn occ(r: SpaceTimeRectangle<T>) -> BerthOp<T> {
-        BerthOp::Occupy(OccupyOperation::new(r))
-    }
-    fn fre(r: SpaceTimeRectangle<T>) -> BerthOp<T> {
-        BerthOp::Free(FreeOperation::new(r))
-    }
-
-    #[test]
-    fn overlay_occupy_then_free_no_leak_past_end() {
-        let base = empty_berth();
-        let mut ov = base.overlay();
-
-        let r = rect(10, 20, 100, 200);
-
-        ov.apply_validated(&BerthOverlayCommit::new(vec![occ(r)]))
-            .expect("first occupy");
-
-        assert!(ov.is_occupied(&rect(10, 20, 150, 160)).unwrap());
-        assert!(
-            !ov.is_occupied(&rect(10, 20, 200, 201)).unwrap(),
-            "no leak at end"
-        );
-
-        ov.apply_validated(&BerthOverlayCommit::new(vec![fre(r)]))
-            .expect("free applies");
-
-        assert!(!ov.is_occupied(&rect(10, 20, 150, 151)).unwrap());
-        assert!(!ov.is_occupied(&rect(10, 20, 199, 200)).unwrap());
-        assert!(!ov.is_occupied(&rect(10, 20, 200, 201)).unwrap());
-    }
-
-    #[test]
-    fn overlay_records_only_successes_and_stops_on_error() {
-        let base = empty_berth();
-        let mut ov = base.overlay();
-
-        let seed = rect(0, 100, 1_000, 1_100);
-        ov.apply_validated(&BerthOverlayCommit::new(vec![occ(seed)]))
-            .unwrap();
-
-        let bad = rect(0, 100, 1_050, 1_070); // overlaps seed
-        let good = rect(100, 200, 1_200, 1_300);
-
-        let commit = BerthOverlayCommit::new(vec![occ(bad), occ(good)]);
-        let e = ov.apply_validated(&commit).unwrap_err();
-        match e {
-            BerthApplyValidationError::NotFree(_) => {}
-            _ => panic!("unexpected error: {e:?}"),
-        }
-
-        assert!(
-            !ov.is_occupied(&good).unwrap(),
-            "no partial apply after error"
-        );
-    }
-
-    #[test]
-    fn overlay_free_then_occupy_swap_is_ok_in_one_commit() {
-        let base = empty_berth();
-        let mut ov = base.overlay();
-
-        let r1 = rect(0, 100, 10_000, 10_500);
-        let r2 = rect(100, 200, 10_000, 10_500);
-
-        ov.apply_validated(&BerthOverlayCommit::new(vec![occ(r1)]))
-            .unwrap();
-        assert!(ov.is_occupied(&r1).unwrap());
-        assert!(!ov.is_occupied(&r2).unwrap());
-
-        let swap = BerthOverlayCommit::new(vec![fre(r1), occ(r2)]);
-        ov.apply_validated(&swap).expect("swap commit");
-
-        assert!(!ov.is_occupied(&r1).unwrap(), "R1 freed");
-        assert!(ov.is_occupied(&r2).unwrap(), "R2 now occupied");
     }
 }

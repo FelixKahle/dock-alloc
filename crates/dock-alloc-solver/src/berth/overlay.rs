@@ -21,7 +21,7 @@
 
 use crate::{
     berth::{
-        berthocc::{BerthApplyValidationError, BerthOccupancy},
+        berthocc::BerthOccupancy,
         commit::BerthOverlayCommit,
         domain::{FreeRegion, FreeSlot},
         iter::{FeasibleRegionIter, FreeSlotIter, OverlayRunsIter, runs_cover_interval},
@@ -535,31 +535,6 @@ where
         Ok(self
             .covering_timepoints_union(time_interval)
             .all(|tp| runs_cover_interval(self.free_runs_at(tp), space_interval)))
-    }
-
-    #[instrument(level = "debug", skip_all)]
-    #[inline]
-    pub fn apply_validated(
-        &mut self,
-        commit: &crate::berth::commit::BerthOverlayCommit<T>,
-    ) -> Result<(), BerthApplyValidationError<T>> {
-        for op in commit.operations() {
-            match op {
-                Operation::Occupy(occ) => {
-                    let rect = occ.rectangle();
-                    match self.is_free(rect) {
-                        Ok(true) => self.occupy(rect).map_err(BerthApplyValidationError::Quay)?,
-                        Ok(false) => return Err(BerthApplyValidationError::NotFree(*rect)),
-                        Err(e) => return Err(BerthApplyValidationError::Quay(e)),
-                    }
-                }
-                Operation::Free(fr) => {
-                    self.free(fr.rectangle())
-                        .map_err(BerthApplyValidationError::Quay)?;
-                }
-            }
-        }
-        Ok(())
     }
 
     /// Checks if a given spatio-temporal rectangle is occupied, considering the overlay.
@@ -1101,56 +1076,6 @@ mod tests {
     }
 
     #[test]
-    fn test_overlay_apply_validated_records_only_successes_and_stops_on_error() {
-        // Base: empty
-        let berth = BO::new(len(12));
-        let mut ov = BerthOccupancyOverlay::new(&berth);
-
-        let r1 = rect(ti(2, 6), si(1, 4)); // ok
-        let r2 = rect(ti(4, 8), si(3, 6)); // overlaps r1 -> should fail under validated
-
-        let commit = BerthOverlayCommit::new(vec![
-            Operation::Occupy(OccupyOperation::new(r1)),
-            Operation::Occupy(OccupyOperation::new(r2)), // should error
-            Operation::Free(FreeOperation::new(r1)),     // should never be reached
-        ]);
-
-        let res = ov.apply_validated(&commit);
-        assert!(res.is_err(), "expected second occupy to fail validation");
-
-        // First op applied and recorded, second not recorded.
-        assert!(ov.is_occupied(&r1).unwrap());
-        assert_eq!(ov.operations().len(), 1);
-        assert!(matches!(ov.operations()[0], Operation::Occupy(_)));
-
-        // r2 overlaps r1, so r2 isn't fully free. Check that ONLY the portion
-        // overlapped by r1 is occupied, and the rest is still free.
-        //
-        // Overlap = time [4,6) × space [3,4)
-        assert!(ov.is_occupied(&rect(ti(4, 6), si(3, 4))).unwrap());
-        // The complementary parts of r2 remain free (no extra occupancy was added):
-        assert!(ov.is_free(&rect(ti(4, 6), si(4, 6))).unwrap());
-        assert!(ov.is_free(&rect(ti(6, 8), si(3, 6))).unwrap());
-    }
-
-    #[test]
-    fn test_overlay_apply_validated_free_then_occupy_same_rect_ok() {
-        let berth = BO::new(len(10));
-        let mut ov = BerthOccupancyOverlay::new(&berth);
-
-        let r = rect(ti(3, 7), si(2, 5));
-        let commit = BerthOverlayCommit::new(vec![
-            Operation::Free(FreeOperation::new(r)), // freeing free area is fine
-            Operation::Occupy(OccupyOperation::new(r)), // then occupy
-        ]);
-        ov.apply_validated(&commit).unwrap();
-        assert!(ov.is_occupied(&r).unwrap());
-        assert_eq!(ov.operations().len(), 2);
-        assert!(matches!(ov.operations()[0], Operation::Free(_)));
-        assert!(matches!(ov.operations()[1], Operation::Occupy(_)));
-    }
-
-    #[test]
     fn test_overlay_into_commit_roundtrip_applies_to_base() {
         // Base: empty
         let mut berth = BO::new(len(12));
@@ -1215,21 +1140,6 @@ mod tests {
     }
 
     #[test]
-    fn test_overlay_apply_validated_out_of_bounds_errors_and_does_not_record() {
-        let berth = BO::new(len(8)); // quay length = 8 -> end position 8
-        let mut ov = BerthOccupancyOverlay::new(&berth);
-
-        // Out of bounds: [7, 10)
-        let r_oob = rect(ti(1, 3), si(7, 10));
-        let commit = BerthOverlayCommit::new(vec![Operation::Occupy(OccupyOperation::new(r_oob))]);
-
-        let res = ov.apply_validated(&commit);
-        assert!(res.is_err(), "OOB must return an error");
-        // No operations recorded on failure
-        assert!(ov.operations().is_empty());
-    }
-
-    #[test]
     fn test_overlay_operations_order_with_duplicates() {
         let berth = BO::new(len(10));
         let mut ov = BerthOccupancyOverlay::new(&berth);
@@ -1246,48 +1156,6 @@ mod tests {
         assert!(matches!(ops[2], Operation::Free(_)));
 
         // Final overlay view should be free over r (occupied twice, then freed)
-        assert!(ov.is_free(&r).unwrap());
-    }
-
-    #[test]
-    fn test_overlay_apply_validated_respects_base_occupancy() {
-        // Base pre-occupied band
-        let mut berth = BO::new(len(12));
-        let base_occ = rect(ti(3, 9), si(2, 5));
-        berth
-            .apply(&BerthOverlayCommit::new(vec![Operation::Occupy(
-                OccupyOperation::new(base_occ),
-            )]))
-            .unwrap();
-
-        let mut ov = BerthOccupancyOverlay::new(&berth);
-
-        // Try to occupy an overlapping rectangle via validated apply -> must fail
-        let overlap = rect(ti(5, 7), si(4, 6));
-        let commit =
-            BerthOverlayCommit::new(vec![Operation::Occupy(OccupyOperation::new(overlap))]);
-
-        let res = ov.apply_validated(&commit);
-        assert!(res.is_err(), "must not occupy over base-occupied region");
-
-        // Overlay remains empty (no recording on failure)
-        assert!(ov.operations().is_empty());
-        // Base still occupied where expected
-        assert!(ov.berth().is_occupied(&base_occ).unwrap());
-    }
-
-    #[test]
-    fn test_overlay_apply_validated_free_unoccupied_is_noop_but_recorded() {
-        let berth = BO::new(len(10));
-        let mut ov = BerthOccupancyOverlay::new(&berth);
-
-        let r = rect(ti(2, 4), si(1, 3));
-        let commit = BerthOverlayCommit::new(vec![Operation::Free(FreeOperation::new(r))]);
-
-        ov.apply_validated(&commit).unwrap();
-        // Free on free area is allowed and recorded
-        assert_eq!(ov.operations().len(), 1);
-        assert!(matches!(ov.operations()[0], Operation::Free(_)));
         assert!(ov.is_free(&r).unwrap());
     }
 
@@ -1376,5 +1244,286 @@ mod tests {
             ov.is_occupied(&r).unwrap(),
             "occupy must win on tie at same timestamp"
         );
+    }
+
+    #[test]
+    fn barrier_without_overlay_set_prevents_carry() {
+        let berth = BO::new(len(10));
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+
+        // Occupy [2,6)×[3,7) with the *barrier* added by `occupy` at t=6
+        ov.occupy(&rect(ti(2, 6), si(3, 7))).unwrap();
+
+        // Just after the barrier: should be free again
+        assert!(ov.is_free(&rect(ti(6, 8), si(3, 7))).unwrap());
+
+        // And right before the barrier: still occupied
+        assert!(ov.is_occupied(&rect(ti(5, 6), si(3, 7))).unwrap());
+    }
+
+    #[test]
+    fn merged_keys_are_sorted_and_deduped() {
+        let mut berth = BO::new(len(10));
+        // Base keys: 3 and 8 (occupy two disjoint windows)
+        berth.occupy(&rect(ti(3, 5), si(0, 1))).unwrap();
+        berth.occupy(&rect(ti(8, 9), si(0, 1))).unwrap();
+
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+        // Overlay key at 6, and a barrier at 7 (implicit via a free op)
+        ov.add_occupy(tp(6), si(1, 2)).unwrap();
+        ov.add_free(tp(7), si(1, 2)).unwrap(); // creates a barrier at 7
+
+        assert_eq!(ov.overlay_next_key_after(tp(0)), Some(tp(3)));
+        assert_eq!(ov.overlay_next_key_after(tp(3)), Some(tp(5))); // base end
+        assert_eq!(ov.overlay_next_key_after(tp(5)), Some(tp(6))); // overlay
+        assert_eq!(ov.overlay_next_key_after(tp(6)), Some(tp(7))); // barrier
+        assert_eq!(ov.overlay_next_key_after(tp(7)), Some(tp(8))); // base
+        assert_eq!(ov.overlay_next_key_after(tp(8)), Some(tp(9)));
+        assert_eq!(ov.overlay_next_key_after(tp(9)), None);
+    }
+
+    #[test]
+    fn same_key_partial_overlap_occupy_wins_only_on_overlap() {
+        let berth = BO::new(len(12));
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+
+        // At t=5, free [2,8) then occupy [4,10) — same timestamp
+        // Overlap is [4,8).
+        ov.add_free(tp(5), si(2, 8)).unwrap();
+        ov.add_occupy(tp(5), si(4, 10)).unwrap();
+
+        // Overlap [4,8) must be occupied.
+        assert!(ov.is_occupied(&rect(ti(5, 7), si(4, 8))).unwrap());
+        // Left non-overlap [2,4) remains free per the free op.
+        assert!(ov.is_free(&rect(ti(5, 7), si(2, 4))).unwrap());
+        // Right tail [8,10) occupied (only from occupy).
+        assert!(ov.is_occupied(&rect(ti(5, 7), si(8, 10))).unwrap());
+    }
+
+    #[test]
+    fn disjoint_intervals_coalesce_and_query_correctly() {
+        let berth = BO::new(len(20));
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+
+        // Make several small occupied islands at the same key
+        ov.add_occupy(tp(4), si(1, 3)).unwrap();
+        ov.add_occupy(tp(4), si(3, 5)).unwrap(); // touches previous -> coalesce [1,5)
+        ov.add_occupy(tp(4), si(10, 12)).unwrap();
+
+        // Free a hole inside [1,5) to split it
+        ov.add_free(tp(4), si(2, 4)).unwrap();
+
+        // Now at t=4 we expect occupied: [1,2) ∪ [4,5) ∪ [10,12)
+        assert!(ov.is_occupied(&rect(ti(4, 6), si(1, 2))).unwrap());
+        assert!(ov.is_free(&rect(ti(4, 6), si(2, 4))).unwrap());
+        assert!(ov.is_occupied(&rect(ti(4, 6), si(4, 5))).unwrap());
+        assert!(ov.is_occupied(&rect(ti(4, 6), si(10, 12))).unwrap());
+    }
+
+    #[test]
+    fn zero_and_negative_duration_respect_barriers() {
+        let berth = BO::new(len(10));
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+
+        // Occupy with a barrier at 6
+        ov.occupy(&rect(ti(2, 6), si(4, 8))).unwrap();
+
+        // Duration == 0: starts should include 2 and 6; 6 should reflect *post*-band state (free)
+        let starts: Vec<_> = ov
+            .iter_free_slots(ti(2, 6), TimeDelta::new(0), len(1), si(0, 10))
+            .map(|bf| bf.slot().start_time().value())
+            .collect();
+        assert!(starts.contains(&2));
+        assert!(starts.contains(&6));
+
+        // Negative duration treated like 0 by our helpers: same set of starts should be reachable
+        let starts_neg: Vec<_> = ov
+            .iter_free_slots(ti(2, 6), TimeDelta::new(-3), len(1), si(0, 10))
+            .map(|bf| bf.slot().start_time().value())
+            .collect();
+        assert!(starts_neg.contains(&2));
+        assert!(starts_neg.contains(&6));
+    }
+
+    #[test]
+    fn overlay_key_at_zero_affects_initial_slice() {
+        let berth = BO::new(len(10)); // base origin at t=0
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+
+        ov.add_occupy(tp(0), si(0, 2)).unwrap();
+
+        // The very first slice [0,1) must see the overlay at its predecessor (t=0).
+        assert!(ov.is_occupied(&rect(ti(0, 1), si(0, 2))).unwrap());
+        assert!(ov.is_free(&rect(ti(0, 1), si(2, 10))).unwrap());
+    }
+
+    #[test]
+    fn exact_fit_required_space_across_entire_quay() {
+        let berth = BO::new(len(8));
+        let ov = BerthOccupancyOverlay::new(&berth);
+
+        // require full length inside [0,8)
+        let items: Vec<_> = ov
+            .iter_free_slots(ti(0, 3), TimeDelta::new(3), len(8), si(0, 8))
+            .collect();
+        assert!(!items.is_empty(), "Full-length slot should be produced");
+    }
+
+    fn snapshot_runs_at(
+        ov: &BerthOccupancyOverlay<'_, '_, T, BooleanVecQuay>,
+        t: T,
+    ) -> Vec<(usize, usize)> {
+        ov.free_runs_at(tp(t))
+            .map(|iv| (iv.start().value(), iv.end().value()))
+            .collect()
+    }
+
+    #[test]
+    fn disjoint_ops_commute() {
+        let berth = BO::new(len(10));
+
+        // Plan A: free then occupy (disjoint)
+        let mut a = BerthOccupancyOverlay::new(&berth);
+        a.add_free(tp(4), si(0, 2)).unwrap();
+        a.add_occupy(tp(4), si(6, 8)).unwrap();
+
+        // Plan B: occupy then free
+        let mut b = BerthOccupancyOverlay::new(&berth);
+        b.add_occupy(tp(4), si(6, 8)).unwrap();
+        b.add_free(tp(4), si(0, 2)).unwrap();
+
+        assert_eq!(snapshot_runs_at(&a, 4), snapshot_runs_at(&b, 4));
+    }
+
+    #[test]
+    fn into_commit_roundtrip_is_idempotent_on_base() {
+        let mut berth = BO::new(len(12));
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+
+        // Complex overlay: carve hole + add disjoint obstacle
+        let big = rect(ti(2, 9), si(3, 9));
+        let hole = rect(ti(4, 6), si(5, 7));
+        let obs = rect(ti(7, 10), si(0, 2));
+
+        ov.occupy(&big).unwrap();
+        ov.free(&hole).unwrap();
+        ov.occupy(&obs).unwrap();
+
+        // Before apply: base differs from overlay
+        assert!(berth.is_free(&big).unwrap());
+
+        // Apply commit (op-log form)
+        let commit = ov.into_commit();
+        berth.apply(&commit).unwrap();
+
+        // Now base should match overlay’s queries for a few probes
+        assert!(berth.is_occupied(&rect(ti(3, 4), si(3, 9))).unwrap());
+        assert!(berth.is_free(&hole).unwrap());
+        assert!(berth.is_occupied(&obs).unwrap());
+
+        // Reapply commit: should be a no-op (idempotent)
+        let before = berth.time_event_count();
+        berth.apply(&commit).unwrap();
+        assert_eq!(before, berth.time_event_count());
+    }
+
+    #[test]
+    fn add_free_oob_is_error_and_does_not_mutate() {
+        let berth = BO::new(len(8));
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+
+        let res = ov.add_free(tp(2), si(7, 10)); // [7,10) exceeds quay end 8
+        assert!(res.is_err());
+
+        // No keys introduced by failure
+        assert_eq!(ov.overlay_next_key_after(tp(0)), None);
+    }
+
+    #[test]
+    fn barrier_splits_when_base_has_no_keys() {
+        let berth = BO::new(len(10)); // base: only origin
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+
+        // Create a band [2,6) by adding free at 2 and barrier at 6 via occupy then free
+        ov.add_occupy(tp(0), si(0, 1)).unwrap(); // force a change pre-2
+        ov.add_free(tp(2), si(0, 1)).unwrap(); // barrier at 2 via free(..end)
+        ov.add_occupy(tp(6), si(0, 1)).unwrap(); // another barrier at 6
+
+        // Regions over [0,8) with dur=2 should show a band split at 2 and 6
+        assert_regions_match_slots_overlay(&ov, ti(0, 8), TimeDelta::new(2), len(1), si(0, 10));
+    }
+
+    #[test]
+    fn overlay_change_is_carried_across_all_base_interior_keys() {
+        let mut berth = BO::new(len(10));
+        // Create interior base keys at 3, 5, 7
+        berth.occupy(&rect(ti(3, 4), si(9, 10))).unwrap();
+        berth.occupy(&rect(ti(5, 6), si(9, 10))).unwrap();
+        berth.occupy(&rect(ti(7, 8), si(9, 10))).unwrap();
+
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+        // Free [2,6)×[1,3): should place entries at 2 and across interior keys 3,5
+        ov.free(&rect(ti(2, 6), si(1, 3))).unwrap();
+
+        // All slices covering [2,6) must reflect this free band, despite base keys at 3 and 5
+        for t in [2, 3, 4, 5].into_iter().map(TimePoint::new) {
+            assert!(
+                ov.is_free(&rect(TimeInterval::new(t, t + TimeDelta::new(1)), si(1, 3)))
+                    .unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn clear_removes_barriers_effect() {
+        let berth = BO::new(len(10));
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+
+        ov.occupy(&rect(ti(2, 6), si(3, 5))).unwrap(); // creates barrier at 6
+        assert_eq!(ov.overlay_next_key_after(tp(2)), Some(tp(6)));
+
+        ov.clear();
+        assert_eq!(ov.overlay_next_key_after(tp(2)), None);
+    }
+
+    #[test]
+    fn absorb_copies_barriers_and_sets() {
+        let berth = BO::new(len(10));
+        let mut a = BerthOccupancyOverlay::new(&berth);
+        let mut b = BerthOccupancyOverlay::new(&berth);
+
+        a.occupy(&rect(ti(2, 6), si(1, 3))).unwrap(); // barrier @6
+        b.free(&rect(ti(4, 5), si(0, 2))).unwrap(); // barrier @5
+
+        // Replace A with B
+        a.absorb(b);
+
+        assert_eq!(a.overlay_next_key_after(tp(0)), Some(tp(4)));
+        assert_eq!(a.overlay_next_key_after(tp(4)), Some(tp(5)));
+
+        assert!(a.is_free(&rect(ti(4, 5), si(0, 2))).unwrap());
+        assert!(
+            a.operations()
+                .iter()
+                .any(|op| matches!(op, Operation::Free(_)))
+        );
+    }
+
+    #[test]
+    fn duration_equal_to_band_width_yields_single_start() {
+        let berth = BO::new(len(10));
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+
+        // Create a free band exactly [3,6) by occupying outside it
+        ov.add_occupy(tp(0), si(0, 10)).unwrap(); // block everything at pred
+        ov.add_free(tp(3), si(0, 10)).unwrap(); // open [3,6)
+        ov.add_occupy(tp(6), si(0, 10)).unwrap(); // close at 6
+
+        // Duration equals 3 -> only start 3 is valid inside [3,6)
+        let starts: Vec<_> = ov
+            .iter_free_slots(ti(0, 10), TimeDelta::new(3), len(2), si(0, 10))
+            .map(|bf| bf.slot().start_time().value())
+            .collect();
+        assert_eq!(starts.into_iter().filter(|&s| s == 3).count(), 1);
     }
 }
