@@ -338,36 +338,12 @@ where
         println!("Winner Operator: {}", rec.operator.name());
         println!("Delta: {}", w_delta);
 
-        match state.apply_plan_validated(&w_plan) {
-            Ok(()) => {
-                rec.stats_mut().on_accept(-w_delta, stats_cfg.reward_alpha);
-                Ok(Some(w_delta))
-            }
-            Err(e) => {
-                eprintln!("Plan application failed: {e:#?}");
-
-                // Helpful extra: quickly check the first Occupy against the current berth view
-                if let Some(first_occ) =
-                    w_plan
-                        .berth_commit()
-                        .operations()
-                        .iter()
-                        .find_map(|op| match op {
-                            crate::berth::operations::Operation::Occupy(o) => Some(*o.rectangle()),
-                            _ => None,
-                        })
-                {
-                    match state.berth().is_free(&first_occ) {
-                        Ok(free) => {
-                            eprintln!("First occupy free at apply time? {free}, rect={first_occ:?}")
-                        }
-                        Err(quay_err) => {
-                            eprintln!("Quay OOB while checking first occupy: {quay_err:?}")
-                        }
-                    }
-                }
-                Ok(None)
-            }
+        if state.apply_plan_validated(&w_plan).is_ok() {
+            rec.stats_mut().on_accept(w_delta, stats_cfg.reward_alpha);
+            Ok(Some(w_delta))
+        } else {
+            println!("Plan application failed");
+            Ok(None)
         }
     }
 }

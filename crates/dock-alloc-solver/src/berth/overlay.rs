@@ -39,7 +39,7 @@ use dock_alloc_core::{
     time::{TimeDelta, TimeInterval, TimePoint},
 };
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     iter::{Copied, FusedIterator, Peekable},
 };
 use std::{
@@ -117,6 +117,8 @@ where
     berth_occupancy: &'a BerthOccupancy<T, Q>,
     free_by_time: BTreeMap<TimePoint<T>, SpaceIntervalSet>,
     occupied_by_time: BTreeMap<TimePoint<T>, SpaceIntervalSet>,
+    /// Explicit time keys that delimit overlay effects (prevents relying on empty sentinels).
+    barrier_times: BTreeSet<TimePoint<T>>,
     operations: Vec<Operation<T>>,
     _brand: Brand<'brand>,
 }
@@ -144,7 +146,8 @@ where
             .range(..time_point)
             .next_back()
             .map(|(t, _)| *t);
-        [base, free, occ].into_iter().flatten().max()
+        let bar = self.barrier_times.range(..time_point).next_back().copied();
+        [base, free, occ, bar].into_iter().flatten().max()
     }
 
     #[inline]
@@ -156,6 +159,7 @@ where
     fn has_key_at(&self, time_point: TimePoint<T>) -> bool {
         self.free_by_time.contains_key(&time_point)
             || self.occupied_by_time.contains_key(&time_point)
+            || self.barrier_times.contains(&time_point)
             || self.berth_occupancy.has_key_at(time_point)
     }
 
@@ -262,6 +266,7 @@ where
             berth_occupancy,
             free_by_time: BTreeMap::new(),
             occupied_by_time: BTreeMap::new(),
+            barrier_times: BTreeSet::new(),
             operations: Vec::new(),
             _brand: Brand::new(),
         }
@@ -282,6 +287,7 @@ where
     pub fn clear(&mut self) {
         self.free_by_time.clear();
         self.occupied_by_time.clear();
+        self.barrier_times.clear();
         self.operations.clear();
     }
 
@@ -342,20 +348,18 @@ where
         let start = time_window.start();
         let end = time_window.end();
 
-        // Änderung beginnt exakt bei `start` (nicht beim Vorgänger).
+        // Start the change at the exact `start` key.
         self.add_occupy(start, space_interval)?;
 
-        // Über alle Basis-Schlüssel innerhalb (start, end) forttragen.
+        // Carry across all interior base keys in (start, end).
         for tp in self.berth().slices(start, end).interior_keys() {
             self.add_occupy(tp, space_interval)?;
         }
 
-        // Sentinel am Ende, damit die Wirkung bei `end` endet.
-        self.occupied_by_time
-            .entry(end)
-            .or_insert_with(|| SpaceIntervalSet::with_capacity(0));
+        // Place an explicit barrier at `end` so effects stop there.
+        self.barrier_times.insert(end);
 
-        // Operation protokollieren
+        // Record the operation
         self.operations
             .push(Operation::Occupy(OccupyOperation::new(*rect)));
 
@@ -413,27 +417,25 @@ where
         let start = time_window.start();
         let end = time_window.end();
 
-        // Änderung beginnt exakt bei `start` (nicht beim Vorgänger).
+        // Start the change at the exact `start` key.
         self.add_free(start, space_interval)?;
 
-        // Über alle Basis-Schlüssel innerhalb (start, end) forttragen.
+        // Carry across all interior base keys in (start, end).
         for tp in self.berth().slices(start, end).interior_keys() {
             self.add_free(tp, space_interval)?;
         }
 
-        // Sentinel am Ende, damit die Wirkung bei `end` endet.
-        self.free_by_time
-            .entry(end)
-            .or_insert_with(|| SpaceIntervalSet::with_capacity(0));
+        // Place an explicit barrier at `end` so effects stop there.
+        self.barrier_times.insert(end);
 
-        // Operation protokollieren
+        // Record the operation
         self.operations
             .push(Operation::Free(FreeOperation::new(*rect)));
 
         Ok(BrandedFreeRegion::new(FreeRegion::new(*rect)))
     }
 
-    /// Creates an iterator that merges keys from the base timeline and the overlay maps.
+    /// Creates an iterator that merges keys from the base timeline, overlay maps, and barriers.
     #[inline]
     fn covering_timepoints_union(
         &self,
@@ -442,7 +444,7 @@ where
         let start = time_interval.start();
         let end = time_interval.end();
 
-        // Predecessor slice that covers `start`: max of base pred and overlay preds (≤ start)
+        // Predecessor slice that covers `start`: max of base pred, overlay preds, and barrier preds (≤ start)
         let base_pred = self.berth().slice_predecessor_timepoint(start);
         let free_pred = self
             .free_by_time
@@ -454,7 +456,11 @@ where
             .range(..=start)
             .next_back()
             .map(|(t, _)| *t);
-        let pred = [base_pred, free_pred, occ_pred].into_iter().flatten().max();
+        let bar_pred = self.barrier_times.range(..=start).next_back().copied();
+        let pred = [base_pred, free_pred, occ_pred, bar_pred]
+            .into_iter()
+            .flatten()
+            .max();
 
         // Base stream: predecessor (0/1) + interior base keys
         let base_keys = pred
@@ -467,44 +473,40 @@ where
             .filter(move |&t| t >= start && t < end)
             .peekable();
 
-        // Merge two sorted streams with de-dup
+        // Barrier keys in [start, end)
+        let barrier_keys = self.barrier_times.range(start..end).copied().peekable();
+
+        // Merge three sorted streams with de-dup
         std::iter::from_fn({
-            let mut base_iter = base_keys;
-            let mut overlay_iter = overlay_keys;
+            let mut a = base_keys;
+            let mut b = overlay_keys;
+            let mut c = barrier_keys;
             let mut last_yielded: Option<TimePoint<T>> = None;
 
             move || loop {
-                let next_base_key = base_iter.peek().copied();
-                let next_overlay_key = overlay_iter.peek().copied();
-                let next_key = match (next_base_key, next_overlay_key) {
-                    (None, None) => return None,
-                    (Some(k), None) => {
-                        base_iter.next();
-                        Some(k)
+                let na = a.peek().copied();
+                let nb = b.peek().copied();
+                let nc = c.peek().copied();
+
+                let next_key = [na, nb, nc].into_iter().flatten().min();
+
+                match next_key {
+                    None => return None,
+                    Some(x) => {
+                        if na == Some(x) {
+                            a.next();
+                        }
+                        if nb == Some(x) {
+                            b.next();
+                        }
+                        if nc == Some(x) {
+                            c.next();
+                        }
+                        if last_yielded != Some(x) {
+                            last_yielded = Some(x);
+                            return last_yielded;
+                        }
                     }
-                    (None, Some(k)) => {
-                        overlay_iter.next();
-                        Some(k)
-                    }
-                    (Some(bk), Some(ok)) => match bk.cmp(&ok) {
-                        std::cmp::Ordering::Less => {
-                            base_iter.next();
-                            Some(bk)
-                        }
-                        std::cmp::Ordering::Greater => {
-                            overlay_iter.next();
-                            Some(ok)
-                        }
-                        std::cmp::Ordering::Equal => {
-                            base_iter.next();
-                            overlay_iter.next();
-                            Some(bk)
-                        }
-                    },
-                };
-                if next_key != last_yielded {
-                    last_yielded = next_key;
-                    return last_yielded;
                 }
             }
         })
@@ -604,7 +606,7 @@ where
             .map(|region| BrandedFreeRegion::new(region))
     }
 
-    /// Finds the next timeline key after a given time point, considering both base and overlay keys.
+    /// Finds the next timeline key after a given time point, considering base, overlay, and barriers.
     #[inline]
     fn overlay_next_key_after(&self, after: TimePoint<T>) -> Option<TimePoint<T>> {
         let next_base_key = self.berth_occupancy.next_time_key_after(after);
@@ -618,10 +620,20 @@ where
             .range((Excluded(after), Unbounded))
             .next()
             .map(|(t, _)| *t);
-        [next_base_key, next_free_key, next_occupied_key]
-            .into_iter()
-            .flatten()
-            .min()
+        let next_barrier_key = self
+            .barrier_times
+            .range((Excluded(after), Unbounded))
+            .next()
+            .copied();
+        [
+            next_base_key,
+            next_free_key,
+            next_occupied_key,
+            next_barrier_key,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 
     pub fn into_commit(self) -> BerthOverlayCommit<T> {
@@ -1347,5 +1359,22 @@ mod tests {
                 "Region band must lie within tail window and cover duration"
             );
         }
+    }
+
+    #[test]
+    fn same_key_free_and_occupy_occupy_wins() {
+        let berth = BO::new(len(10));
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+
+        let r = rect(ti(5, 8), si(2, 6));
+
+        // Create both overlay entries at the SAME key = 5
+        ov.add_free(tp(5), r.space()).unwrap();
+        ov.add_occupy(tp(5), r.space()).unwrap();
+
+        assert!(
+            ov.is_occupied(&r).unwrap(),
+            "occupy must win on tie at same timestamp"
+        );
     }
 }

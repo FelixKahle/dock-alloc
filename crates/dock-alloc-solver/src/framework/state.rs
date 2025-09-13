@@ -563,25 +563,19 @@ where
         }
 
         {
-            let mut ov = self.berth.overlay();
-            ov.apply_validated(plan.berth_commit())
+            let mut berth_clone = self.berth.clone();
+            berth_clone
+                .apply_validated(plan.berth_commit())
                 .map_err(FeasibleSolverStateApplyError::Berth)?;
         }
 
         self.ledger
             .apply_validated(plan.ledger_commit())
-            // Print the plan that caused the error for easier debugging
-            .expect("Cannot recover from partial ledger apply. Plan: {plan:?}");
+            .expect("Cannot recover from partial ledger apply. This should not happen if validation passed.");
 
-        let berth_commit_str = format!("{}", plan.berth_commit());
-        let msg = format!(
-            "Cannot recover from partial berth apply. Berth commit: {}",
-            berth_commit_str
+        self.berth.apply_validated(plan.berth_commit()).expect(
+            "Cannot recover from partial berth apply. This should not happen if validation passed.",
         );
-        self.berth
-            .apply_validated(plan.berth_commit())
-            // Print the plan that caused the error for easier debugging
-            .expect(&msg);
 
         Ok(())
     }
