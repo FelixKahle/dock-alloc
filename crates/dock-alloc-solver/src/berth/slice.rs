@@ -19,10 +19,9 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use dock_alloc_core::domain::{SpaceInterval, TimePoint};
-use num_traits::{PrimInt, Signed};
+use dock_alloc_core::{SolverVariable, space::SpaceInterval, time::TimePoint};
 
-pub trait SliceView<T: PrimInt + Signed> {
+pub trait SliceView<T: SolverVariable> {
     type FreeRunsIter<'s>: Iterator<Item = SpaceInterval> + 's
     where
         Self: 's;
@@ -36,7 +35,7 @@ pub trait SliceView<T: PrimInt + Signed> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TimeSliceRef<'a, T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     time: TimePoint<T>,
     quay: &'a Q,
@@ -44,7 +43,7 @@ where
 
 impl<'a, T, Q> TimeSliceRef<'a, T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     #[inline]
     pub fn new(time: TimePoint<T>, quay: &'a Q) -> Self {

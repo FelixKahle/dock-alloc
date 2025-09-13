@@ -19,10 +19,9 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use std::fmt::Display;
-
-use dock_alloc_core::domain::{SpaceInterval, TimeInterval};
+use dock_alloc_core::{space::SpaceInterval, time::TimeInterval};
 use num_traits::{PrimInt, Signed};
+use std::fmt::Display;
 
 /// A version number used to track iterations or generations in optimization algorithms.
 ///
@@ -152,6 +151,10 @@ impl<T: PrimInt + Signed> SpaceTimeRectangle<T> {
         self.space.intersects(&other.space) && self.time.intersects(&other.time)
     }
 
+    pub fn contains(&self, other: &Self) -> bool {
+        self.space.contains_interval(&other.space) && self.time.contains_interval(&other.time)
+    }
+
     pub fn intersection(&self, other: &Self) -> Option<Self> {
         let space = self.space.intersection(&other.space)?;
         let time = self.time.intersection(&other.time)?;
@@ -177,7 +180,7 @@ impl<T: PrimInt + Signed> From<(SpaceInterval, TimeInterval<T>)> for SpaceTimeRe
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dock_alloc_core::domain::{SpacePosition, TimePoint};
+    use dock_alloc_core::{space::SpacePosition, time::TimePoint};
 
     #[test]
     fn test_space_time_rectangle_creation() {

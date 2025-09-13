@@ -24,6 +24,7 @@ use crate::{
         commit::BerthOverlayCommit,
         domain::{FreeRegion, FreeSlot},
         iter::{FeasibleRegionIter, FreeSlotIter},
+        operations::Operation,
         overlay::BerthOccupancyOverlay,
         quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError, QuayWrite},
         slice::{SliceView, TimeSliceRef},
@@ -31,17 +32,39 @@ use crate::{
     container::timeline::Timeline,
     domain::SpaceTimeRectangle,
 };
-use dock_alloc_core::domain::{
-    SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
+use dock_alloc_core::{
+    SolverVariable,
+    space::{SpaceInterval, SpaceLength, SpacePosition},
+    time::{TimeDelta, TimeInterval, TimePoint},
 };
 use dock_alloc_model::model::Problem;
-use num_traits::{PrimInt, Signed, Zero};
-use std::ops::Bound::Excluded;
+use num_traits::{PrimInt, Signed};
+use std::{fmt::Debug, ops::Bound::Excluded};
+use tracing::instrument;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BerthApplyValidationError<T: PrimInt + Signed> {
+    Quay(QuaySpaceIntervalOutOfBoundsError),
+    NotFree(SpaceTimeRectangle<T>),
+}
+
+impl<T: PrimInt + Signed + std::fmt::Display> std::fmt::Display for BerthApplyValidationError<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BerthApplyValidationError::Quay(e) => write!(f, "{}", e),
+            BerthApplyValidationError::NotFree(r) => write!(f, "Rectangle {} is not free", r),
+        }
+    }
+}
+impl<T: PrimInt + Signed + std::fmt::Display + std::fmt::Debug> std::error::Error
+    for BerthApplyValidationError<T>
+{
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Slices<'a, T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     Q: QuayRead,
 {
     berth: &'a BerthOccupancy<T, Q>,
@@ -51,7 +74,7 @@ where
 
 impl<'a, T, Q> Slices<'a, T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     Q: QuayRead,
 {
     #[inline]
@@ -141,7 +164,7 @@ where
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BerthOccupancy<T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     quay_length: SpaceLength,
     timeline: Timeline<TimePoint<T>, Q>,
@@ -149,7 +172,7 @@ where
 
 impl<T, Q> BerthOccupancy<T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     Q: QuayRead + Clone + PartialEq,
 {
     #[inline]
@@ -160,7 +183,7 @@ where
 
 impl<T, Q> SliceView<T> for BerthOccupancy<T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     Q: QuayRead,
 {
     type FreeRunsIter<'s>
@@ -195,7 +218,7 @@ where
 
 impl<T, Q> BerthOccupancy<T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     Q: QuayRead + Clone + PartialEq,
 {
     #[inline]
@@ -249,6 +272,7 @@ where
         self.timeline.at(t)
     }
 
+    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn is_free(
         &self,
@@ -270,6 +294,7 @@ where
         Ok(true)
     }
 
+    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn is_occupied(
         &self,
@@ -278,6 +303,7 @@ where
         Ok(!self.is_free(rect)?)
     }
 
+    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn iter_free_slots(
         &self,
@@ -292,6 +318,7 @@ where
         FreeSlotIter::new(self, time_window, duration, required_space, space_window)
     }
 
+    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn iter_free_regions(
         &self,
@@ -314,7 +341,7 @@ where
 
 impl<T, Q> BerthOccupancy<T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     Q: QuayRead + QuayWrite + Clone + PartialEq,
 {
     fn apply_in<F>(
@@ -337,6 +364,7 @@ where
             })
     }
 
+    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn occupy(
         &mut self,
@@ -345,6 +373,7 @@ where
         self.apply_in(rect, |quay, space_interval| quay.occupy(space_interval))
     }
 
+    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn free(
         &mut self,
@@ -353,17 +382,54 @@ where
         self.apply_in(rect, |quay, space_interval| quay.free(space_interval))
     }
 
+    #[instrument(level = "debug", skip_all)]
+    #[inline]
+    pub fn push_operation(
+        &mut self,
+        op: &Operation<T>,
+    ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
+        match op {
+            Operation::Occupy(occ) => {
+                self.occupy(occ.rectangle())?;
+            }
+            Operation::Free(free) => {
+                self.free(free.rectangle())?;
+            }
+        }
+        Ok(())
+    }
+
+    #[instrument(level = "debug", skip_all)]
+    #[inline]
     pub fn apply(
         &mut self,
         commit: &BerthOverlayCommit<T>,
     ) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
         for op in commit.operations() {
+            self.push_operation(op)?;
+        }
+        Ok(())
+    }
+
+    #[instrument(level = "debug", skip_all)]
+    #[inline]
+    pub fn apply_validated(
+        &mut self,
+        commit: &crate::berth::commit::BerthOverlayCommit<T>,
+    ) -> Result<(), BerthApplyValidationError<T>> {
+        for op in commit.operations() {
             match op {
-                crate::berth::operations::Operation::Occupy(occ) => {
-                    self.occupy(occ.rectangle())?;
+                Operation::Occupy(occ) => {
+                    let rect = occ.rectangle();
+                    match self.is_free(rect) {
+                        Ok(true) => self.occupy(rect).map_err(BerthApplyValidationError::Quay)?,
+                        Ok(false) => return Err(BerthApplyValidationError::NotFree(*rect)),
+                        Err(e) => return Err(BerthApplyValidationError::Quay(e)),
+                    }
                 }
-                crate::berth::operations::Operation::Free(free) => {
-                    self.free(free.rectangle())?;
+                Operation::Free(fr) => {
+                    self.free(fr.rectangle())
+                        .map_err(BerthApplyValidationError::Quay)?;
                 }
             }
         }
@@ -373,14 +439,14 @@ where
 
 impl<T, C, Q> TryFrom<&Problem<T, C>> for BerthOccupancy<T, Q>
 where
-    T: PrimInt + Signed + Zero + Copy,
-    C: PrimInt + Signed + Zero + Copy,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead + QuayWrite,
 {
     type Error = QuaySpaceIntervalOutOfBoundsError;
     fn try_from(problem: &Problem<T, C>) -> Result<Self, Self::Error> {
         let mut berth_occupancy = BerthOccupancy::<T, Q>::new(problem.quay_length());
-        for fixed_assignment in problem.preassigned().values() {
+        for fixed_assignment in problem.preassigned() {
             let request = fixed_assignment.request();
             let length = request.length();
             let processing_duration = request.processing_duration();
@@ -401,9 +467,10 @@ where
 mod tests {
     use super::*;
     use crate::berth::{
-        prelude::{FreeOperation, OccupyOperation, Operation},
+        operations::{FreeOperation, OccupyOperation},
         quay::BooleanVecQuay,
     };
+    use num_traits::Zero;
 
     type T = i64;
     type BO = BerthOccupancy<T, BooleanVecQuay>;

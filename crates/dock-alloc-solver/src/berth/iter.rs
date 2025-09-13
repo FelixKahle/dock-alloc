@@ -27,16 +27,18 @@ use crate::{
     domain::SpaceTimeRectangle,
 };
 use dock_alloc_core::{
-    domain::{SpaceInterval, SpaceLength, TimeDelta, TimeInterval, TimePoint},
+    SolverVariable,
     iter::MaybeIter,
     mem::DoubleBuf,
+    space::{SpaceInterval, SpaceLength},
+    time::{TimeDelta, TimeInterval, TimePoint},
 };
 use num_traits::{One, PrimInt, Signed};
 use std::iter::FusedIterator;
 
 struct CandidateStartIter<'a, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + 'a,
 {
     view: &'a V,
@@ -48,7 +50,7 @@ where
 
 impl<'a, T, V> CandidateStartIter<'a, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + 'a,
 {
     fn new(view: &'a V, time_window: TimeInterval<T>, duration: TimeDelta<T>) -> Self {
@@ -65,7 +67,7 @@ where
 
 impl<'a, T, V> Iterator for CandidateStartIter<'a, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + 'a,
 {
     type Item = TimePoint<T>;
@@ -103,7 +105,7 @@ where
 
 pub struct FreeSlotIter<'a, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + 'a,
 {
     view: &'a V,
@@ -119,7 +121,7 @@ where
 
 impl<'a, T, V> FreeSlotIter<'a, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + 'a,
 {
     #[inline]
@@ -169,7 +171,7 @@ where
 
 impl<'a, T, V> Iterator for FreeSlotIter<'a, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + 'a,
 {
     type Item = FreeSlot<T>;
@@ -199,7 +201,7 @@ where
 
 struct Keys<'v, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + ?Sized + 'v,
 {
     view: &'v V,
@@ -210,7 +212,7 @@ where
 }
 impl<'v, T, V> Keys<'v, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + ?Sized + 'v,
 {
     fn new(view: &'v V, from: TimePoint<T>, to: TimePoint<T>) -> Self {
@@ -225,7 +227,7 @@ where
 }
 impl<'v, T, V> Iterator for Keys<'v, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + ?Sized + 'v,
 {
     type Item = TimePoint<T>;
@@ -252,13 +254,21 @@ fn calculate_breakpoints<T, V>(
     duration: TimeDelta<T>,
 ) -> Vec<TimePoint<T>>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T>,
 {
     let tw_start = time_window.start();
     let latest_start = time_window.end() - duration;
+
     if tw_start > latest_start {
         return Vec::new();
+    }
+
+    // Special-case: exactly one admissible start.
+    // Emit [tw_start, tw_start + 1) so regions represent “start at tw_start”.
+    if tw_start == latest_start {
+        let one = TimeDelta::new(T::one());
+        return vec![tw_start, tw_start + one];
     }
 
     let one = TimeDelta::new(T::one());
@@ -278,8 +288,8 @@ where
     };
 
     let mut right = prefix
-        .into_iter() // 0 or 1 element
-        .chain(base_right) // same Chain<IntoIter<_>, Keys<...>> type regardless
+        .into_iter()
+        .chain(base_right)
         .map(move |t| t - duration + one)
         .filter(move |&t| t > tw_start && t <= latest_start)
         .peekable();
@@ -314,7 +324,7 @@ where
 
 pub struct FeasibleRegionIter<'a, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + 'a,
 {
     view: &'a V,
@@ -331,7 +341,7 @@ where
 
 impl<'a, T, V> FeasibleRegionIter<'a, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + 'a,
 {
     #[inline]
@@ -374,7 +384,7 @@ fn rep_start<T: PrimInt + Signed + Copy + One>(a: TimePoint<T>, b: TimePoint<T>)
 
 impl<'a, T, V> Iterator for FeasibleRegionIter<'a, T, V>
 where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + 'a,
 {
     type Item = FreeRegion<T>;
@@ -470,7 +480,7 @@ fn runs_at<'v, T, V>(
     min_len: SpaceLength,
 ) -> impl Iterator<Item = SpaceInterval> + 'v
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     V: SliceView<T> + ?Sized + 'v,
 {
     let inner = (bounds.length() >= min_len).then(|| {
@@ -557,7 +567,7 @@ fn eroded_runs<'v, T, V>(
     min_len: SpaceLength,
     out_runs: &mut DoubleBuf<SpaceInterval>,
 ) where
-    T: PrimInt + Signed + Copy,
+    T: SolverVariable,
     V: SliceView<T> + ?Sized + 'v,
 {
     let seed_tp = if view.has_key_at(start) {
@@ -630,36 +640,34 @@ impl<I> FusedIterator for OverlayRunsIter<I> where I: Iterator<Item = SpaceInter
 mod tests {
     use super::*;
     use crate::berth::{berthocc::BerthOccupancy, quay::BooleanVecQuay};
+    use dock_alloc_core::space::SpacePosition;
     use num_traits::Zero;
 
     type T = i64;
     type BO = BerthOccupancy<T, BooleanVecQuay>;
 
     #[inline]
-    fn pos(x: usize) -> dock_alloc_core::domain::SpacePosition {
-        dock_alloc_core::domain::SpacePosition::new(x)
+    fn pos(x: usize) -> SpacePosition {
+        SpacePosition::new(x)
     }
     #[inline]
-    fn len(x: usize) -> dock_alloc_core::domain::SpaceLength {
-        dock_alloc_core::domain::SpaceLength::new(x)
+    fn len(x: usize) -> SpaceLength {
+        SpaceLength::new(x)
     }
     #[inline]
-    fn si(a: usize, b: usize) -> dock_alloc_core::domain::SpaceInterval {
-        dock_alloc_core::domain::SpaceInterval::new(pos(a), pos(b))
+    fn si(a: usize, b: usize) -> SpaceInterval {
+        SpaceInterval::new(pos(a), pos(b))
     }
     #[inline]
-    fn tp(t: T) -> dock_alloc_core::domain::TimePoint<T> {
-        dock_alloc_core::domain::TimePoint::new(t)
+    fn tp(t: T) -> TimePoint<T> {
+        TimePoint::new(t)
     }
     #[inline]
-    fn ti(a: T, b: T) -> dock_alloc_core::domain::TimeInterval<T> {
-        dock_alloc_core::domain::TimeInterval::new(tp(a), tp(b))
+    fn ti(a: T, b: T) -> TimeInterval<T> {
+        TimeInterval::new(tp(a), tp(b))
     }
     #[inline]
-    fn rect(
-        tw: dock_alloc_core::domain::TimeInterval<T>,
-        si: dock_alloc_core::domain::SpaceInterval,
-    ) -> SpaceTimeRectangle<T> {
+    fn rect(tw: TimeInterval<T>, si: SpaceInterval) -> SpaceTimeRectangle<T> {
         SpaceTimeRectangle::new(si, tw)
     }
 
@@ -892,5 +900,18 @@ mod tests {
         assert_eq!(owned.next(), Some(si(0, 1)));
         assert_eq!(owned.next(), Some(si(1, 3)));
         assert_eq!(owned.next(), None);
+    }
+
+    #[test]
+    fn regions_single_start_equals_slots() {
+        let b = BO::new(len(10));
+        // Only one admissible start: tw=[0,5), dur=5
+        let bands = collect_bands(&b, ti(0, 5), TimeDelta::new(5), len(2), si(0, 10));
+        assert_eq!(bands.len(), 1);
+        let ((ts, te), spaces) = bands.into_iter().next().unwrap();
+        assert_eq!(ts, 0);
+        assert_eq!(te, 1); // band represents “start at 0”
+        let slots = slot_set_for_start(&b, tp(0), TimeDelta::new(5), len(2), si(0, 10));
+        assert_eq!(spaces, slots);
     }
 }

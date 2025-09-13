@@ -19,10 +19,24 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-pub mod berth;
-pub mod container;
-pub mod domain;
-pub mod framework;
-pub mod greedy;
-pub mod meta;
-pub mod registry;
+use crate::{
+    berth::quay::QuayRead,
+    framework::planning::{Plan, PlanningContext},
+};
+use dock_alloc_core::SolverVariable;
+use rand_chacha::ChaCha8Rng;
+
+pub trait Operator: Send + Sync {
+    type Time: SolverVariable;
+    type Cost: SolverVariable;
+    type Quay: QuayRead;
+
+    fn name(&self) -> &'static str;
+
+    fn propose<'p, 'al, 'bo>(
+        &self,
+        iteration: usize,
+        rng: &mut ChaCha8Rng,
+        ctx: PlanningContext<'p, 'al, 'bo, Self::Time, Self::Cost, Self::Quay>,
+    ) -> Plan<'p, Self::Time, Self::Cost>;
+}

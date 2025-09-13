@@ -19,8 +19,16 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-pub mod domain;
+use num_traits::{PrimInt, Signed, Zero};
+use std::fmt::{Debug, Display};
+
+pub mod cost;
 pub mod iter;
 pub mod marker;
 pub mod mem;
 pub mod primitives;
+pub mod space;
+pub mod time;
+
+pub trait SolverVariable: PrimInt + Signed + Zero + Send + Sync + Debug + Display {}
+impl<T> SolverVariable for T where T: PrimInt + Signed + Zero + Send + Sync + Debug + Display {}

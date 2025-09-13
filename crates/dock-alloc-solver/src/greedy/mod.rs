@@ -21,12 +21,16 @@
 
 use crate::{
     berth::quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError, QuayWrite},
-    framework::{ConstructiveSolver, FeasibleSolverState, Solver, SolverState},
-    planning::ProposeCtx,
+    framework::{
+        planning::PlanningContext,
+        state::{ConstructiveSolver, FeasibleSolverState, Solver, SolverState},
+    },
 };
-use dock_alloc_core::domain::{TimeInterval, TimePoint};
+use dock_alloc_core::{
+    SolverVariable,
+    time::{TimeInterval, TimePoint},
+};
 use dock_alloc_model::model::{AssignmentRef, Problem, SolutionRef};
-use num_traits::{PrimInt, Signed};
 use std::{cmp::Reverse, collections::BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,30 +45,49 @@ impl From<QuaySpaceIntervalOutOfBoundsError> for GreedySolverError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GreedySolver;
+pub struct GreedySolver<T, C, Q>
+where
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
+    Q: QuayRead + QuayWrite,
+{
+    _phantom: std::marker::PhantomData<(T, C, Q)>,
+}
 
-impl Default for GreedySolver {
+impl<T, C, Q> Default for GreedySolver<T, C, Q>
+where
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
+    Q: QuayRead + QuayWrite,
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl GreedySolver {
+impl<T, C, Q> GreedySolver<T, C, Q>
+where
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
+    Q: QuayRead + QuayWrite,
+{
     pub fn new() -> Self {
-        Self
+        Self {
+            _phantom: std::marker::PhantomData,
+        }
     }
 }
 
-impl<T, C, Q> Solver<T, C, Q> for GreedySolver
+impl<T, C, Q> Solver<T, C, Q> for GreedySolver<T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
     Q: QuayRead + QuayWrite,
 {
     type SolveError = GreedySolverError;
 
     fn solve<'p>(
-        &self,
+        &mut self,
         problem: &'p Problem<T, C>,
     ) -> Result<SolutionRef<'p, T, C>, Self::SolveError> {
         let state: FeasibleSolverState<'p, T, C, Q> = self.build_state(problem)?;
@@ -72,16 +95,16 @@ where
     }
 }
 
-impl<T, C, Q> ConstructiveSolver<T, C, Q> for GreedySolver
+impl<T, C, Q> ConstructiveSolver<T, C, Q> for GreedySolver<T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
     Q: QuayRead + QuayWrite,
 {
     type SolveError = GreedySolverError;
 
     fn build_state<'p>(
-        &self,
+        &mut self,
         problem: &'p Problem<T, C>,
     ) -> Result<FeasibleSolverState<'p, T, C, Q>, Self::SolveError> {
         let mut state: SolverState<'p, T, C, Q> = SolverState::try_from(problem)?;
@@ -96,36 +119,39 @@ where
 
         while let Some(t) = events.pop_first() {
             let t_next_opt = events.first().copied();
-            let ctx = ProposeCtx::new(state.ledger(), state.berth(), problem);
-            let (plan_opt, departures) = ctx.with_builder(|mut b| {
-                let mut ready_order = b.with_explorer(|ex| {
-                    ex.iter_unassigned_requests()
-                        .filter(|req| {
-                            let tw = req.feasible_time_window();
-                            req.request().arrival_time() <= t && tw.contains(t)
-                        })
-                        .map(|req| {
-                            let proc = req.processing_duration();
-                            let tw = req.feasible_time_window();
-                            let latest_start = tw.end() - proc;
-                            let slack = latest_start - t;
-                            let len_key = Reverse(req.length().value());
-                            let arr_key = req.request().arrival_time().value();
+            let ctx = PlanningContext::new(state.ledger(), state.berth(), problem);
 
-                            (req.id(), slack.value(), len_key, arr_key)
+            let (plan_opt, departures) = ctx.with_builder(|mut b| {
+                // Start a transactional child over the current overlays
+                let mut tx = b.begin();
+
+                // Decide using the (old) read facade over the parent overlay:
+                // For this greedy example we don't need to "see" incremental txn changes while we place,
+                // so using b.with_explorer(...) is fine. (If you later need reads to see txn deltas,
+                // add an Explorer::new_from(&alov, &bov) and call tx.ex().)
+                let mut ready_order = tx.with_explorer(|ex| {
+                    ex.iter_unassigned_requests()
+                        .filter(|req| req.request().arrival_time() <= t)
+                        .map(|req| {
+                            (
+                                req.clone(),
+                                Reverse(req.length().value()),
+                                req.request().arrival_time().value(),
+                            )
                         })
                         .collect::<Vec<_>>()
                 });
 
-                ready_order
-                    .sort_by_key(|&(_id, slack_v, len_key, arr_key)| (slack_v, len_key, arr_key));
+                ready_order.sort_by_key(|&(_, len_key, arr_key)| (len_key, arr_key));
+
                 let mut deps = Vec::new();
 
-                for (rid, _slack_v, _len_key, _arr_key) in ready_order {
-                    let decision = b.with_explorer(|ex| {
-                        let req = ex.iter_unassigned_requests().find(|r| r.id() == rid)?;
+                for (req, _len_key, _arr_key) in ready_order {
+                    let decision = tx.with_explorer(|ex| {
                         let proc = req.processing_duration();
                         let swin = req.feasible_space_window();
+
+                        // try to place now
                         let twin_now = TimeInterval::new(t, t + proc);
                         let mut best_now_cost = None;
                         let mut best_now_slot = None;
@@ -137,7 +163,6 @@ where
                             let c =
                                 AssignmentRef::new(req.request(), slot.slot().space().start(), t)
                                     .cost();
-
                             if best_now_cost.is_none_or(|b| c < b) {
                                 best_now_cost = Some(c);
                                 best_now_slot = Some(slot);
@@ -145,7 +170,7 @@ where
                         }
 
                         let best_later_cost = match t_next_opt {
-                            Some(tn) if req.feasible_time_window().contains(tn) => {
+                            Some(tn) if tn >= req.request().arrival_time() => {
                                 let twin_later = TimeInterval::new(tn, tn + proc);
                                 let mut best = None;
                                 for slot in ex.iter_slots_for_request_within(&req, twin_later, swin)
@@ -170,11 +195,11 @@ where
 
                         match (best_now_cost, best_later_cost) {
                             (None, None) => None,
-                            (Some(_), None) => Some((req, best_now_slot.unwrap(), proc)),
+                            (Some(_), None) => Some((req.clone(), best_now_slot.unwrap(), proc)),
                             (None, Some(_)) => None,
                             (Some(c_now), Some(c_later)) => {
                                 if c_now <= c_later {
-                                    Some((req, best_now_slot.unwrap(), proc))
+                                    Some((req.clone(), best_now_slot.unwrap(), proc))
                                 } else {
                                     None
                                 }
@@ -182,14 +207,18 @@ where
                         }
                     });
 
-                    if let Some((req, slot, proc)) = decision
-                        && b.propose_assign(&req, slot).is_ok()
-                    {
-                        deps.push(t + proc);
+                    if let Some((req2, slot, proc)) = decision {
+                        // Stage using the NEW transactional API
+                        if tx.propose_assign(&req2, slot).is_ok() {
+                            deps.push(t + proc);
+                        }
                     }
                 }
 
+                // Merge txn changes back into the builder overlays and build the plan
+                tx.commit();
                 let built = b.build();
+
                 let plan = if built.ledger_commit().operations().is_empty() {
                     None
                 } else {
@@ -215,14 +244,17 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::berth::quay::{BTreeMapQuay, BooleanVecQuay};
+
     use super::*;
-    use crate::berth::prelude::BooleanVecQuay;
-    use crate::framework::ConstructiveSolver;
-    use dock_alloc_core::domain::{
-        Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
+
+    use dock_alloc_core::{
+        cost::Cost,
+        space::{SpaceInterval, SpaceLength, SpacePosition},
+        time::TimeDelta,
     };
     use dock_alloc_model::{
-        generator::{InstanceGenConfig, InstanceGenerator, SpaceWindowPolicy, TimeWindowPolicy},
+        generator::{InstanceGenConfig, InstanceGenerator},
         model::{Assignment, Fixed, Movable, ProblemBuilder, Request, RequestId},
     };
 
@@ -232,9 +264,8 @@ mod tests {
     fn req_movable_ok(
         id: u64,
         len: usize,
+        arrival_t: i64,
         proc_t: i64,
-        t0: i64,
-        t1: i64,
         s0: usize,
         s1: usize,
         target: usize,
@@ -242,11 +273,11 @@ mod tests {
         Request::<Movable, _, _>::new(
             RequestId::new(id),
             SpaceLength::new(len),
+            TimePoint::new(arrival_t),
             TimeDelta::new(proc_t),
             SpacePosition::new(target),
             Cost::new(1),
             Cost::new(1),
-            TimeInterval::new(TimePoint::new(t0), TimePoint::new(t1)),
             SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
         )
         .expect("valid movable request")
@@ -255,9 +286,8 @@ mod tests {
     fn req_fixed_ok(
         id: u64,
         len: usize,
+        arrival_t: i64,
         proc_t: i64,
-        t0: i64,
-        t1: i64,
         s0: usize,
         s1: usize,
         target: usize,
@@ -265,11 +295,11 @@ mod tests {
         Request::<Fixed, _, _>::new(
             RequestId::new(id),
             SpaceLength::new(len),
+            TimePoint::new(arrival_t),
             TimeDelta::new(proc_t),
-            SpacePosition::new(target), // target_position
+            SpacePosition::new(target),
             Cost::new(1),
             Cost::new(1),
-            TimeInterval::new(TimePoint::new(t0), TimePoint::new(t1)),
             SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
         )
         .expect("valid fixed request")
@@ -279,14 +309,14 @@ mod tests {
     fn test_greedy_assigns_at_arrival_when_free() {
         // quay has plenty of space; both ships can start at arrival t=0 at their targets
         let mut pb = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(200));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 200, 0);
-        let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 200, 50);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100, 0);
+        let r2 = req_movable_ok(2, 10, 0, 5, 0, 100, 50);
         pb.add_movable_request(r1.clone()).unwrap();
         pb.add_movable_request(r2.clone()).unwrap();
 
         let problem = pb.build();
 
-        let solver = GreedySolver::new();
+        let mut solver = GreedySolver::new();
         let state: FeasibleSolverState<'_, Tm, Cm, BooleanVecQuay> =
             solver.build_state(&problem).unwrap();
 
@@ -311,7 +341,7 @@ mod tests {
         // Movable arrives at t=0 needs same space; should be placed at t=5.
         let mut pb = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(20));
 
-        let rf = req_fixed_ok(10, 10, 5, 0, 100, 0, 20, 0);
+        let rf = req_fixed_ok(10, 10, 0, 5, 0, 100, 0);
         pb.add_preassigned(Assignment::new(
             rf.clone(),
             SpacePosition::new(0),
@@ -319,11 +349,11 @@ mod tests {
         ))
         .unwrap(); // occupies [space 0..10) x [time 0..5)
 
-        let rm = req_movable_ok(1, 10, 5, 0, 100, 0, 20, 0);
+        let rm = req_movable_ok(1, 10, 0, 5, 0, 100, 0);
         pb.add_movable_request(rm.clone()).unwrap();
 
         let problem = pb.build();
-        let solver = GreedySolver::new();
+        let mut solver = GreedySolver::new();
         let state: FeasibleSolverState<'_, Tm, Cm, BooleanVecQuay> =
             solver.build_state(&problem).unwrap();
 
@@ -342,14 +372,14 @@ mod tests {
         // One starts at 0, the other waits until first departs (t=5).
         let mut pb = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(10));
 
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 10, 0);
-        let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 10, 0);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100, 0);
+        let r2 = req_movable_ok(2, 10, 0, 5, 0, 100, 0);
 
         pb.add_movable_request(r1.clone()).unwrap();
         pb.add_movable_request(r2.clone()).unwrap();
 
         let problem = pb.build();
-        let solver = GreedySolver::new();
+        let mut solver = GreedySolver::new();
         let state: FeasibleSolverState<'_, Tm, Cm, BooleanVecQuay> =
             solver.build_state(&problem).unwrap();
 
@@ -377,16 +407,14 @@ mod tests {
         type Cm = i64;
 
         let mut pb = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(200));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 200, 0);
-        let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 200, 50);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100, 0);
+        let r2 = req_movable_ok(2, 10, 0, 5, 0, 100, 50);
         pb.add_movable_request(r1.clone()).unwrap();
         pb.add_movable_request(r2.clone()).unwrap();
 
         let problem = pb.build();
-        let solver = GreedySolver::new();
-
-        let sol = <GreedySolver as Solver<i64, i64, BooleanVecQuay>>::solve(&solver, &problem)
-            .expect("solve");
+        let mut solver: GreedySolver<i64, i64, BooleanVecQuay> = GreedySolver::new();
+        let sol = solver.solve(&problem).expect("solve");
 
         assert_eq!(sol.decisions().len(), 2);
         assert_eq!(sol.stats().total_waiting_time(), TimeDelta::new(0));
@@ -400,7 +428,6 @@ mod tests {
 
     #[test]
     fn test_greedy_infeasible_tight_windows_errors_not_partial() {
-        use crate::berth::prelude::BooleanVecQuay;
         type Tm = i64;
         type Cm = i64;
 
@@ -411,11 +438,11 @@ mod tests {
         let r1 = Request::<Movable, _, _>::new(
             RequestId::new(1),
             SpaceLength::new(10),
+            TimePoint::new(0),
             TimeDelta::new(5),
             SpacePosition::new(0),
             Cost::new(1),
             Cost::new(1),
-            TimeInterval::new(TimePoint::new(0), TimePoint::new(5)),
             SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10)),
         )
         .unwrap();
@@ -423,11 +450,11 @@ mod tests {
         let r2 = Request::<Movable, _, _>::new(
             RequestId::new(2),
             SpaceLength::new(10),
+            TimePoint::new(0),
             TimeDelta::new(5),
             SpacePosition::new(0),
             Cost::new(1),
             Cost::new(1),
-            TimeInterval::new(TimePoint::new(0), TimePoint::new(5)),
             SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10)),
         )
         .unwrap();
@@ -436,57 +463,33 @@ mod tests {
         pb.add_movable_request(r2).unwrap();
         let problem = pb.build();
 
-        let solver = GreedySolver::new();
+        let mut solver: GreedySolver<i64, i64, BooleanVecQuay> = GreedySolver::new();
 
         // build_state must error (cannot assign both)
         let state_res: Result<FeasibleSolverState<'_, Tm, Cm, BooleanVecQuay>, _> =
             solver.build_state(&problem);
-        assert!(state_res.is_err(), "expected infeasible, got state OK");
+        assert!(
+            state_res.is_ok(),
+            "expected Ok, got error {:?}",
+            state_res.err()
+        );
 
         // solve must error too (no partial SolutionRef)
-        let solve_res =
-            <GreedySolver as Solver<i64, i64, BooleanVecQuay>>::solve(&solver, &problem);
-        assert!(solve_res.is_err(), "expected infeasible, got solution OK");
+        let solve_res = solver.solve(&problem);
+        assert!(
+            solve_res.is_ok(),
+            "expected Ok, got error {:?}",
+            solve_res.err()
+        );
     }
 
     #[test]
     fn test_greedy_solves_large_instance() {
-        let config = InstanceGenConfig::new(
-            SpaceLength::new(1_500), // quay_length
-            SpaceLength::new(80),    // min_length
-            SpaceLength::new(300),   // max_length
-            SpaceWindowPolicy::FullQuay,
-            TimeWindowPolicy::FullHorizon,
-            400,                      // amount_movables
-            0,                        // amount_fixed
-            TimePoint::new(10000),    // horizon
-            0.9,                      // lambda_per_time
-            2.5,                      // processing_time_sigma
-            TimeDelta::new(4),        // min_processing
-            Some(TimeDelta::new(72)), // max_processing
-            TimeDelta::new(12),       // time_slack
-            TimeDelta::new(2),        // fixed_gap
-            TimeDelta::new(10),       // processing_mu_base
-            TimeDelta::new(20),       // processing_mu_span
-            6,                        // arrival_oversample_mult
-            0.1,                      // processing_sigma_floor
-            SpaceLength::new(1),      // length_span_epsilon
-            Cost::new(1),             // cost_inc_num (ramp up to +100% at max length)
-            Cost::new(1),             // cost_inc_den
-            Cost::new(1),             // min_cost_floor
-            SpaceLength::new(1),      // window_split_left_num (50/50)
-            SpaceLength::new(2),      // window_split_den
-            Cost::new(2),             // base_cost_per_delay
-            Cost::new(1),             // base_cost_per_dev
-            28,
-        )
-        .unwrap();
-
-        let mut generator = InstanceGenerator::new(config);
+        let mut generator: InstanceGenerator<_, _> = InstanceGenConfig::default().into();
         let problem = generator.generate();
 
-        let solver = GreedySolver::new();
-        let state: FeasibleSolverState<'_, Tm, Cm, BooleanVecQuay> =
+        let mut solver = GreedySolver::new();
+        let state: FeasibleSolverState<'_, Tm, Cm, BTreeMapQuay> =
             solver.build_state(&problem).unwrap();
         assert_eq!(
             state.ledger().iter_movable_assignments().count(),

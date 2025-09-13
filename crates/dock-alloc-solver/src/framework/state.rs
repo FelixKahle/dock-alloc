@@ -21,19 +21,22 @@
 
 use crate::{
     berth::{
-        prelude::BerthOccupancy,
+        berthocc::{BerthApplyValidationError, BerthOccupancy},
         quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError, QuayWrite},
     },
     domain::SpaceTimeRectangle,
-    planning::Plan,
-    registry::ledger::{AssignmentLedger, LedgerError},
+    framework::planning::Plan,
+    registry::ledger::{AssignmentLedger, LedgerApplyValidationError, LedgerError},
 };
-use dock_alloc_core::domain::{SpaceInterval, SpacePosition, TimeInterval};
+use dock_alloc_core::{
+    SolverVariable,
+    space::{SpaceInterval, SpacePosition},
+    time::{TimeInterval, TimePoint},
+};
 use dock_alloc_model::model::{
-    AssignmentExceedsQuayError, AssignmentOutsideSpaceWindowError,
-    AssignmentOutsideTimeWindowError, AssignmentRef, Kind, Problem, RequestId, SolutionRef,
+    AssignmentBeforeArrivalTimeError, AssignmentExceedsQuayError,
+    AssignmentOutsideSpaceWindowError, AssignmentRef, Kind, Problem, RequestId, SolutionRef,
 };
-use num_traits::{PrimInt, Signed, Zero};
 use std::fmt::{Debug, Display};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,10 +57,22 @@ impl From<LedgerError> for SolverStateApplyError {
     }
 }
 
+impl std::fmt::Display for SolverStateApplyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SolverStateApplyError::Quay(e) => write!(f, "Quay error: {}", e),
+            SolverStateApplyError::LedgerError(e) => write!(f, "Ledger error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for SolverStateApplyError {}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct SolverState<'p, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     problem: &'p Problem<T, C>,
@@ -67,10 +82,11 @@ where
 
 impl<'p, T, C, Q> SolverState<'p, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
+    #[inline]
     pub fn new(
         problem: &'p Problem<T, C>,
         ledger: AssignmentLedger<'p, T, C>,
@@ -83,14 +99,17 @@ where
         }
     }
 
+    #[inline]
     pub fn ledger(&self) -> &AssignmentLedger<'p, T, C> {
         &self.ledger
     }
 
+    #[inline]
     pub fn berth(&self) -> &BerthOccupancy<T, Q> {
         &self.berth
     }
 
+    #[inline]
     pub fn problem(&self) -> &'p Problem<T, C> {
         self.problem
     }
@@ -98,8 +117,8 @@ where
 
 impl<'p, T, C, Q> SolverState<'p, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead + QuayWrite,
 {
     pub fn apply_plan<'a>(
@@ -114,8 +133,8 @@ where
 
 impl<'p, T, C, Q> TryFrom<&'p Problem<T, C>> for SolverState<'p, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead + QuayWrite,
 {
     type Error = QuaySpaceIntervalOutOfBoundsError;
@@ -127,10 +146,11 @@ where
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct FeasibleSolverState<'p, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     problem: &'p Problem<T, C>,
@@ -139,13 +159,13 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SolverStateOverlapError<T: PrimInt + Signed> {
+pub struct SolverStateOverlapError<T: SolverVariable> {
     a: RequestId,
     b: RequestId,
     intersection: SpaceTimeRectangle<T>,
 }
 
-impl<T: PrimInt + Signed> SolverStateOverlapError<T> {
+impl<T: SolverVariable> SolverStateOverlapError<T> {
     #[inline]
     pub fn new(a: RequestId, b: RequestId, intersection: SpaceTimeRectangle<T>) -> Self {
         Self { a, b, intersection }
@@ -167,7 +187,7 @@ impl<T: PrimInt + Signed> SolverStateOverlapError<T> {
     }
 }
 
-impl<T: PrimInt + Signed + Display> std::fmt::Display for SolverStateOverlapError<T> {
+impl<T: SolverVariable + Display> std::fmt::Display for SolverStateOverlapError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -177,45 +197,45 @@ impl<T: PrimInt + Signed + Display> std::fmt::Display for SolverStateOverlapErro
     }
 }
 
-impl<T: PrimInt + Signed + Display + Debug> std::error::Error for SolverStateOverlapError<T> {}
+impl<T: SolverVariable + Display + Debug> std::error::Error for SolverStateOverlapError<T> {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FeasibleStateError<T: PrimInt + Signed> {
-    AssignmentOutsideTimeWindow(AssignmentOutsideTimeWindowError<T>),
+pub enum FeasibleStateError<T: SolverVariable> {
+    AssignmentBeforeArrivalTime(AssignmentBeforeArrivalTimeError<T>),
     AssignmentOutsideSpaceWindow(AssignmentOutsideSpaceWindowError),
     AssignmentExceedsQuay(AssignmentExceedsQuayError),
     Overlap(SolverStateOverlapError<T>),
     UnassignedRequests(Vec<RequestId>),
 }
 
-impl<T: PrimInt + Signed> From<AssignmentOutsideTimeWindowError<T>> for FeasibleStateError<T> {
-    fn from(value: AssignmentOutsideTimeWindowError<T>) -> Self {
-        FeasibleStateError::AssignmentOutsideTimeWindow(value)
+impl<T: SolverVariable> From<AssignmentBeforeArrivalTimeError<T>> for FeasibleStateError<T> {
+    fn from(value: AssignmentBeforeArrivalTimeError<T>) -> Self {
+        FeasibleStateError::AssignmentBeforeArrivalTime(value)
     }
 }
 
-impl<T: PrimInt + Signed> From<AssignmentOutsideSpaceWindowError> for FeasibleStateError<T> {
+impl<T: SolverVariable> From<AssignmentOutsideSpaceWindowError> for FeasibleStateError<T> {
     fn from(value: AssignmentOutsideSpaceWindowError) -> Self {
         FeasibleStateError::AssignmentOutsideSpaceWindow(value)
     }
 }
 
-impl<T: PrimInt + Signed> From<AssignmentExceedsQuayError> for FeasibleStateError<T> {
+impl<T: SolverVariable> From<AssignmentExceedsQuayError> for FeasibleStateError<T> {
     fn from(value: AssignmentExceedsQuayError) -> Self {
         FeasibleStateError::AssignmentExceedsQuay(value)
     }
 }
 
-impl<T: PrimInt + Signed> From<SolverStateOverlapError<T>> for FeasibleStateError<T> {
+impl<T: SolverVariable> From<SolverStateOverlapError<T>> for FeasibleStateError<T> {
     fn from(value: SolverStateOverlapError<T>) -> Self {
         FeasibleStateError::Overlap(value)
     }
 }
 
-impl<T: PrimInt + Signed + Display + Debug> std::fmt::Display for FeasibleStateError<T> {
+impl<T: SolverVariable + Display + Debug> std::fmt::Display for FeasibleStateError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FeasibleStateError::AssignmentOutsideTimeWindow(e) => {
+            FeasibleStateError::AssignmentBeforeArrivalTime(e) => {
                 write!(f, "{}", e)
             }
             FeasibleStateError::AssignmentOutsideSpaceWindow(e) => {
@@ -237,27 +257,27 @@ impl<T: PrimInt + Signed + Display + Debug> std::fmt::Display for FeasibleStateE
     }
 }
 
-impl<T: PrimInt + Signed + Display + Debug> std::error::Error for FeasibleStateError<T> {}
+impl<T: SolverVariable + Display + Debug> std::error::Error for FeasibleStateError<T> {}
 
 #[derive(Clone, Debug)]
-struct Item<T: PrimInt + Signed> {
+struct Item<T: SolverVariable> {
     req_id: RequestId,
     rect: SpaceTimeRectangle<T>,
-    feasible_time_window: TimeInterval<T>,
+    arrival_time: TimePoint<T>,
     feasible_space_window: SpaceInterval,
 }
 
-impl<T: PrimInt + Signed> Item<T> {
+impl<T: SolverVariable> Item<T> {
     fn new(
         req_id: RequestId,
         rect: SpaceTimeRectangle<T>,
-        feasible_time_window: TimeInterval<T>,
+        arrival_time: TimePoint<T>,
         feasible_space_window: SpaceInterval,
     ) -> Self {
         Self {
             req_id,
             rect,
-            feasible_time_window,
+            arrival_time,
             feasible_space_window,
         }
     }
@@ -266,8 +286,8 @@ impl<T: PrimInt + Signed> Item<T> {
 fn rect_for_assignment<K, T, C>(a: AssignmentRef<'_, K, T, C>) -> SpaceTimeRectangle<T>
 where
     K: Kind,
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     let t0 = a.start_time();
     let t1 = t0 + a.request().processing_duration();
@@ -278,8 +298,8 @@ where
 
 impl<'p, T, C, Q> FeasibleSolverState<'p, T, C, Q>
 where
-    T: PrimInt + Signed + Zero,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     #[inline]
@@ -317,15 +337,13 @@ where
     }
 
     fn validate(state: &SolverState<'p, T, C, Q>) -> Result<(), FeasibleStateError<T>> {
-        let committed = state.ledger().committed(); // HashMap<MovableRequestId, _>
+        let committed = state.ledger().committed();
         let mut missing: Vec<RequestId> = Vec::new();
-
-        for &mid in state.problem().movables().keys() {
+        for mid in state.problem().movables().iter().map(|r| r.typed_id()) {
             if !committed.contains_key(&mid) {
                 missing.push(RequestId::from(mid));
             }
         }
-
         if !missing.is_empty() {
             return Err(FeasibleStateError::UnassignedRequests(missing));
         }
@@ -338,7 +356,7 @@ where
             items.push(Item::new(
                 fa.id(),
                 rect_for_assignment(aref),
-                fa.request().feasible_time_window(),
+                fa.request().arrival_time(),
                 fa.request().feasible_space_window(),
             ));
         }
@@ -348,7 +366,7 @@ where
             items.push(Item::new(
                 ma.id(),
                 rect_for_assignment(aref),
-                ma.request().feasible_time_window(),
+                ma.request().arrival_time(),
                 ma.request().feasible_space_window(),
             ));
         }
@@ -356,9 +374,9 @@ where
         for it in &items {
             let (sint, tint) = it.rect.into_inner();
 
-            if !it.feasible_time_window.contains_interval(&tint) {
-                return Err(FeasibleStateError::AssignmentOutsideTimeWindow(
-                    AssignmentOutsideTimeWindowError::new(it.req_id, it.feasible_time_window, tint),
+            if tint.start() < it.arrival_time {
+                return Err(FeasibleStateError::AssignmentBeforeArrivalTime(
+                    AssignmentBeforeArrivalTimeError::new(it.req_id, it.arrival_time, tint.start()),
                 ));
             }
 
@@ -375,12 +393,12 @@ where
             let quay_bounds = state.berth().quay_space_interval();
             if !quay_bounds.contains_interval(&sint) {
                 return Err(FeasibleStateError::AssignmentExceedsQuay(
-                    AssignmentExceedsQuayError::new(it.req_id, state.problem().quay_length(), sint),
+                    AssignmentExceedsQuayError::new(it.req_id, quay_len, sint),
                 ));
             }
 
             match state.berth().is_occupied(&it.rect) {
-                Ok(true) => {}
+                Ok(true) => {} // good
                 Ok(false) => {
                     return Err(FeasibleStateError::AssignmentOutsideSpaceWindow(
                         AssignmentOutsideSpaceWindowError::new(
@@ -400,18 +418,23 @@ where
 
         let mut order: Vec<usize> = (0..items.len()).collect();
         order.sort_by_key(|&i| items[i].rect.time().start().value());
+
         let mut active: Vec<usize> = Vec::new();
-        let active_sorted_by_end = |v: &mut Vec<usize>| {
+        let sort_active_by_end = |v: &mut Vec<usize>| {
             v.sort_by(|&i, &j| {
-                let ei = items[i].rect.time().end().value();
-                let ej = items[j].rect.time().end().value();
-                ei.cmp(&ej)
-            })
+                items[i]
+                    .rect
+                    .time()
+                    .end()
+                    .value()
+                    .cmp(&items[j].rect.time().end().value())
+            });
         };
 
         for &i in &order {
             let t_start_i = items[i].rect.time().start();
-            active_sorted_by_end(&mut active);
+
+            sort_active_by_end(&mut active);
             let mut keep_from = 0;
             for (k, &idx) in active.iter().enumerate() {
                 if items[idx].rect.time().end() > t_start_i {
@@ -424,17 +447,14 @@ where
             if keep_from > 0 {
                 active.drain(0..keep_from);
             }
+
             for &j in &active {
-                let a = &items[i];
-                let b = &items[j];
-
-                if let Some(inter) = a.rect.intersection(&b.rect) {
-                    let (ra, rb) = if a.req_id.value() <= b.req_id.value() {
-                        (a.req_id, b.req_id)
+                if let Some(inter) = items[i].rect.intersection(&items[j].rect) {
+                    let (ra, rb) = if items[i].req_id.value() <= items[j].req_id.value() {
+                        (items[i].req_id, items[j].req_id)
                     } else {
-                        (b.req_id, a.req_id)
+                        (items[j].req_id, items[i].req_id)
                     };
-
                     return Err(FeasibleStateError::Overlap(SolverStateOverlapError::new(
                         ra, rb, inter,
                     )));
@@ -448,23 +468,154 @@ where
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MismatchedOperationsAmountsError {
+    unassigned_amount: usize,
+    assigned_amount: usize,
+}
+
+impl MismatchedOperationsAmountsError {
+    #[inline]
+    pub fn new(unassigned_amount: usize, assigned_amount: usize) -> Self {
+        Self {
+            unassigned_amount,
+            assigned_amount,
+        }
+    }
+
+    #[inline]
+    pub fn unassigned_amount(&self) -> usize {
+        self.unassigned_amount
+    }
+
+    #[inline]
+    pub fn assigned_amount(&self) -> usize {
+        self.assigned_amount
+    }
+}
+
+impl std::fmt::Display for MismatchedOperationsAmountsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Mismatched amounts: unassigned amount is {}, but assigned amount is {}",
+            self.unassigned_amount, self.assigned_amount
+        )
+    }
+}
+
+impl std::error::Error for MismatchedOperationsAmountsError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FeasibleSolverStateApplyError<T: SolverVariable> {
+    Berth(BerthApplyValidationError<T>),
+    Ledger(LedgerApplyValidationError<T>),
+    MismatchedAmounts(MismatchedOperationsAmountsError),
+}
+
+impl<T: SolverVariable + Display + Debug> std::fmt::Display for FeasibleSolverStateApplyError<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FeasibleSolverStateApplyError::Berth(e) => write!(f, "Berth error: {}", e),
+            FeasibleSolverStateApplyError::Ledger(e) => write!(f, "Ledger error: {}", e),
+            FeasibleSolverStateApplyError::MismatchedAmounts(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl<T: SolverVariable> From<BerthApplyValidationError<T>> for FeasibleSolverStateApplyError<T> {
+    fn from(value: BerthApplyValidationError<T>) -> Self {
+        FeasibleSolverStateApplyError::Berth(value)
+    }
+}
+
+impl<T: SolverVariable> From<LedgerApplyValidationError<T>> for FeasibleSolverStateApplyError<T> {
+    fn from(value: LedgerApplyValidationError<T>) -> Self {
+        FeasibleSolverStateApplyError::Ledger(value)
+    }
+}
+
+impl<T: SolverVariable + Display + Debug> std::error::Error for FeasibleSolverStateApplyError<T> {}
+
 impl<'p, T, C, Q> FeasibleSolverState<'p, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead + QuayWrite,
 {
-    pub fn apply_plan(&mut self, plan: &'p Plan<T, C>) -> Result<(), SolverStateApplyError> {
-        self.ledger.apply(plan.ledger_commit())?;
-        self.berth.apply(plan.berth_commit())?;
+    pub fn apply_plan_validated(
+        &mut self,
+        plan: &Plan<'p, T, C>,
+    ) -> Result<(), FeasibleSolverStateApplyError<T>> {
+        let a = plan.ledger_commit().amount_assigned();
+        let u = plan.ledger_commit().amount_unassigned();
+        if a != u {
+            return Err(FeasibleSolverStateApplyError::MismatchedAmounts(
+                MismatchedOperationsAmountsError::new(u, a),
+            ));
+        }
+
+        {
+            let mut tmp_ledger = self.ledger.clone();
+            tmp_ledger
+                .apply_validated(plan.ledger_commit())
+                .map_err(FeasibleSolverStateApplyError::Ledger)?;
+        }
+
+        {
+            let mut ov = self.berth.overlay();
+            for op in plan.berth_commit().operations() {
+                match op {
+                    crate::berth::operations::Operation::Occupy(occ) => {
+                        let rect = occ.rectangle();
+                        match ov.is_free(rect) {
+                            Ok(true) => {
+                                ov.occupy(rect).map_err(|e| {
+                                    FeasibleSolverStateApplyError::Berth(
+                                        crate::berth::berthocc::BerthApplyValidationError::Quay(e),
+                                    )
+                                })?;
+                            }
+                            Ok(false) => {
+                                return Err(FeasibleSolverStateApplyError::Berth(
+                                    crate::berth::berthocc::BerthApplyValidationError::NotFree(
+                                        *rect,
+                                    ),
+                                ));
+                            }
+                            Err(e) => {
+                                return Err(FeasibleSolverStateApplyError::Berth(
+                                    crate::berth::berthocc::BerthApplyValidationError::Quay(e),
+                                ));
+                            }
+                        }
+                    }
+                    crate::berth::operations::Operation::Free(fr) => {
+                        ov.free(fr.rectangle()).map_err(|e| {
+                            FeasibleSolverStateApplyError::Berth(
+                                crate::berth::berthocc::BerthApplyValidationError::Quay(e),
+                            )
+                        })?;
+                    }
+                }
+            }
+        }
+
+        self.ledger.apply(plan.ledger_commit()).map_err(|e| {
+            FeasibleSolverStateApplyError::Ledger(LedgerApplyValidationError::Ledger(e))
+        })?;
+
+        self.berth.apply(plan.berth_commit()).map_err(|e| {
+            FeasibleSolverStateApplyError::Berth(BerthApplyValidationError::Quay(e))
+        })?;
         Ok(())
     }
 }
 
 impl<'p, T, C, Q> TryFrom<FeasibleSolverState<'p, T, C, Q>> for SolverState<'p, T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     type Error = FeasibleStateError<T>;
@@ -476,8 +627,8 @@ where
 
 impl<'p, T, C, Q> From<FeasibleSolverState<'p, T, C, Q>> for SolutionRef<'p, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
     Q: QuayRead,
 {
     fn from(value: FeasibleSolverState<'p, T, C, Q>) -> Self {
@@ -487,28 +638,28 @@ where
 
 pub trait ConstructiveSolver<T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead,
 {
     type SolveError;
 
     fn build_state<'p>(
-        &self,
+        &mut self,
         problem: &'p Problem<T, C>,
     ) -> Result<FeasibleSolverState<'p, T, C, Q>, Self::SolveError>;
 }
 
 pub trait Solver<T, C, Q>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
     Q: QuayRead + QuayWrite,
 {
     type SolveError;
 
     fn solve<'p>(
-        &self,
+        &mut self,
         problem: &'p Problem<T, C>,
     ) -> Result<SolutionRef<'p, T, C>, Self::SolveError>;
 }

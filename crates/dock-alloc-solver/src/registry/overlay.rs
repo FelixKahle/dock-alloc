@@ -17,19 +17,20 @@
 // NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
 // LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE..
-
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use dock_alloc_core::{
-    domain::{Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint},
+    SolverVariable,
+    cost::Cost,
     marker::Brand,
+    space::{SpaceInterval, SpaceLength, SpacePosition},
+    time::{TimeDelta, TimePoint},
 };
 use dock_alloc_model::model::{
     AnyAssignmentRef, AssignmentRef, Fixed, FixedRequestId, Movable, MovableRequestId, Request,
     RequestId, SolutionRef,
 };
-use num_traits::{PrimInt, Signed};
+use std::collections::{BTreeSet, HashMap};
 
 use crate::registry::{
     commit::LedgerOverlayCommit,
@@ -94,8 +95,8 @@ impl<'brand> std::fmt::Display for BrandedFixedRequestId<'brand> {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BrandedMovableRequest<'brand, 'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     inner: &'a Request<Movable, T, C>,
     _brand: Brand<'brand>,
@@ -103,8 +104,8 @@ where
 
 impl<'brand, 'a, T, C> BrandedMovableRequest<'brand, 'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     #[inline]
     fn new(inner: &'a Request<Movable, T, C>) -> Self {
@@ -145,11 +146,6 @@ where
     }
 
     #[inline]
-    pub fn feasible_time_window(&self) -> TimeInterval<T> {
-        self.inner.feasible_time_window()
-    }
-
-    #[inline]
     pub fn feasible_space_window(&self) -> SpaceInterval {
         self.inner.feasible_space_window()
     }
@@ -173,8 +169,8 @@ where
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BrandedMovableAssignment<'brand, 'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     assignment: AssignmentRef<'a, Movable, T, C>,
     _brand: Brand<'brand>,
@@ -182,8 +178,8 @@ where
 
 impl<'brand, 'a, T, C> BrandedMovableAssignment<'brand, 'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     #[inline]
     fn new(assignment: AssignmentRef<'a, Movable, T, C>) -> Self {
@@ -196,6 +192,10 @@ where
     #[inline]
     pub fn assignment(&self) -> AssignmentRef<'a, Movable, T, C> {
         self.assignment
+    }
+
+    pub fn branded_request(&self) -> BrandedMovableRequest<'brand, 'a, T, C> {
+        BrandedMovableRequest::new(self.assignment.request())
     }
 
     #[inline]
@@ -232,23 +232,23 @@ where
 impl<'brand, 'a, T, C> From<BrandedMovableAssignment<'brand, 'a, T, C>>
     for AssignmentRef<'a, Movable, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     fn from(val: BrandedMovableAssignment<'brand, 'a, T, C>) -> Self {
         val.assignment
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AssignmentLedgerOverlay<'brand, 'a, 'l, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     ledger: &'l AssignmentLedger<'a, T, C>,
-    staged_commits: BTreeMap<MovableRequestId, BrandedMovableAssignment<'brand, 'a, T, C>>,
-    staged_uncommits: BTreeMap<MovableRequestId, BrandedMovableRequestId<'brand>>,
+    staged_commits: HashMap<MovableRequestId, BrandedMovableAssignment<'brand, 'a, T, C>>,
+    staged_uncommits: HashMap<MovableRequestId, BrandedMovableRequestId<'brand>>,
     _brand: Brand<'brand>,
 }
 
@@ -288,25 +288,44 @@ impl std::error::Error for StageError {}
 
 impl<'brand, 'a, 'l, T, C> AssignmentLedgerOverlay<'brand, 'a, 'l, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     pub fn new(ledger: &'l AssignmentLedger<'a, T, C>) -> Self {
+        let reserve = ledger.problem().movables().len().max(8);
+        let staged_commits = HashMap::with_capacity(reserve);
+        let staged_uncommits = HashMap::with_capacity(reserve.min(64));
         Self {
             ledger,
-            staged_commits: BTreeMap::new(),
-            staged_uncommits: BTreeMap::new(),
+            staged_commits,
+            staged_uncommits,
             _brand: Brand::new(),
         }
     }
 
-    pub fn commit_assignment(
+    #[inline]
+    pub fn ledger(&self) -> &'l AssignmentLedger<'a, T, C> {
+        self.ledger
+    }
+
+    #[inline]
+    pub fn clear(&mut self) {
+        self.staged_commits.clear();
+        self.staged_uncommits.clear();
+    }
+
+    #[inline]
+    pub fn absorb(&mut self, child: Self) {
+        debug_assert!(std::ptr::eq(self.ledger, child.ledger));
+        *self = child;
+    }
+
+    #[inline]
+    fn stage_commit_asg(
         &mut self,
-        req: &'a Request<Movable, T, C>,
-        start_time: TimePoint<T>,
-        start_position: SpacePosition,
+        asg: AssignmentRef<'a, Movable, T, C>,
     ) -> Result<BrandedMovableAssignment<'brand, 'a, T, C>, StageError> {
-        let id = req.typed_id();
+        let id = asg.typed_id();
 
         let base_has = self.ledger.committed().contains_key(&id);
         let tombstoned = self.staged_uncommits.contains_key(&id);
@@ -314,31 +333,42 @@ where
             return Err(StageError::AlreadyCommittedInBase(id));
         }
 
-        let asg = AssignmentRef::new(req, start_position, start_time);
-
         if let Some(existing) = self.staged_commits.get(&id) {
             if existing.assignment == asg {
-                return Ok(existing.clone());
+                return Ok(existing.clone()); // idempotent
             }
             return Err(StageError::AlreadyStagedCommit(id));
         }
 
+        // clear tombstone if present (we're replacing it with a new placement)
         self.staged_uncommits.remove(&id);
-        let new_bma = BrandedMovableAssignment::new(asg);
-        self.staged_commits.insert(id, new_bma.clone());
-        Ok(new_bma)
+
+        let bma = BrandedMovableAssignment::new(asg);
+        self.staged_commits.insert(id, bma.clone());
+        Ok(bma)
+    }
+
+    #[inline]
+    pub fn commit_assignment(
+        &mut self,
+        req: &'a Request<Movable, T, C>,
+        start_time: TimePoint<T>,
+        start_position: SpacePosition,
+    ) -> Result<BrandedMovableAssignment<'brand, 'a, T, C>, StageError> {
+        let asg = AssignmentRef::new(req, start_position, start_time);
+        self.stage_commit_asg(asg)
     }
 
     #[inline]
     pub fn uncommit_assignment(
         &mut self,
-        ma_ref: &'brand BrandedMovableAssignment<'brand, 'a, T, C>,
+        ma_ref: &BrandedMovableAssignment<'brand, 'a, T, C>,
     ) -> Result<BrandedMovableAssignment<'brand, 'a, T, C>, StageError> {
         let id = ma_ref.id();
+
         if let Some(staged) = self.staged_commits.remove(&id) {
             return Ok(staged);
         }
-
         if self.staged_uncommits.contains_key(&id) {
             return Err(StageError::AlreadyStagedUncommit(id));
         }
@@ -382,7 +412,7 @@ where
     pub fn iter_fixed_handles(&self) -> impl Iterator<Item = BrandedFixedRequestId<'brand>> + '_ {
         self.ledger
             .iter_fixed_handles()
-            .map(|id| BrandedFixedRequestId::new(*id))
+            .map(BrandedFixedRequestId::new)
     }
 
     #[inline]
@@ -466,7 +496,7 @@ where
         self.ledger
             .problem()
             .movables()
-            .values()
+            .iter()
             .filter(move |req| {
                 let id = req.typed_id();
                 let base_has = self.ledger.committed().contains_key(&id);
@@ -484,7 +514,7 @@ where
         self.ledger
             .problem()
             .movables()
-            .values()
+            .iter()
             .filter(move |req| {
                 let id = req.typed_id();
                 (self.ledger.committed().contains_key(&id)
@@ -495,6 +525,9 @@ where
     }
 
     pub fn into_commit(&self) -> LedgerOverlayCommit<'a, T, C> {
+        let mut amount_assigned = 0;
+        let mut amount_unassigned = 0;
+
         let mut unassign_ids: BTreeSet<MovableRequestId> = BTreeSet::new();
         for id in self.staged_uncommits.keys() {
             unassign_ids.insert(*id);
@@ -511,6 +544,7 @@ where
         for id in unassign_ids {
             if let Some(asg) = self.ledger.committed().get(&id) {
                 ops.push(Operation::from(UnassignOperation::new(*asg)));
+                amount_unassigned += 1;
             } else {
                 panic!(
                     "into_commit: base assignment for {:?} missing while unassigning",
@@ -521,17 +555,18 @@ where
 
         for bma in self.staged_commits.values() {
             ops.push(Operation::from(AssignOperation::new(bma.assignment())));
+            amount_assigned += 1;
         }
 
-        LedgerOverlayCommit::new(ops)
+        LedgerOverlayCommit::new(ops, amount_unassigned, amount_assigned)
     }
 }
 
 impl<'brand, 'p, 'l, T, C> From<&'l AssignmentLedgerOverlay<'brand, 'p, 'l, T, C>>
     for SolutionRef<'l, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
 {
     fn from(val: &'l AssignmentLedgerOverlay<'brand, 'p, 'l, T, C>) -> Self {
         let decisions: HashMap<RequestId, AnyAssignmentRef<'l, T, C>> =
@@ -544,9 +579,6 @@ where
 mod tests {
     use super::*;
     use crate::registry::ledger::AssignmentLedger;
-    use dock_alloc_core::domain::{
-        Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
-    };
     use dock_alloc_model::model::{
         Assignment, AssignmentRef, Fixed, Movable, MovableRequestId, ProblemBuilder, Request,
         RequestId,
@@ -558,20 +590,19 @@ mod tests {
     fn req_movable_ok(
         id: u64,
         len: usize,
-        proc_t: i64,
         t0: i64,
-        t1: i64,
+        proc_t: i64,
         s0: usize,
         s1: usize,
     ) -> Request<Movable, Tm, Cm> {
         Request::<Movable, _, _>::new(
             RequestId::new(id),
             SpaceLength::new(len),
+            TimePoint::new(t0),
             TimeDelta::new(proc_t),
             SpacePosition::new(s0),
             Cost::new(1),
             Cost::new(1),
-            TimeInterval::new(TimePoint::new(t0), TimePoint::new(t1)),
             SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
         )
         .expect("valid movable request")
@@ -580,20 +611,19 @@ mod tests {
     fn req_fixed_ok(
         id: u64,
         len: usize,
-        proc_t: i64,
         t0: i64,
-        t1: i64,
+        proc_t: i64,
         s0: usize,
         s1: usize,
     ) -> Request<Fixed, Tm, Cm> {
         Request::<Fixed, _, _>::new(
             RequestId::new(id),
             SpaceLength::new(len),
+            TimePoint::new(t0),
             TimeDelta::new(proc_t),
             SpacePosition::new(s0),
             Cost::new(1),
             Cost::new(1),
-            TimeInterval::new(TimePoint::new(t0), TimePoint::new(t1)),
             SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
         )
         .expect("valid fixed request")
@@ -622,9 +652,9 @@ mod tests {
     #[test]
     fn test_overlay_uncommit_makes_request_unassigned_in_overlay_view() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
-        let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 100);
-        let r_fixed = req_fixed_ok(10, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
+        let r2 = req_movable_ok(2, 10, 0, 5, 0, 100);
+        let r_fixed = req_fixed_ok(10, 10, 0, 5, 0, 100);
 
         b.add_movable_request(r1.clone()).unwrap();
         b.add_movable_request(r2.clone()).unwrap();
@@ -676,9 +706,9 @@ mod tests {
     #[test]
     fn test_overlay_commit_hides_request_from_unassigned_in_overlay_view() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
-        let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 100);
-        let r3 = req_movable_ok(3, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
+        let r2 = req_movable_ok(2, 10, 0, 5, 0, 100);
+        let r3 = req_movable_ok(3, 10, 0, 5, 0, 100);
 
         b.add_movable_request(r1.clone()).unwrap();
         b.add_movable_request(r2.clone()).unwrap();
@@ -716,7 +746,7 @@ mod tests {
     #[test]
     fn test_overlay_move_same_id_tombstones_then_readds_with_new_assignment() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
 
         b.add_movable_request(r1.clone()).unwrap();
 
@@ -763,7 +793,7 @@ mod tests {
     #[test]
     fn test_overlay_commit_conflict_when_already_in_base() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
         b.add_movable_request(r1.clone()).unwrap();
 
         let problem = b.build();
@@ -794,7 +824,7 @@ mod tests {
     #[test]
     fn test_overlay_uncommit_conflict_when_not_in_base() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
         b.add_movable_request(r1.clone()).unwrap();
 
         let problem = b.build();
@@ -813,7 +843,7 @@ mod tests {
     #[test]
     fn test_overlay_double_stage_rules() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
         b.add_movable_request(r1.clone()).unwrap();
 
         let problem = b.build();
@@ -858,9 +888,9 @@ mod tests {
     #[test]
     fn test_into_solution_from_ledger_and_overlay() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
-        let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 100);
-        let r_fixed = req_fixed_ok(10, 10, 5, 0, 100, 0, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
+        let r2 = req_movable_ok(2, 10, 0, 5, 0, 100);
+        let r_fixed = req_fixed_ok(10, 10, 0, 5, 0, 100);
 
         b.add_movable_request(r1.clone()).unwrap();
         b.add_movable_request(r2.clone()).unwrap();

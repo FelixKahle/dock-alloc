@@ -19,14 +19,16 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use dock_alloc_core::domain::{
-    Cost, SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint,
-};
-use num_traits::{PrimInt, Signed};
+use dock_alloc_core::SolverVariable;
+use dock_alloc_core::cost::Cost;
+use dock_alloc_core::space::{SpaceInterval, SpaceLength, SpacePosition};
+use dock_alloc_core::time::{TimeDelta, TimeInterval, TimePoint};
+use num_traits::{FromPrimitive, ToPrimitive};
 use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::{collections::HashMap, hash::Hash};
 
+#[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RequestId(u64);
 
@@ -35,6 +37,7 @@ impl RequestId {
     pub const fn new(id: u64) -> Self {
         RequestId(id)
     }
+
     #[inline]
     pub const fn value(self) -> u64 {
         self.0
@@ -46,6 +49,7 @@ impl Display for RequestId {
         write!(f, "RequestId({})", self.0)
     }
 }
+
 impl From<u64> for RequestId {
     fn from(value: u64) -> Self {
         RequestId(value)
@@ -61,6 +65,7 @@ impl MovableRequestId {
     pub fn new(id: RequestId) -> Self {
         Self(id)
     }
+
     #[inline]
     pub fn value(self) -> RequestId {
         self.0
@@ -71,11 +76,13 @@ impl Display for MovableRequestId {
         write!(f, "Movable({})", self.0)
     }
 }
+
 impl From<RequestId> for MovableRequestId {
     fn from(value: RequestId) -> Self {
         MovableRequestId(value)
     }
 }
+
 impl From<MovableRequestId> for RequestId {
     fn from(value: MovableRequestId) -> Self {
         value.0
@@ -101,11 +108,13 @@ impl Display for FixedRequestId {
         write!(f, "Fixed({})", self.0)
     }
 }
+
 impl From<RequestId> for FixedRequestId {
     fn from(value: RequestId) -> Self {
         FixedRequestId(value)
     }
 }
+
 impl From<FixedRequestId> for RequestId {
     fn from(value: FixedRequestId) -> Self {
         value.0
@@ -132,44 +141,6 @@ impl Kind for Fixed {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TimeWindowTooShortError<T: PrimInt + Signed> {
-    id: RequestId,
-    processing: TimeDelta<T>,
-    window: TimeInterval<T>,
-}
-impl<T: PrimInt + Signed> TimeWindowTooShortError<T> {
-    pub fn new(id: RequestId, processing: TimeDelta<T>, window: TimeInterval<T>) -> Self {
-        Self {
-            id,
-            processing,
-            window,
-        }
-    }
-    #[inline]
-    pub fn id(&self) -> RequestId {
-        self.id
-    }
-    #[inline]
-    pub fn processing_duration(&self) -> TimeDelta<T> {
-        self.processing
-    }
-    #[inline]
-    pub fn time_window(&self) -> TimeInterval<T> {
-        self.window
-    }
-}
-impl<T: PrimInt + Signed + Display> Display for TimeWindowTooShortError<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Request {} has processing {} not fitting time window {}",
-            self.id, self.processing, self.window
-        )
-    }
-}
-impl<T: PrimInt + Signed + Debug + Display> std::error::Error for TimeWindowTooShortError<T> {}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SpaceWindowTooShortError {
     id: RequestId,
     length: SpaceLength,
@@ -177,17 +148,21 @@ pub struct SpaceWindowTooShortError {
 }
 
 impl SpaceWindowTooShortError {
+    #[inline]
     pub fn new(id: RequestId, length: SpaceLength, window: SpaceInterval) -> Self {
         Self { id, length, window }
     }
+
     #[inline]
     pub fn id(&self) -> RequestId {
         self.id
     }
+
     #[inline]
     pub fn length(&self) -> SpaceLength {
         self.length
     }
+
     #[inline]
     pub fn space_window(&self) -> SpaceInterval {
         self.window
@@ -206,69 +181,53 @@ impl Display for SpaceWindowTooShortError {
 
 impl std::error::Error for SpaceWindowTooShortError {}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RequestError<T: PrimInt + Signed> {
-    TimeWindowTooShort(TimeWindowTooShortError<T>),
-    SpaceWindowTooShort(SpaceWindowTooShortError),
-}
-impl<T: PrimInt + Signed + Display + Debug> Display for RequestError<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RequestError::TimeWindowTooShort(e) => write!(f, "{e}"),
-            RequestError::SpaceWindowTooShort(e) => write!(f, "{e}"),
-        }
-    }
-}
-impl<T: PrimInt + Signed + Display + Debug> std::error::Error for RequestError<T> {}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Request<K: Kind, T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     id: RequestId,
     length: SpaceLength,
+    arrival_time: TimePoint<T>,
     processing_duration: TimeDelta<T>,
     target_position: SpacePosition,
     cost_per_delay: Cost<C>,
     cost_per_position_deviation: Cost<C>,
-    feasible_time_window: TimeInterval<T>,
     feasible_space_window: SpaceInterval,
     _k: PhantomData<K>,
 }
 
-impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> Request<K, T, C> {
+impl<K: Kind, T: SolverVariable, C: SolverVariable> Request<K, T, C> {
     #[allow(clippy::too_many_arguments)]
     #[inline]
     pub fn new(
         id: RequestId,
         length: SpaceLength,
+        arrival_time: TimePoint<T>,
         processing_duration: TimeDelta<T>,
         target_position: SpacePosition,
         cost_per_delay: Cost<C>,
         cost_per_position_deviation: Cost<C>,
-        feasible_time_window: TimeInterval<T>,
         feasible_space_window: SpaceInterval,
-    ) -> Result<Self, RequestError<T>> {
-        if feasible_time_window.duration() < processing_duration {
-            return Err(RequestError::TimeWindowTooShort(
-                TimeWindowTooShortError::new(id, processing_duration, feasible_time_window),
-            ));
-        }
+    ) -> Result<Self, SpaceWindowTooShortError> {
+        // Check if the space window is large enough to fit the request
         if feasible_space_window.measure() < length {
-            return Err(RequestError::SpaceWindowTooShort(
-                SpaceWindowTooShortError::new(id, length, feasible_space_window),
+            return Err(SpaceWindowTooShortError::new(
+                id,
+                length,
+                feasible_space_window,
             ));
         }
+
         Ok(Self {
             id,
             length,
+            arrival_time,
             processing_duration,
             target_position,
             cost_per_delay,
             cost_per_position_deviation,
-            feasible_time_window,
             feasible_space_window,
             _k: PhantomData,
         })
@@ -291,7 +250,7 @@ impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> Request<K, T, C> {
 
     #[inline]
     pub fn arrival_time(&self) -> TimePoint<T> {
-        self.feasible_time_window.start()
+        self.arrival_time
     }
 
     #[inline]
@@ -315,17 +274,12 @@ impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> Request<K, T, C> {
     }
 
     #[inline]
-    pub fn feasible_time_window(&self) -> TimeInterval<T> {
-        self.feasible_time_window
-    }
-
-    #[inline]
     pub fn feasible_space_window(&self) -> SpaceInterval {
         self.feasible_space_window
     }
 }
 
-impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed + TryFrom<T>> Request<K, T, C> {
+impl<K: Kind, T: SolverVariable, C: SolverVariable + TryFrom<T>> Request<K, T, C> {
     #[inline]
     pub fn waiting_cost(&self, waiting_time: TimeDelta<T>) -> Cost<C> {
         let scalar: C = C::try_from(waiting_time.value())
@@ -334,7 +288,8 @@ impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed + TryFrom<T>> Request<K, 
         self.cost_per_delay * scalar
     }
 }
-impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed + TryFrom<usize>> Request<K, T, C> {
+
+impl<K: Kind, T: SolverVariable, C: SolverVariable + TryFrom<usize>> Request<K, T, C> {
     #[inline]
     pub fn target_position_deviation_cost(&self, deviation: SpaceLength) -> Cost<C> {
         let scalar: C = C::try_from(deviation.value())
@@ -344,23 +299,23 @@ impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed + TryFrom<usize>> Request
     }
 }
 
-impl<K: Kind, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> Display
+impl<K: Kind, T: SolverVariable + Display, C: SolverVariable + Display> Display
     for Request<K, T, C>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}Request(id: {}, length: {}, processing_duration: {}, target_position: {}, \
-             cost_per_delay: {}, cost_per_position_deviation: {}, feasible_time_window: {}, \
+            "{}Request(id: {}, length: {}, arrival_time: {}, processing_duration: {}, \
+            target_position: {}, cost_per_delay: {}, cost_per_position_deviation: {}, \
              feasible_space_window: {})",
             K::NAME,
             self.id,
             self.length,
+            self.arrival_time,
             self.processing_duration,
             self.target_position,
             self.cost_per_delay,
             self.cost_per_position_deviation,
-            self.feasible_time_window,
             self.feasible_space_window
         )
     }
@@ -369,15 +324,15 @@ impl<K: Kind, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> Disp
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Assignment<K: Kind, T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     request: Request<K, T, C>,
     start_position: SpacePosition,
     start_time: TimePoint<T>,
 }
 
-impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> Assignment<K, T, C> {
+impl<K: Kind, T: SolverVariable, C: SolverVariable> Assignment<K, T, C> {
     #[inline]
     pub fn new(
         request: Request<K, T, C>,
@@ -464,7 +419,7 @@ impl<K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> Assignment<K, T, C> {
     }
 }
 
-impl<K: Kind, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> Display
+impl<K: Kind, T: SolverVariable + Display, C: SolverVariable + Display> Display
     for Assignment<K, T, C>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -482,15 +437,15 @@ impl<K: Kind, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> Disp
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AssignmentRef<'a, K: Kind, T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     request: &'a Request<K, T, C>,
     start_position: SpacePosition,
     start_time: TimePoint<T>,
 }
 
-impl<'a, K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> AssignmentRef<'a, K, T, C> {
+impl<'a, K: Kind, T: SolverVariable, C: SolverVariable> AssignmentRef<'a, K, T, C> {
     #[inline]
     pub fn new(
         request: &'a Request<K, T, C>,
@@ -582,7 +537,7 @@ impl<'a, K: Kind, T: PrimInt + Signed, C: PrimInt + Signed> AssignmentRef<'a, K,
     }
 }
 
-impl<'a, K: Kind, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> Display
+impl<'a, K: Kind, T: SolverVariable + Display, C: SolverVariable + Display> Display
     for AssignmentRef<'a, K, T, C>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -600,14 +555,14 @@ impl<'a, K: Kind, T: PrimInt + Signed + Display, C: PrimInt + Signed + Display> 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AnyRequest<T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     Movable(Request<Movable, T, C>),
     Fixed(Request<Fixed, T, C>),
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
+impl<T: SolverVariable, C: SolverVariable> AnyRequest<T, C> {
     pub fn id(&self) -> RequestId {
         match self {
             AnyRequest::Movable(r) => r.id(),
@@ -622,6 +577,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
             AnyRequest::Fixed(r) => r.length(),
         }
     }
+
     #[inline]
     pub fn arrival_time(&self) -> TimePoint<T> {
         match self {
@@ -629,6 +585,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
             AnyRequest::Fixed(r) => r.arrival_time(),
         }
     }
+
     #[inline]
     pub fn processing_duration(&self) -> TimeDelta<T> {
         match self {
@@ -636,6 +593,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
             AnyRequest::Fixed(r) => r.processing_duration(),
         }
     }
+
     #[inline]
     pub fn target_position(&self) -> SpacePosition {
         match self {
@@ -643,6 +601,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
             AnyRequest::Fixed(r) => r.target_position(),
         }
     }
+
     #[inline]
     pub fn cost_per_delay(&self) -> Cost<C> {
         match self {
@@ -650,6 +609,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
             AnyRequest::Fixed(r) => r.cost_per_delay(),
         }
     }
+
     #[inline]
     pub fn cost_per_position_deviation(&self) -> Cost<C> {
         match self {
@@ -657,13 +617,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
             AnyRequest::Fixed(r) => r.cost_per_position_deviation(),
         }
     }
-    #[inline]
-    pub fn feasible_time_window(&self) -> TimeInterval<T> {
-        match self {
-            AnyRequest::Movable(r) => r.feasible_time_window(),
-            AnyRequest::Fixed(r) => r.feasible_time_window(),
-        }
-    }
+
     #[inline]
     pub fn feasible_space_window(&self) -> SpaceInterval {
         match self {
@@ -671,15 +625,23 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> AnyRequest<T, C> {
             AnyRequest::Fixed(r) => r.feasible_space_window(),
         }
     }
+
+    pub fn is_movable(&self) -> bool {
+        matches!(self, AnyRequest::Movable(_))
+    }
+
+    pub fn is_fixed(&self) -> bool {
+        matches!(self, AnyRequest::Fixed(_))
+    }
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Request<Movable, T, C>> for AnyRequest<T, C> {
+impl<T: SolverVariable, C: SolverVariable> From<Request<Movable, T, C>> for AnyRequest<T, C> {
     fn from(r: Request<Movable, T, C>) -> Self {
         AnyRequest::Movable(r)
     }
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Request<Fixed, T, C>> for AnyRequest<T, C> {
+impl<T: SolverVariable, C: SolverVariable> From<Request<Fixed, T, C>> for AnyRequest<T, C> {
     fn from(r: Request<Fixed, T, C>) -> Self {
         AnyRequest::Fixed(r)
     }
@@ -688,8 +650,8 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Request<Fixed, T, C>> for An
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AnyRequestRef<'a, T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     Movable(&'a Request<Movable, T, C>),
     Fixed(&'a Request<Fixed, T, C>),
@@ -697,8 +659,8 @@ where
 
 impl<'a, T, C> AnyRequestRef<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     pub fn id(&self) -> RequestId {
         match self {
@@ -714,6 +676,7 @@ where
             AnyRequestRef::Fixed(r) => r.length(),
         }
     }
+
     #[inline]
     pub fn arrival_time(&self) -> TimePoint<T> {
         match self {
@@ -721,6 +684,7 @@ where
             AnyRequestRef::Fixed(r) => r.arrival_time(),
         }
     }
+
     #[inline]
     pub fn processing_duration(&self) -> TimeDelta<T> {
         match self {
@@ -728,6 +692,7 @@ where
             AnyRequestRef::Fixed(r) => r.processing_duration(),
         }
     }
+
     #[inline]
     pub fn target_position(&self) -> SpacePosition {
         match self {
@@ -735,6 +700,7 @@ where
             AnyRequestRef::Fixed(r) => r.target_position(),
         }
     }
+
     #[inline]
     pub fn cost_per_delay(&self) -> Cost<C> {
         match self {
@@ -742,6 +708,7 @@ where
             AnyRequestRef::Fixed(r) => r.cost_per_delay(),
         }
     }
+
     #[inline]
     pub fn cost_per_position_deviation(&self) -> Cost<C> {
         match self {
@@ -749,13 +716,7 @@ where
             AnyRequestRef::Fixed(r) => r.cost_per_position_deviation(),
         }
     }
-    #[inline]
-    pub fn feasible_time_window(&self) -> TimeInterval<T> {
-        match self {
-            AnyRequestRef::Movable(r) => r.feasible_time_window(),
-            AnyRequestRef::Fixed(r) => r.feasible_time_window(),
-        }
-    }
+
     #[inline]
     pub fn feasible_space_window(&self) -> SpaceInterval {
         match self {
@@ -763,9 +724,17 @@ where
             AnyRequestRef::Fixed(r) => r.feasible_space_window(),
         }
     }
+
+    pub fn is_movable(&self) -> bool {
+        matches!(self, AnyRequestRef::Movable(_))
+    }
+
+    pub fn is_fixed(&self) -> bool {
+        matches!(self, AnyRequestRef::Fixed(_))
+    }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Request<Movable, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<&'a Request<Movable, T, C>>
     for AnyRequestRef<'a, T, C>
 {
     fn from(r: &'a Request<Movable, T, C>) -> Self {
@@ -773,7 +742,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Request<Movable, T, 
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Request<Fixed, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<&'a Request<Fixed, T, C>>
     for AnyRequestRef<'a, T, C>
 {
     fn from(r: &'a Request<Fixed, T, C>) -> Self {
@@ -784,18 +753,30 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Request<Fixed, T, C>
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AnyAssignment<T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     request: AnyRequest<T, C>,
     start_position: SpacePosition,
     start_time: TimePoint<T>,
 }
 
+impl<T: SolverVariable, C: SolverVariable> Display for AnyAssignment<T, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "AnyAssignment(request_id: {}, start_position: {}, start_time: {})",
+            self.request.id(),
+            self.start_position,
+            self.start_time
+        )
+    }
+}
+
 impl<T, C> AnyAssignment<T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     fn new(
         request: AnyRequest<T, C>,
@@ -809,22 +790,27 @@ where
         }
     }
 
+    #[inline]
     pub fn id(&self) -> RequestId {
         self.request.id()
     }
 
+    #[inline]
     pub fn request(&self) -> &AnyRequest<T, C> {
         &self.request
     }
 
+    #[inline]
     pub fn start_position(&self) -> SpacePosition {
         self.start_position
     }
 
+    #[inline]
     pub fn start_time(&self) -> TimePoint<T> {
         self.start_time
     }
 
+    #[inline]
     pub fn into_ref<'a>(&'a self) -> AnyAssignmentRef<'a, T, C> {
         let request = match &self.request {
             AnyRequest::Movable(r) => AnyRequestRef::Movable(r),
@@ -841,19 +827,34 @@ where
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AnyAssignmentRef<'a, T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     request: AnyRequestRef<'a, T, C>,
     start_position: SpacePosition,
     start_time: TimePoint<T>,
 }
 
+impl<'a, T: SolverVariable + Display, C: SolverVariable + Display> Display
+    for AnyAssignmentRef<'a, T, C>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "AnyAssignmentRef(request_id: {}, start_position: {}, start_time: {})",
+            self.request.id(),
+            self.start_position,
+            self.start_time
+        )
+    }
+}
+
 impl<'a, T, C> AnyAssignmentRef<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
+    #[inline]
     fn new(
         request: AnyRequestRef<'a, T, C>,
         start_position: SpacePosition,
@@ -866,22 +867,27 @@ where
         }
     }
 
+    #[inline]
     pub fn id(&self) -> RequestId {
         self.request.id()
     }
 
+    #[inline]
     pub fn request(&self) -> &AnyRequestRef<'a, T, C> {
         &self.request
     }
 
+    #[inline]
     pub fn start_position(&self) -> SpacePosition {
         self.start_position
     }
 
+    #[inline]
     pub fn start_time(&self) -> TimePoint<T> {
         self.start_time
     }
 
+    #[inline]
     pub fn into_owned(self) -> AnyAssignment<T, C> {
         let request = match self.request {
             AnyRequestRef::Movable(r) => AnyRequest::Movable(r.clone()),
@@ -894,6 +900,44 @@ where
         }
     }
 
+    pub fn waiting_time(&self) -> TimeDelta<T> {
+        (self.start_time() - self.request.arrival_time()).max(TimeDelta::zero())
+    }
+
+    pub fn waiting_cost(&self) -> Cost<C>
+    where
+        C: TryFrom<T>,
+    {
+        let waiting_time = self.waiting_time();
+        let scalar: C = C::try_from(waiting_time.value())
+            .ok()
+            .expect("waiting time does not fit in C");
+        self.request().cost_per_delay() * scalar
+    }
+
+    pub fn position_deviation(&self) -> SpaceLength {
+        (self.start_position() - self.request.target_position()).abs()
+    }
+
+    pub fn position_deviation_cost(&self) -> Cost<C>
+    where
+        C: TryFrom<usize>,
+    {
+        let deviation = self.position_deviation();
+        let scalar: C = C::try_from(deviation.value())
+            .ok()
+            .expect("deviation does not fit in C");
+        self.request().cost_per_position_deviation() * scalar
+    }
+
+    pub fn cost(&self) -> Cost<C>
+    where
+        C: TryFrom<T> + TryFrom<usize>,
+    {
+        self.waiting_cost() + self.position_deviation_cost()
+    }
+
+    #[inline]
     pub fn to_owned(&self) -> AnyAssignment<T, C> {
         let request = match self.request {
             AnyRequestRef::Movable(r) => AnyRequest::Movable(r.clone()),
@@ -903,7 +947,7 @@ where
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<Movable, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<&'a Assignment<Movable, T, C>>
     for AnyAssignmentRef<'a, T, C>
 {
     #[inline]
@@ -916,7 +960,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<Movable, 
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<Fixed, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<&'a Assignment<Fixed, T, C>>
     for AnyAssignmentRef<'a, T, C>
 {
     #[inline]
@@ -929,7 +973,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a Assignment<Fixed, T,
     }
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<Movable, T, C>>
+impl<T: SolverVariable, C: SolverVariable> From<&Assignment<Movable, T, C>>
     for AnyAssignment<T, C>
 {
     #[inline]
@@ -942,9 +986,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<Movable, T, C>>
     }
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<Fixed, T, C>>
-    for AnyAssignment<T, C>
-{
+impl<T: SolverVariable, C: SolverVariable> From<&Assignment<Fixed, T, C>> for AnyAssignment<T, C> {
     #[inline]
     fn from(a: &Assignment<Fixed, T, C>) -> Self {
         AnyAssignment::new(
@@ -955,9 +997,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> From<&Assignment<Fixed, T, C>>
     }
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<Movable, T, C>>
-    for AnyAssignment<T, C>
-{
+impl<T: SolverVariable, C: SolverVariable> From<Assignment<Movable, T, C>> for AnyAssignment<T, C> {
     fn from(a: Assignment<Movable, T, C>) -> Self {
         AnyAssignment::new(
             AnyRequest::Movable(a.request().clone()),
@@ -967,9 +1007,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<Movable, T, C>>
     }
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<Fixed, T, C>>
-    for AnyAssignment<T, C>
-{
+impl<T: SolverVariable, C: SolverVariable> From<Assignment<Fixed, T, C>> for AnyAssignment<T, C> {
     fn from(a: Assignment<Fixed, T, C>) -> Self {
         AnyAssignment::new(
             AnyRequest::Fixed(a.request().clone()),
@@ -979,7 +1017,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> From<Assignment<Fixed, T, C>>
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a AssignmentRef<'a, Movable, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<&'a AssignmentRef<'a, Movable, T, C>>
     for AnyAssignmentRef<'a, T, C>
 {
     #[inline]
@@ -992,7 +1030,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a AssignmentRef<'a, Mo
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a AssignmentRef<'a, Fixed, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<&'a AssignmentRef<'a, Fixed, T, C>>
     for AnyAssignmentRef<'a, T, C>
 {
     #[inline]
@@ -1005,7 +1043,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&'a AssignmentRef<'a, Fi
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&AssignmentRef<'a, Movable, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<&AssignmentRef<'a, Movable, T, C>>
     for AnyAssignment<T, C>
 {
     #[inline]
@@ -1018,7 +1056,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&AssignmentRef<'a, Movab
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&AssignmentRef<'a, Fixed, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<&AssignmentRef<'a, Fixed, T, C>>
     for AnyAssignment<T, C>
 {
     #[inline]
@@ -1031,7 +1069,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<&AssignmentRef<'a, Fixed
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Movable, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<AssignmentRef<'a, Movable, T, C>>
     for AnyAssignment<T, C>
 {
     fn from(a: AssignmentRef<'a, Movable, T, C>) -> Self {
@@ -1043,7 +1081,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Movabl
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Fixed, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<AssignmentRef<'a, Fixed, T, C>>
     for AnyAssignment<T, C>
 {
     fn from(a: AssignmentRef<'a, Fixed, T, C>) -> Self {
@@ -1055,7 +1093,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Fixed,
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Movable, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<AssignmentRef<'a, Movable, T, C>>
     for AnyAssignmentRef<'a, T, C>
 {
     fn from(a: AssignmentRef<'a, Movable, T, C>) -> Self {
@@ -1067,7 +1105,7 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Movabl
     }
 }
 
-impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Fixed, T, C>>
+impl<'a, T: SolverVariable, C: SolverVariable> From<AssignmentRef<'a, Fixed, T, C>>
     for AnyAssignmentRef<'a, T, C>
 {
     fn from(a: AssignmentRef<'a, Fixed, T, C>) -> Self {
@@ -1080,48 +1118,54 @@ impl<'a, T: PrimInt + Signed, C: PrimInt + Signed> From<AssignmentRef<'a, Fixed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct AssignmentOutsideTimeWindowError<T: PrimInt + Signed> {
+pub struct AssignmentBeforeArrivalTimeError<T: SolverVariable> {
     id: RequestId,
-    time_window: TimeInterval<T>,
-    assigned_interval: TimeInterval<T>,
+    arrival_time: TimePoint<T>,
+    assigned_start_time: TimePoint<T>,
 }
 
-impl<T: PrimInt + Signed> AssignmentOutsideTimeWindowError<T> {
+impl<T: SolverVariable> AssignmentBeforeArrivalTimeError<T> {
+    #[inline]
     pub fn new(
         id: RequestId,
-        time_window: TimeInterval<T>,
-        assigned_interval: TimeInterval<T>,
+        arrival_time: TimePoint<T>,
+        assigned_start_time: TimePoint<T>,
     ) -> Self {
         Self {
             id,
-            time_window,
-            assigned_interval,
+            arrival_time,
+            assigned_start_time,
         }
     }
+
     #[inline]
     pub fn id(&self) -> RequestId {
         self.id
     }
+
     #[inline]
-    pub fn time_window(&self) -> TimeInterval<T> {
-        self.time_window
+    pub fn arrival_time(&self) -> TimePoint<T> {
+        self.arrival_time
     }
+
     #[inline]
-    pub fn assigned_interval(&self) -> TimeInterval<T> {
-        self.assigned_interval
+    pub fn assigned_start_time(&self) -> TimePoint<T> {
+        self.assigned_start_time
     }
 }
-impl<T: PrimInt + Signed + Display> Display for AssignmentOutsideTimeWindowError<T> {
+
+impl<T: SolverVariable + Display> std::fmt::Display for AssignmentBeforeArrivalTimeError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Assignment for request {} is outside its time window: {} not in {}",
-            self.id, self.assigned_interval, self.time_window
+            "Assignment for request {} starts before its arrival time: {} < {}",
+            self.id, self.assigned_start_time, self.arrival_time
         )
     }
 }
-impl<T: PrimInt + Signed + Debug + Display> std::error::Error
-    for AssignmentOutsideTimeWindowError<T>
+
+impl<T: SolverVariable + Debug + Display> std::error::Error
+    for AssignmentBeforeArrivalTimeError<T>
 {
 }
 
@@ -1133,6 +1177,7 @@ pub struct AssignmentOutsideSpaceWindowError {
 }
 
 impl AssignmentOutsideSpaceWindowError {
+    #[inline]
     pub fn new(
         id: RequestId,
         space_window: SpaceInterval,
@@ -1144,14 +1189,17 @@ impl AssignmentOutsideSpaceWindowError {
             assigned_interval,
         }
     }
+
     #[inline]
     pub fn id(&self) -> RequestId {
         self.id
     }
+
     #[inline]
     pub fn space_window(&self) -> SpaceInterval {
         self.space_window
     }
+
     #[inline]
     pub fn assigned_interval(&self) -> SpaceInterval {
         self.assigned_interval
@@ -1177,6 +1225,7 @@ pub struct AssignmentExceedsQuayError {
 }
 
 impl AssignmentExceedsQuayError {
+    #[inline]
     pub fn new(id: RequestId, quay_length: SpaceLength, assigned_interval: SpaceInterval) -> Self {
         Self {
             id,
@@ -1184,14 +1233,17 @@ impl AssignmentExceedsQuayError {
             assigned_interval,
         }
     }
+
     #[inline]
     pub fn id(&self) -> RequestId {
         self.id
     }
+
     #[inline]
     pub fn quay_length(&self) -> SpaceLength {
         self.quay_length
     }
+
     #[inline]
     pub fn assigned_interval(&self) -> SpaceInterval {
         self.assigned_interval
@@ -1207,6 +1259,7 @@ impl Display for AssignmentExceedsQuayError {
         )
     }
 }
+
 impl std::error::Error for AssignmentExceedsQuayError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1216,13 +1269,16 @@ pub struct PreassignedOverlapError {
 }
 
 impl PreassignedOverlapError {
+    #[inline]
     pub fn new(a: FixedRequestId, b: FixedRequestId) -> Self {
         Self { a, b }
     }
+
     #[inline]
     pub fn request_a(&self) -> FixedRequestId {
         self.a
     }
+
     #[inline]
     pub fn request_b(&self) -> FixedRequestId {
         self.b
@@ -1240,19 +1296,19 @@ impl Display for PreassignedOverlapError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ProblemBuildError<T: PrimInt + Signed> {
+pub enum ProblemBuildError<T: SolverVariable> {
     DuplicateRequestId(RequestId),
-    AssignmentOutsideTimeWindow(AssignmentOutsideTimeWindowError<T>),
+    AssignmentBeforeArrivalTime(AssignmentBeforeArrivalTimeError<T>),
     AssignmentOutsideSpaceWindow(AssignmentOutsideSpaceWindowError),
     AssignmentExceedsQuay(AssignmentExceedsQuayError),
     PreassignedOverlap(PreassignedOverlapError),
 }
 
-impl<T: PrimInt + Signed + Display + Debug> Display for ProblemBuildError<T> {
+impl<T: SolverVariable + Display> Display for ProblemBuildError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ProblemBuildError::DuplicateRequestId(id) => write!(f, "Duplicate request ID: {}", id),
-            ProblemBuildError::AssignmentOutsideTimeWindow(e) => write!(f, "{e}"),
+            ProblemBuildError::AssignmentBeforeArrivalTime(e) => write!(f, "{e}"),
             ProblemBuildError::AssignmentOutsideSpaceWindow(e) => write!(f, "{e}"),
             ProblemBuildError::AssignmentExceedsQuay(e) => write!(f, "{e}"),
             ProblemBuildError::PreassignedOverlap(e) => write!(f, "{e}"),
@@ -1260,20 +1316,79 @@ impl<T: PrimInt + Signed + Display + Debug> Display for ProblemBuildError<T> {
     }
 }
 
-impl<T: PrimInt + Signed + Display + Debug> std::error::Error for ProblemBuildError<T> {}
+impl<T: SolverVariable + Debug + Display> std::error::Error for ProblemBuildError<T> {}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Problem<T = i64, C = i64>
-where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
-{
-    movables: HashMap<MovableRequestId, Request<Movable, T, C>>,
-    preassigned: HashMap<FixedRequestId, Assignment<Fixed, T, C>>,
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProblemStats<T: SolverVariable> {
+    /// Total quay length (space) as a typed length.
     quay_length: SpaceLength,
+    /// Number of movable requests.
+    movable_count: usize,
+    /// 50th percentile of request lengths (typed).
+    p50_request_length: SpaceLength,
+    /// 90th percentile of request lengths (typed).
+    p90_request_length: SpaceLength,
+    /// 50th percentile of processing durations (typed).
+    p50_processing_time: TimeDelta<T>,
+    /// Proxy for instance horizon: latest known completion time among fixed and movable ETA+proc.
+    latest_completion_time: TimePoint<T>,
+    /// Crude congestion: total area demand / (quay_length * horizon),
+    /// capped to [0, 2] for stability. Dimensionless.
+    rho: f64,
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> Problem<T, C> {
+impl<T: SolverVariable> ProblemStats<T> {
+    #[inline]
+    pub fn quay_length(&self) -> SpaceLength {
+        self.quay_length
+    }
+
+    #[inline]
+    pub fn movable_count(&self) -> usize {
+        self.movable_count
+    }
+
+    #[inline]
+    pub fn p50_request_length(&self) -> SpaceLength {
+        self.p50_request_length
+    }
+
+    #[inline]
+    pub fn p90_request_length(&self) -> SpaceLength {
+        self.p90_request_length
+    }
+
+    #[inline]
+    pub fn p50_processing_time(&self) -> TimeDelta<T> {
+        self.p50_processing_time
+    }
+
+    #[inline]
+    pub fn latest_completion_time(&self) -> TimePoint<T> {
+        self.latest_completion_time
+    }
+
+    #[inline]
+    pub fn rho(&self) -> f64 {
+        self.rho
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Problem<T = i64, C = i64>
+where
+    T: SolverVariable,
+    C: SolverVariable,
+{
+    movables: Vec<Request<Movable, T, C>>,
+    movable_index: HashMap<MovableRequestId, usize>,
+    preassigned: Vec<Assignment<Fixed, T, C>>,
+    preassigned_index: HashMap<FixedRequestId, usize>,
+    quay_length: SpaceLength,
+    stats: ProblemStats<T>,
+}
+
+impl<T: SolverVariable, C: SolverVariable> Problem<T, C> {
     #[inline]
     pub fn quay_length(&self) -> SpaceLength {
         self.quay_length
@@ -1285,33 +1400,35 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> Problem<T, C> {
     }
 
     #[inline]
-    pub fn movables(&self) -> &HashMap<MovableRequestId, Request<Movable, T, C>> {
+    pub fn movables(&self) -> &[Request<Movable, T, C>] {
         &self.movables
     }
 
     #[inline]
-    pub fn preassigned(&self) -> &HashMap<FixedRequestId, Assignment<Fixed, T, C>> {
+    pub fn preassigned(&self) -> &[Assignment<Fixed, T, C>] {
         &self.preassigned
     }
 
     #[inline]
     pub fn get_movable(&self, id: MovableRequestId) -> Option<&Request<Movable, T, C>> {
-        self.movables.get(&id)
+        let idx = self.movable_index.get(&id)?;
+        self.movables.get(*idx)
     }
 
     #[inline]
     pub fn get_preassigned(&self, id: FixedRequestId) -> Option<&Assignment<Fixed, T, C>> {
-        self.preassigned.get(&id)
+        let idx = self.preassigned_index.get(&id)?;
+        self.preassigned.get(*idx)
     }
 
     #[inline]
     pub fn iter_movable_requests(&self) -> impl Iterator<Item = &Request<Movable, T, C>> {
-        self.movables.values()
+        self.movables.iter()
     }
 
     #[inline]
     pub fn iter_fixed_requests(&self) -> impl Iterator<Item = &Request<Fixed, T, C>> {
-        self.preassigned.values().map(|fa| fa.request())
+        self.preassigned.iter().map(|a| a.request())
     }
 
     #[inline]
@@ -1323,23 +1440,72 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> Problem<T, C> {
 
     #[inline]
     pub fn iter_fixed_assignments(&self) -> impl Iterator<Item = &Assignment<Fixed, T, C>> {
-        self.preassigned.values()
+        self.preassigned.iter()
+    }
+
+    #[inline]
+    pub fn stats(&self) -> &ProblemStats<T> {
+        &self.stats
+    }
+
+    #[inline]
+    pub fn congestion_rho(&self) -> f64 {
+        self.stats.rho()
+    }
+
+    #[inline]
+    pub fn latest_completion_time(&self) -> TimePoint<T> {
+        self.stats.latest_completion_time()
+    }
+
+    #[inline]
+    pub fn p50_processing_time(&self) -> TimeDelta<T> {
+        self.stats.p50_processing_time()
+    }
+
+    #[inline]
+    pub fn p50_request_length(&self) -> SpaceLength {
+        self.stats.p50_request_length()
+    }
+
+    #[inline]
+    pub fn p90_request_length(&self) -> SpaceLength {
+        self.stats.p90_request_length()
+    }
+
+    #[inline]
+    pub fn movable_count(&self) -> usize {
+        self.stats.movable_count()
     }
 }
 
-pub type BerthAllocationProblem = Problem<i64, i64>;
+impl<T: SolverVariable, C: SolverVariable> Display for Problem<T, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Problem:")?;
+        writeln!(f, "  Quay length: {}", self.quay_length)?;
+        writeln!(f, "  Movable requests ({}):", self.movables.len())?;
+        for r in &self.movables {
+            writeln!(f, "    {}", r)?;
+        }
+        writeln!(f, "  Preassigned ({}):", self.preassigned.len())?;
+        for a in &self.preassigned {
+            writeln!(f, "    {}", a)?;
+        }
+        Ok(())
+    }
+}
 
 pub struct ProblemBuilder<T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable + ToPrimitive + FromPrimitive,
+    C: SolverVariable,
 {
     movables: HashMap<MovableRequestId, Request<Movable, T, C>>,
     preassigned: HashMap<FixedRequestId, Assignment<Fixed, T, C>>,
     quay_length: SpaceLength,
 }
 
-impl<T: PrimInt + Signed, C: PrimInt + Signed> ProblemBuilder<T, C> {
+impl<T: SolverVariable + ToPrimitive + FromPrimitive, C: SolverVariable> ProblemBuilder<T, C> {
     #[inline]
     pub fn new(quay_length: SpaceLength) -> Self {
         Self {
@@ -1355,6 +1521,7 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> ProblemBuilder<T, C> {
         self
     }
 
+    #[inline]
     pub fn add_movable_request(
         &mut self,
         request: Request<Movable, T, C>,
@@ -1388,13 +1555,13 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> ProblemBuilder<T, C> {
             return Err(ProblemBuildError::DuplicateRequestId(id));
         }
 
-        let (tspan, sspan) = Self::assignment_spans(a);
-        let tw = r.feasible_time_window();
-        if !tw.contains_interval(&tspan) {
-            return Err(ProblemBuildError::AssignmentOutsideTimeWindow(
-                AssignmentOutsideTimeWindowError::new(id, tw, tspan),
+        if a.start_time() < r.arrival_time() {
+            return Err(ProblemBuildError::AssignmentBeforeArrivalTime(
+                AssignmentBeforeArrivalTimeError::new(id, r.arrival_time(), a.start_time()),
             ));
         }
+
+        let (tspan, sspan) = Self::assignment_spans(a);
 
         let sw = r.feasible_space_window();
         if !sw.contains_interval(&sspan) {
@@ -1423,11 +1590,160 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> ProblemBuilder<T, C> {
         Ok(self)
     }
 
+    fn percentile_space_length(mut v: Vec<SpaceLength>, p: f64) -> SpaceLength {
+        if v.is_empty() {
+            return SpaceLength::new(0);
+        }
+        v.sort_unstable_by_key(|x| x.value());
+        let n = v.len();
+        if n == 1 {
+            return v[0];
+        }
+
+        let p = p.clamp(0.0, 1.0);
+        let q = p * (n as f64 - 1.0);
+        let lo = q.floor() as usize;
+        let hi = q.ceil() as usize;
+        if lo == hi {
+            return v[lo];
+        }
+
+        let lo_v = v[lo].value() as f64;
+        let hi_v = v[hi].value() as f64;
+        let frac = q - lo as f64;
+        let interp = lo_v + (hi_v - lo_v) * frac;
+        SpaceLength::new(interp.round() as usize)
+    }
+
+    fn percentile_time_delta(mut v: Vec<TimeDelta<T>>, p: f64) -> TimeDelta<T> {
+        if v.is_empty() {
+            return TimeDelta::new(T::zero());
+        }
+        v.sort_unstable_by_key(|x| x.value());
+        let n = v.len();
+        if n == 1 {
+            return v[0];
+        }
+
+        let p = p.clamp(0.0, 1.0);
+        let q = p * (n as f64 - 1.0);
+        let lo = q.floor() as usize;
+        let hi = q.ceil() as usize;
+        if lo == hi {
+            return v[lo];
+        }
+
+        let lo_v = v[lo].value().to_f64().unwrap_or(0.0);
+        let hi_v = v[hi].value().to_f64().unwrap_or(lo_v);
+        let frac = q - lo as f64;
+        let interp = lo_v + (hi_v - lo_v) * frac;
+        let rounded = interp.round();
+
+        let t = T::from_f64(rounded).unwrap_or_else(T::zero);
+        TimeDelta::new(t)
+    }
+
+    #[inline]
     pub fn build(&self) -> Problem<T, C> {
-        Problem {
-            movables: self.movables.clone(),
-            preassigned: self.preassigned.clone(),
+        // ---- assemble ordered movables + index
+        let mut movable_pairs: Vec<(MovableRequestId, Request<Movable, T, C>)> =
+            self.movables.iter().map(|(k, v)| (*k, v.clone())).collect();
+        movable_pairs.sort_by_key(|(id, _)| id.value());
+
+        let mut movables = Vec::with_capacity(movable_pairs.len());
+        let mut movable_index = HashMap::with_capacity(movable_pairs.len());
+        for (i, (mid, req)) in movable_pairs.into_iter().enumerate() {
+            movable_index.insert(mid, i);
+            movables.push(req);
+        }
+
+        // ---- assemble ordered fixed assignments + index
+        let mut fixed_pairs: Vec<(FixedRequestId, Assignment<Fixed, T, C>)> = self
+            .preassigned
+            .iter()
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        fixed_pairs.sort_by_key(|(id, _)| id.value());
+
+        let mut preassigned = Vec::with_capacity(fixed_pairs.len());
+        let mut preassigned_index = HashMap::with_capacity(fixed_pairs.len());
+        for (i, (fid, asg)) in fixed_pairs.into_iter().enumerate() {
+            preassigned_index.insert(fid, i);
+            preassigned.push(asg);
+        }
+
+        // ---- compute ProblemStats from the assembled parts (typed end-to-end)
+        // Percentiles over movables
+        let lengths: Vec<SpaceLength> = movables.iter().map(|r| r.length()).collect();
+        let procs: Vec<TimeDelta<T>> = movables.iter().map(|r| r.processing_duration()).collect();
+
+        let p50_len = Self::percentile_space_length(lengths.clone(), 0.50);
+        let p90_len = Self::percentile_space_length(lengths, 0.90);
+        let p50_proc = Self::percentile_time_delta(procs, 0.50);
+
+        // Latest completion time across fixed (start+proc) and movable (arrival+proc)
+        let mut latest_end = TimePoint::new(T::zero());
+        for a in &preassigned {
+            let end = a.start_time() + a.request().processing_duration();
+            if end > latest_end {
+                latest_end = end;
+            }
+        }
+        for r in &movables {
+            let end = r.arrival_time() + r.processing_duration();
+            if end > latest_end {
+                latest_end = end;
+            }
+        }
+
+        // Area demand (sum length * proc) for movables + fixed; capacity = quay_length * horizon
+        let mut total_area: i128 = 0;
+        for r in &movables {
+            total_area += (r.length().value() as i128)
+                * (r.processing_duration().value().to_i128().unwrap_or(0));
+        }
+        for a in &preassigned {
+            total_area += (a.request().length().value() as i128)
+                * (a.request()
+                    .processing_duration()
+                    .value()
+                    .to_i128()
+                    .unwrap_or(0));
+        }
+        let horizon: i128 = latest_end.value().to_i128().unwrap_or(0).max(1);
+        let capacity: i128 = (self.quay_length.value() as i128) * horizon;
+        let rho = if capacity > 0 {
+            (total_area as f64 / capacity as f64).clamp(0.0, 2.0)
+        } else {
+            0.0
+        };
+
+        let stats = ProblemStats {
             quay_length: self.quay_length,
+            movable_count: movables.len(),
+            p50_request_length: if p50_len.value() == 0 {
+                SpaceLength::new(1)
+            } else {
+                p50_len
+            },
+            p90_request_length: if p90_len.value() == 0 {
+                SpaceLength::new(1)
+            } else {
+                p90_len
+            },
+            p50_processing_time: p50_proc,
+            latest_completion_time: latest_end,
+            rho,
+        };
+
+        // ---- finalize Problem with embedded stats
+        Problem {
+            movables,
+            movable_index,
+            preassigned,
+            preassigned_index,
+            quay_length: self.quay_length,
+            stats,
         }
     }
 }
@@ -1435,14 +1751,33 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> ProblemBuilder<T, C> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SolutionStats<T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     total_cost: Cost<C>,
     total_waiting_time: TimeDelta<T>,
     total_target_position_deviation: SpaceLength,
 }
-impl<T: PrimInt + Signed, C: PrimInt + Signed> SolutionStats<T, C> {
+
+impl<T, C> Display for SolutionStats<T, C>
+where
+    T: SolverVariable,
+    C: SolverVariable,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Solution statistics:")?;
+        writeln!(f, "  Total cost: {}", self.total_cost)?;
+        writeln!(f, "  Total waiting time: {}", self.total_waiting_time)?;
+        writeln!(
+            f,
+            "  Total target position deviation: {}",
+            self.total_target_position_deviation
+        )?;
+        Ok(())
+    }
+}
+
+impl<T: SolverVariable, C: SolverVariable> SolutionStats<T, C> {
     #[inline]
     fn new(
         total_cost: Cost<C>,
@@ -1471,20 +1806,37 @@ impl<T: PrimInt + Signed, C: PrimInt + Signed> SolutionStats<T, C> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnedSolution<T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     decisions: HashMap<RequestId, AnyAssignment<T, C>>,
     stats: SolutionStats<T, C>,
 }
 
+impl<T, C> Display for OwnedSolution<T, C>
+where
+    T: SolverVariable,
+    C: SolverVariable,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Solution:")?;
+        for a in self.decisions.values() {
+            writeln!(f, "{}", a)?;
+        }
+        writeln!(f)?;
+        write!(f, "{}", self.stats)
+    }
+}
+
 impl<T, C> OwnedSolution<T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
+    #[inline]
     fn new(decisions: HashMap<RequestId, AnyAssignment<T, C>>, stats: SolutionStats<T, C>) -> Self {
         Self { decisions, stats }
     }
@@ -1503,18 +1855,34 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SolutionRef<'a, T = i64, C = i64>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     decisions: HashMap<RequestId, AnyAssignmentRef<'a, T, C>>,
     stats: SolutionStats<T, C>,
 }
 
+impl<T, C> Display for SolutionRef<'_, T, C>
+where
+    T: SolverVariable,
+    C: SolverVariable,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Solution:")?;
+        for a in self.decisions.values() {
+            writeln!(f, "{}", a)?;
+        }
+        writeln!(f)?;
+        write!(f, "{}", self.stats)
+    }
+}
+
 impl<'a, T, C> SolutionRef<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed + TryFrom<T> + TryFrom<usize>,
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
 {
+    #[inline]
     pub fn new(
         assignments: HashMap<RequestId, AnyAssignmentRef<'a, T, C>>,
         stats: SolutionStats<T, C>,
@@ -1576,8 +1944,8 @@ where
 
 impl<'a, T, C> SolutionRef<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     #[inline]
     pub fn to_owned(&self) -> OwnedSolution<T, C> {
@@ -1604,8 +1972,8 @@ where
 
 impl<'a, T, C> From<&SolutionRef<'a, T, C>> for OwnedSolution<T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
     #[inline]
     fn from(s: &SolutionRef<'a, T, C>) -> Self {
@@ -1616,7 +1984,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dock_alloc_core::domain::SpacePosition;
 
     type Tm = i64;
     type Cm = i64;
@@ -1624,20 +1991,19 @@ mod tests {
     fn req_movable_ok(
         id: u64,
         len: usize,
-        proc_t: i64,
         t0: i64,
-        t1: i64,
+        proc_t: i64,
         s0: usize,
         s1: usize,
     ) -> Request<Movable, Tm, Cm> {
         Request::<Movable, _, _>::new(
             RequestId::new(id),
             SpaceLength::new(len),
+            TimePoint::new(t0),
             TimeDelta::new(proc_t),
             SpacePosition::new(s0),
             Cost::new(1),
             Cost::new(1),
-            TimeInterval::new(TimePoint::new(t0), TimePoint::new(t1)),
             SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
         )
         .expect("valid movable request")
@@ -1646,20 +2012,19 @@ mod tests {
     fn req_fixed_ok(
         id: u64,
         len: usize,
-        proc_t: i64,
         t0: i64,
-        t1: i64,
+        proc_t: i64,
         s0: usize,
         s1: usize,
     ) -> Request<Fixed, Tm, Cm> {
         Request::<Fixed, _, _>::new(
             RequestId::new(id),
             SpaceLength::new(len),
+            TimePoint::new(t0),
             TimeDelta::new(proc_t),
             SpacePosition::new(s0),
             Cost::new(1),
             Cost::new(1),
-            TimeInterval::new(TimePoint::new(t0), TimePoint::new(t1)),
             SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
         )
         .expect("valid fixed request")
@@ -1676,38 +2041,25 @@ mod tests {
 
     #[test]
     fn request_new_rejects_bad_windows() {
-        // too short time window
-        let bad = Request::<Movable, _, _>::new(
-            RequestId::new(1),
-            SpaceLength::new(10),
-            TimeDelta::new(5),
-            SpacePosition::new(0),
-            Cost::new(1),
-            Cost::new(1),
-            TimeInterval::new(TimePoint::new(0), TimePoint::new(4)), // len 4 < 5
-            SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
-        );
-        assert!(matches!(bad, Err(RequestError::TimeWindowTooShort(_))));
-
         // too short space window
         let bad2 = Request::<Fixed, _, _>::new(
             RequestId::new(2),
             SpaceLength::new(10),
+            TimePoint::new(0),
             TimeDelta::new(2),
             SpacePosition::new(0),
             Cost::new(1),
             Cost::new(1),
-            TimeInterval::new(TimePoint::new(0), TimePoint::new(10)),
             SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(5)), // measure 5 < 10
         );
-        assert!(matches!(bad2, Err(RequestError::SpaceWindowTooShort(_))));
+        assert!(bad2.is_err());
     }
 
     #[test]
     fn builder_duplicate_ids_rejected() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(20));
-        let r1 = req_movable_ok(1, 4, 3, 0, 10, 0, 20);
-        let r2 = req_movable_ok(1, 5, 3, 0, 10, 0, 20); // same id
+        let r1 = req_movable_ok(1, 4, 0, 3, 0, 10);
+        let r2 = req_movable_ok(1, 5, 0, 3, 0, 10); // same id
         b.add_movable_request(r1).unwrap();
         assert!(matches!(
             b.add_movable_request(r2),
@@ -1718,15 +2070,8 @@ mod tests {
     #[test]
     fn builder_preassigned_window_violations_rejected() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(20));
-        let rf = req_fixed_ok(1, 4, 5, 10, 20, 0, 20);
-        let a = Assignment::new(rf, SpacePosition::new(0), TimePoint::new(16)); // [16,21) leaks past
-        assert!(matches!(
-            b.add_preassigned(a),
-            Err(ProblemBuildError::AssignmentOutsideTimeWindow(_))
-        ));
-
-        let rf2 = req_fixed_ok(2, 6, 2, 0, 10, 5, 12);
-        let a2 = Assignment::new(rf2, SpacePosition::new(7), TimePoint::new(1)); // [7,13) leaks past 12
+        let rf2 = req_fixed_ok(2, 6, 0, 2, 0, 10); // arrival = 0 (so time is fine)
+        let a2 = Assignment::new(rf2, SpacePosition::new(7), TimePoint::new(1)); // [7,13) leaks past 10
         assert!(matches!(
             b.add_preassigned(a2),
             Err(ProblemBuildError::AssignmentOutsideSpaceWindow(_))
@@ -1736,7 +2081,7 @@ mod tests {
     #[test]
     fn builder_preassigned_exceeds_quay_rejected() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(10));
-        let rf = req_fixed_ok(1, 6, 2, 0, 10, 0, 20);
+        let rf = req_fixed_ok(1, 6, 0, 2, 0, 20); // window wide enough to include [6,12)
         let a = Assignment::new(rf, SpacePosition::new(6), TimePoint::new(1)); // [6,12) > quay 10
         assert!(matches!(
             b.add_preassigned(a),
@@ -1747,8 +2092,8 @@ mod tests {
     #[test]
     fn builder_preassigned_overlap_rejected() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(20));
-        let r1 = req_fixed_ok(1, 4, 5, 0, 20, 0, 20);
-        let r2 = req_fixed_ok(2, 4, 5, 0, 20, 0, 20);
+        let r1 = req_fixed_ok(1, 4, 0, 5, 0, 20);
+        let r2 = req_fixed_ok(2, 4, 0, 5, 0, 20);
 
         b.add_preassigned(Assignment::new(
             r1,
@@ -1766,13 +2111,13 @@ mod tests {
     #[test]
     fn builder_build_ok_when_valid() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(20));
-        let r_m = req_movable_ok(1, 4, 3, 0, 10, 0, 20);
-        let r_f = req_fixed_ok(2, 4, 3, 0, 10, 10, 20);
+        let r_m = req_movable_ok(1, 4, 0, 3, 0, 10);
+        let r_f = req_fixed_ok(2, 4, 10, 3, 0, 10); // arrival = 10
         b.add_movable_request(r_m).unwrap();
         b.add_preassigned(Assignment::new(
             r_f,
-            SpacePosition::new(10),
-            TimePoint::new(0),
+            SpacePosition::new(6),
+            TimePoint::new(10), // start at/after arrival
         ))
         .unwrap();
         let p = b.build();
@@ -1784,16 +2129,16 @@ mod tests {
     #[test]
     fn problem_iters_and_solution_aggregation() {
         let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
-        let r1 = req_movable_ok(1, 10, 5, 0, 100, 0, 100);
-        let r2 = req_movable_ok(2, 10, 5, 0, 100, 0, 100);
-        let r_fixed = req_fixed_ok(10, 10, 5, 0, 100, 60, 100);
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
+        let r2 = req_movable_ok(2, 10, 0, 5, 0, 100);
+        let r_fixed = req_fixed_ok(10, 10, 60, 5, 60, 100);
 
         b.add_movable_request(r1.clone()).unwrap();
         b.add_movable_request(r2.clone()).unwrap();
         b.add_preassigned(Assignment::new(
             r_fixed,
             SpacePosition::new(60),
-            TimePoint::new(0),
+            TimePoint::new(60), // start at arrival
         ))
         .unwrap();
 
@@ -1816,7 +2161,7 @@ mod tests {
         );
 
         let a_fixed_ref: AnyAssignmentRef<'_, Tm, Cm> =
-            AnyAssignmentRef::from(p.preassigned().values().next().unwrap());
+            AnyAssignmentRef::from(p.preassigned().iter().next().unwrap());
         let a_r1_ref: AnyAssignmentRef<'_, Tm, Cm> = AnyAssignmentRef::from(&a_r1);
 
         let mut map: HashMap<RequestId, AnyAssignmentRef<'_, Tm, Cm>> = HashMap::new();
@@ -1824,8 +2169,6 @@ mod tests {
         map.insert(a_r1_ref.id(), a_r1_ref);
 
         let sol = SolutionRef::from_assignments(map);
-        // Stats are deterministic under unit costs:
-        // r_fixed wait 0, dev 0; r1 wait 0, dev |0 - target(0)| = 0
         assert_eq!(sol.stats().total_waiting_time(), TimeDelta::new(0));
         assert_eq!(
             sol.stats().total_target_position_deviation(),
@@ -1836,7 +2179,7 @@ mod tests {
 
     #[test]
     fn assignment_into_erased_roundtrip() {
-        let r = req_movable_ok(5, 4, 3, 0, 10, 2, 20);
+        let r = req_movable_ok(5, 4, 2, 3, 0, 10);
         let a = asg(r, 7, 1);
         let ae: AnyAssignmentRef<'_, Tm, Cm> = AnyAssignmentRef::from(&a);
         assert_eq!(ae.id(), a.id());
@@ -1854,11 +2197,11 @@ mod tests {
         let r = Request::<Movable, Tm, Cm>::new(
             RequestId::new(7),
             SpaceLength::new(4),
+            TimePoint::new(5),
             TimeDelta::new(3),
             SpacePosition::new(10),
             Cost::new(2), // per time unit
             Cost::new(3), // per space unit
-            TimeInterval::new(TimePoint::new(5), TimePoint::new(50)),
             SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
         )
         .unwrap();
@@ -1881,5 +2224,43 @@ mod tests {
 
         // expected: cost = 2*4 + 3*3 = 8 + 9 = 17
         assert_eq!(sol.stats().total_cost(), Cost::new(17));
+    }
+
+    #[test]
+    fn builder_preassigned_start_before_arrival_rejected() {
+        let mut b = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
+        let r = req_fixed_ok(42, 10, 50, 5, 0, 100); // arrival_time = 50
+        let a = Assignment::new(r, SpacePosition::new(0), TimePoint::new(49)); // starts before arrival
+        assert!(matches!(
+            b.add_preassigned(a),
+            Err(ProblemBuildError::AssignmentBeforeArrivalTime(_))
+        ));
+    }
+
+    #[test]
+    fn problem_build_embeds_stats() {
+        let mut b = ProblemBuilder::<i64, i64>::new(SpaceLength::new(100));
+        let r1 = req_movable_ok(1, 10, 0, 5, 0, 100);
+        let r2 = req_movable_ok(2, 20, 0, 7, 0, 100);
+        let rf = req_fixed_ok(10, 10, 60, 5, 60, 100);
+
+        b.add_movable_request(r1).unwrap();
+        b.add_movable_request(r2).unwrap();
+        b.add_preassigned(Assignment::new(
+            rf,
+            SpacePosition::new(60),
+            TimePoint::new(60),
+        ))
+        .unwrap();
+
+        let p = b.build();
+        let s = p.stats();
+
+        assert_eq!(s.quay_length(), SpaceLength::new(100));
+        assert_eq!(s.movable_count(), 2);
+        assert_eq!(s.p50_request_length().value(), 15); // median of [10,20]
+        assert_eq!(s.p50_processing_time().value(), 6); // median of [5,7]
+        assert!(s.latest_completion_time().value() >= 65); // fixed ends at 60+5
+        assert!(s.rho() >= 0.0 && s.rho() <= 2.0);
     }
 }

@@ -33,19 +33,25 @@ use crate::{
     domain::SpaceTimeRectangle,
 };
 use dock_alloc_core::{
-    domain::{SpaceInterval, SpaceLength, SpacePosition, TimeDelta, TimeInterval, TimePoint},
+    SolverVariable,
     marker::Brand,
+    space::{SpaceInterval, SpaceLength, SpacePosition},
+    time::{TimeDelta, TimeInterval, TimePoint},
 };
-use num_traits::{PrimInt, Signed};
-use std::ops::Bound::{Excluded, Unbounded};
 use std::{
     collections::BTreeMap,
     iter::{Copied, FusedIterator, Peekable},
 };
+use std::{
+    fmt::Debug,
+    ops::Bound::{Excluded, Unbounded},
+};
+use tracing::instrument;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BrandedFreeSlot<'brand, T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     slot: FreeSlot<T>,
     _brand: Brand<'brand>,
@@ -53,7 +59,7 @@ where
 
 impl<'brand, T> BrandedFreeSlot<'brand, T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     #[inline]
     fn new(slot: FreeSlot<T>) -> Self {
@@ -69,9 +75,10 @@ where
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BrandedFreeRegion<'brand, T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     region: FreeRegion<T>,
     _brand: Brand<'brand>,
@@ -79,7 +86,7 @@ where
 
 impl<'brand, T> BrandedFreeRegion<'brand, T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     #[inline]
     fn new(region: FreeRegion<T>) -> Self {
@@ -104,7 +111,7 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BerthOccupancyOverlay<'brand, 'a, T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     Q: QuayRead,
 {
     berth_occupancy: &'a BerthOccupancy<T, Q>,
@@ -116,7 +123,7 @@ where
 
 impl<'brand, 'a, T, Q> SliceView<T> for BerthOccupancyOverlay<'brand, 'a, T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     Q: QuayRead,
 {
     type FreeRunsIter<'s>
@@ -188,14 +195,14 @@ where
 type SpaceIntervalSet = IntervalSet<SpacePosition>;
 
 #[derive(Clone, Debug)]
-struct KeysUnion<'a, T: PrimInt + Signed> {
+struct KeysUnion<'a, T: SolverVariable> {
     free_keys:
         Peekable<Copied<std::collections::btree_map::Keys<'a, TimePoint<T>, SpaceIntervalSet>>>,
     occupied_keys:
         Peekable<Copied<std::collections::btree_map::Keys<'a, TimePoint<T>, SpaceIntervalSet>>>,
 }
 
-impl<'a, T: PrimInt + Signed> KeysUnion<'a, T> {
+impl<'a, T: SolverVariable> KeysUnion<'a, T> {
     #[inline]
     fn new(
         free: &'a BTreeMap<TimePoint<T>, SpaceIntervalSet>,
@@ -208,7 +215,7 @@ impl<'a, T: PrimInt + Signed> KeysUnion<'a, T> {
     }
 }
 
-impl<'a, T: PrimInt + Signed> Iterator for KeysUnion<'a, T> {
+impl<'a, T: SolverVariable> Iterator for KeysUnion<'a, T> {
     type Item = TimePoint<T>;
     fn next(&mut self) -> Option<Self::Item> {
         let free_key = self.free_keys.peek().copied();
@@ -231,11 +238,11 @@ impl<'a, T: PrimInt + Signed> Iterator for KeysUnion<'a, T> {
     }
 }
 
-impl<'a, T: PrimInt + Signed> FusedIterator for KeysUnion<'a, T> {}
+impl<'a, T: SolverVariable> FusedIterator for KeysUnion<'a, T> {}
 
 impl<'brand, 'a, T, Q> BerthOccupancyOverlay<'brand, 'a, T, Q>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
     Q: QuayRead,
 {
     /// Creates a new, empty overlay for a given `BerthOccupancy`.
@@ -258,6 +265,19 @@ where
     #[inline]
     pub fn operations(&self) -> &[Operation<T>] {
         &self.operations
+    }
+
+    #[inline]
+    pub fn clear(&mut self) {
+        self.free_by_time.clear();
+        self.occupied_by_time.clear();
+        self.operations.clear();
+    }
+
+    #[inline]
+    pub fn absorb(&mut self, child: Self) {
+        debug_assert!(std::ptr::eq(self.berth_occupancy, child.berth_occupancy));
+        *self = child;
     }
 
     /// Records an occupied space at a specific time point in the overlay.
@@ -294,6 +314,7 @@ where
     }
 
     /// Marks a spatio-temporal rectangle as occupied in the overlay.
+    #[instrument(level = "debug", skip_all)]
     pub fn occupy(
         &mut self,
         rect: &SpaceTimeRectangle<T>,
@@ -364,6 +385,7 @@ where
     }
 
     /// Marks a spatio-temporal rectangle as free in the overlay.
+    #[instrument(level = "debug", skip_all)]
     pub fn free(
         &mut self,
         rect: &SpaceTimeRectangle<T>,
@@ -461,6 +483,7 @@ where
     }
 
     /// Checks if a given spatio-temporal rectangle is completely free, considering the overlay.
+    #[instrument(level = "debug", skip_all)]
     pub fn is_free(
         &self,
         rect: &SpaceTimeRectangle<T>,
@@ -485,6 +508,7 @@ where
     }
 
     /// Checks if a given spatio-temporal rectangle is occupied, considering the overlay.
+    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn is_occupied(
         &self,
@@ -494,6 +518,7 @@ where
     }
 
     /// Returns an iterator over all `FreeSlot`s, considering the overlay.
+    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn iter_free_slots(
         &'a self,
@@ -510,6 +535,7 @@ where
     }
 
     /// Returns an iterator over all feasible `SpaceTimeRectangle` regions, considering the overlay.
+    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn iter_free_regions(
         &'a self,

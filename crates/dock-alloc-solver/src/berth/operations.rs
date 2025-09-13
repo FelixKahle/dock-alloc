@@ -20,18 +20,18 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use crate::domain::SpaceTimeRectangle;
-use num_traits::{PrimInt, Signed};
+use dock_alloc_core::SolverVariable;
 use std::fmt::Display;
 
 #[repr(transparent)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FreeOperation<T>(SpaceTimeRectangle<T>)
 where
-    T: PrimInt + Signed;
+    T: SolverVariable;
 
 impl<T> FreeOperation<T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     pub fn new(rect: SpaceTimeRectangle<T>) -> Self {
         Self(rect)
@@ -44,7 +44,7 @@ where
 
 impl<T> Display for FreeOperation<T>
 where
-    T: PrimInt + Signed + Display,
+    T: SolverVariable,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "FreeOperation({})", self.0)
@@ -53,7 +53,7 @@ where
 
 impl<T> From<SpaceTimeRectangle<T>> for FreeOperation<T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     fn from(rect: SpaceTimeRectangle<T>) -> Self {
         Self::new(rect)
@@ -64,11 +64,11 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OccupyOperation<T>(SpaceTimeRectangle<T>)
 where
-    T: PrimInt + Signed;
+    T: SolverVariable;
 
 impl<T> OccupyOperation<T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     pub fn new(rect: SpaceTimeRectangle<T>) -> Self {
         Self(rect)
@@ -81,7 +81,7 @@ where
 
 impl<T> Display for OccupyOperation<T>
 where
-    T: PrimInt + Signed + Display,
+    T: SolverVariable,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "OccupyOperation({})", self.0)
@@ -90,7 +90,7 @@ where
 
 impl<T> From<SpaceTimeRectangle<T>> for OccupyOperation<T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     fn from(rect: SpaceTimeRectangle<T>) -> Self {
         Self::new(rect)
@@ -100,7 +100,7 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Operation<T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     Occupy(OccupyOperation<T>),
     Free(FreeOperation<T>),
@@ -108,7 +108,7 @@ where
 
 impl<T> Operation<T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     pub fn rectangle(&self) -> &SpaceTimeRectangle<T> {
         match self {
@@ -120,7 +120,7 @@ where
 
 impl<T> Display for Operation<T>
 where
-    T: PrimInt + Signed + Display,
+    T: SolverVariable,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -132,7 +132,7 @@ where
 
 impl<T> From<OccupyOperation<T>> for Operation<T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     fn from(op: OccupyOperation<T>) -> Self {
         Self::Occupy(op)
@@ -141,7 +141,7 @@ where
 
 impl<T> From<FreeOperation<T>> for Operation<T>
 where
-    T: PrimInt + Signed,
+    T: SolverVariable,
 {
     fn from(op: FreeOperation<T>) -> Self {
         Self::Free(op)

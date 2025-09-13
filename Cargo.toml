@@ -25,4 +25,5 @@ members = [
     "crates/dock-alloc-core",
     "crates/dock-alloc-model",
     "crates/dock-alloc-solver",
+    "crates/dock-alloc-main"
 ]

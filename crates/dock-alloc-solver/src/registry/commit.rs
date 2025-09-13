@@ -20,29 +20,33 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use crate::registry::operations::Operation;
-use num_traits::{PrimInt, Signed};
+use dock_alloc_core::SolverVariable;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LedgerOverlayCommit<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
+    amount_unassigned: usize,
+    amount_assigned: usize,
     operations: Vec<Operation<'a, T, C>>,
 }
 
 impl<'a, T, C> LedgerOverlayCommit<'a, T, C>
 where
-    T: PrimInt + Signed,
-    C: PrimInt + Signed,
+    T: SolverVariable,
+    C: SolverVariable,
 {
-    pub fn new(operations: Vec<Operation<'a, T, C>>) -> Self {
-        Self { operations }
-    }
-
-    pub fn with_capacity(capacity: usize) -> Self {
+    pub fn new(
+        operations: Vec<Operation<'a, T, C>>,
+        amount_unassigned: usize,
+        amount_assigned: usize,
+    ) -> Self {
         Self {
-            operations: Vec::with_capacity(capacity),
+            operations,
+            amount_unassigned,
+            amount_assigned,
         }
     }
 
@@ -52,6 +56,14 @@ where
 
     pub fn is_empty(&self) -> bool {
         self.operations.is_empty()
+    }
+
+    pub fn amount_unassigned(&self) -> usize {
+        self.amount_unassigned
+    }
+
+    pub fn amount_assigned(&self) -> usize {
+        self.amount_assigned
     }
 }
 
