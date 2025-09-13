@@ -1395,6 +1395,14 @@ impl<T: SolverVariable, C: SolverVariable> Problem<T, C> {
     }
 
     #[inline]
+    pub fn quay_interval(&self) -> SpaceInterval {
+        SpaceInterval::new(
+            SpacePosition::zero(),
+            SpacePosition::zero() + self.quay_length,
+        )
+    }
+
+    #[inline]
     pub fn total_requests(&self) -> usize {
         self.movables.len() + self.preassigned.len()
     }

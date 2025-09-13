@@ -564,50 +564,24 @@ where
 
         {
             let mut ov = self.berth.overlay();
-            for op in plan.berth_commit().operations() {
-                match op {
-                    crate::berth::operations::Operation::Occupy(occ) => {
-                        let rect = occ.rectangle();
-                        match ov.is_free(rect) {
-                            Ok(true) => {
-                                ov.occupy(rect).map_err(|e| {
-                                    FeasibleSolverStateApplyError::Berth(
-                                        crate::berth::berthocc::BerthApplyValidationError::Quay(e),
-                                    )
-                                })?;
-                            }
-                            Ok(false) => {
-                                return Err(FeasibleSolverStateApplyError::Berth(
-                                    crate::berth::berthocc::BerthApplyValidationError::NotFree(
-                                        *rect,
-                                    ),
-                                ));
-                            }
-                            Err(e) => {
-                                return Err(FeasibleSolverStateApplyError::Berth(
-                                    crate::berth::berthocc::BerthApplyValidationError::Quay(e),
-                                ));
-                            }
-                        }
-                    }
-                    crate::berth::operations::Operation::Free(fr) => {
-                        ov.free(fr.rectangle()).map_err(|e| {
-                            FeasibleSolverStateApplyError::Berth(
-                                crate::berth::berthocc::BerthApplyValidationError::Quay(e),
-                            )
-                        })?;
-                    }
-                }
-            }
+            ov.apply_validated(plan.berth_commit())
+                .map_err(FeasibleSolverStateApplyError::Berth)?;
         }
 
         self.ledger
             .apply_validated(plan.ledger_commit())
-            .expect("Cannot recover from partial ledger apply");
+            // Print the plan that caused the error for easier debugging
+            .expect("Cannot recover from partial ledger apply. Plan: {plan:?}");
 
+        let berth_commit_str = format!("{}", plan.berth_commit());
+        let msg = format!(
+            "Cannot recover from partial berth apply. Berth commit: {}",
+            berth_commit_str
+        );
         self.berth
             .apply_validated(plan.berth_commit())
-            .expect("Cannot recover from partial berth apply");
+            // Print the plan that caused the error for easier debugging
+            .expect(&msg);
 
         Ok(())
     }
@@ -663,4 +637,131 @@ where
         &mut self,
         problem: &'p Problem<T, C>,
     ) -> Result<SolutionRef<'p, T, C>, Self::SolveError>;
+}
+
+#[cfg(test)]
+mod ledger_commit_tests {
+    use crate::registry::commit::LedgerOverlayCommit;
+    use crate::registry::operations::Operation as LedgerOp; // build ops as needed
+    type T = i64;
+    type C = i64;
+
+    #[test]
+    fn ledger_commit_amounts_round_trip() {
+        let ops: Vec<LedgerOp<'static, T, C>> = Vec::new(); // or real ops if useful
+        let lc = LedgerOverlayCommit::new(ops, 3, 2);
+        assert_eq!(lc.amount_unassigned(), 3);
+        assert_eq!(lc.amount_assigned(), 2);
+        assert!(lc.operations().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod overlay_tests {
+    use super::*;
+    use crate::berth::{
+        berthocc::{BerthApplyValidationError, BerthOccupancy},
+        commit::BerthOverlayCommit,
+        operations::{
+            FreeOperation,   // <-- import
+            OccupyOperation, // <-- import
+            Operation as BerthOp,
+        },
+        quay::BTreeMapQuay,
+    };
+    use dock_alloc_core::{
+        space::{SpaceInterval, SpacePosition},
+        time::{TimeInterval, TimePoint},
+    };
+
+    type T = i64;
+    type Q = BTreeMapQuay;
+
+    fn rect(s0: usize, s1: usize, t0: i64, t1: i64) -> SpaceTimeRectangle<T> {
+        SpaceTimeRectangle::new(
+            SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
+            TimeInterval::new(TimePoint::new(t0), TimePoint::new(t1)),
+        )
+    }
+
+    fn empty_berth() -> BerthOccupancy<T, Q> {
+        BerthOccupancy::<T, Q>::new(1000.into())
+    }
+
+    // small helpers so test code stays readable
+    fn occ(r: SpaceTimeRectangle<T>) -> BerthOp<T> {
+        BerthOp::Occupy(OccupyOperation::new(r))
+    }
+    fn fre(r: SpaceTimeRectangle<T>) -> BerthOp<T> {
+        BerthOp::Free(FreeOperation::new(r))
+    }
+
+    #[test]
+    fn overlay_occupy_then_free_no_leak_past_end() {
+        let base = empty_berth();
+        let mut ov = base.overlay();
+
+        let r = rect(10, 20, 100, 200);
+
+        ov.apply_validated(&BerthOverlayCommit::new(vec![occ(r)]))
+            .expect("first occupy");
+
+        assert!(ov.is_occupied(&rect(10, 20, 150, 160)).unwrap());
+        assert!(
+            !ov.is_occupied(&rect(10, 20, 200, 201)).unwrap(),
+            "no leak at end"
+        );
+
+        ov.apply_validated(&BerthOverlayCommit::new(vec![fre(r)]))
+            .expect("free applies");
+
+        assert!(!ov.is_occupied(&rect(10, 20, 150, 151)).unwrap());
+        assert!(!ov.is_occupied(&rect(10, 20, 199, 200)).unwrap());
+        assert!(!ov.is_occupied(&rect(10, 20, 200, 201)).unwrap());
+    }
+
+    #[test]
+    fn overlay_records_only_successes_and_stops_on_error() {
+        let base = empty_berth();
+        let mut ov = base.overlay();
+
+        let seed = rect(0, 100, 1_000, 1_100);
+        ov.apply_validated(&BerthOverlayCommit::new(vec![occ(seed)]))
+            .unwrap();
+
+        let bad = rect(0, 100, 1_050, 1_070); // overlaps seed
+        let good = rect(100, 200, 1_200, 1_300);
+
+        let commit = BerthOverlayCommit::new(vec![occ(bad), occ(good)]);
+        let e = ov.apply_validated(&commit).unwrap_err();
+        match e {
+            BerthApplyValidationError::NotFree(_) => {}
+            _ => panic!("unexpected error: {e:?}"),
+        }
+
+        assert!(
+            !ov.is_occupied(&good).unwrap(),
+            "no partial apply after error"
+        );
+    }
+
+    #[test]
+    fn overlay_free_then_occupy_swap_is_ok_in_one_commit() {
+        let base = empty_berth();
+        let mut ov = base.overlay();
+
+        let r1 = rect(0, 100, 10_000, 10_500);
+        let r2 = rect(100, 200, 10_000, 10_500);
+
+        ov.apply_validated(&BerthOverlayCommit::new(vec![occ(r1)]))
+            .unwrap();
+        assert!(ov.is_occupied(&r1).unwrap());
+        assert!(!ov.is_occupied(&r2).unwrap());
+
+        let swap = BerthOverlayCommit::new(vec![fre(r1), occ(r2)]);
+        ov.apply_validated(&swap).expect("swap commit");
+
+        assert!(!ov.is_occupied(&r1).unwrap(), "R1 freed");
+        assert!(ov.is_occupied(&r2).unwrap(), "R2 now occupied");
+    }
 }

@@ -19,60 +19,48 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use std::fmt::Display;
-
-use crate::berth::operations::Operation;
+use crate::{berth::quay::QuayRead, meta::operator::Operator};
 use dock_alloc_core::SolverVariable;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BerthOverlayCommit<T>
-where
-    T: SolverVariable,
-{
-    operations: Vec<Operation<T>>,
+pub struct NoOpOperator<T, C, Q> {
+    _phantom: core::marker::PhantomData<(T, C, Q)>,
 }
 
-impl<T> BerthOverlayCommit<T>
-where
-    T: SolverVariable,
-{
-    pub fn new(operations: Vec<Operation<T>>) -> Self {
-        Self { operations }
-    }
-
-    pub fn with_capacity(capacity: usize) -> Self {
+impl<T, C, Q> Default for NoOpOperator<T, C, Q> {
+    fn default() -> Self {
         Self {
-            operations: Vec::with_capacity(capacity),
+            _phantom: core::marker::PhantomData,
         }
     }
-
-    pub fn operations(&self) -> &[Operation<T>] {
-        &self.operations
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.operations.is_empty()
-    }
 }
 
-impl<T> Display for BerthOverlayCommit<T>
+impl<T, C, Q> Operator for NoOpOperator<T, C, Q>
 where
     T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
+    Q: QuayRead + Send + Sync,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let ops_string = self
-            .operations
-            .iter()
-            .map(|op| format!("{}", op))
-            .collect::<Vec<_>>()
-            .join(", ");
-        write!(f, "BerthOverlayCommit[{}]", ops_string)
+    type Time = T;
+    type Cost = C;
+    type Quay = Q;
+
+    fn propose<'p, 'al, 'bo>(
+        &self,
+        _: usize,
+        _: &mut rand_chacha::ChaCha8Rng,
+        ctx: crate::framework::planning::PlanningContext<
+            'p,
+            'al,
+            'bo,
+            Self::Time,
+            Self::Cost,
+            Self::Quay,
+        >,
+    ) -> crate::framework::planning::Plan<'p, Self::Time, Self::Cost> {
+        ctx.with_builder(|builder| builder.build())
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use static_assertions::assert_impl_all;
-
-    assert_impl_all!(crate::berth::commit::BerthOverlayCommit<i64>: Send, Sync);
+    fn name(&self) -> &'static str {
+        "NoOpOperator"
+    }
 }

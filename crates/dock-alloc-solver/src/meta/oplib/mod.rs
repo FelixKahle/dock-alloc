@@ -19,28 +19,17 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-pub mod ec;
-pub mod grbok;
-pub mod grl;
-pub mod mrs;
-pub mod mtef;
-pub mod mtlf;
-pub mod rdr;
-pub mod rl;
-pub mod rs;
-pub mod sn;
-mod util;
+pub mod destruct;
+pub mod noop;
 
 pub mod prelude {
-    pub use super::{
-        ec::*, grbok::*, grl::*, mrs::*, mtef::*, mtlf::*, rdr::*, rl::*, rs::*, sn::*,
-    };
+    pub use super::{destruct::*, noop::*};
     use crate::meta::operator::Operator;
     use dock_alloc_model::model::Problem;
     use num_traits::FromPrimitive;
 
     pub fn op_list<T, C, Q>(
-        problem: &Problem<T, C>,
+        _: &Problem<T, C>,
     ) -> Vec<Box<dyn Operator<Time = T, Cost = C, Quay = Q> + Send + Sync + 'static>>
     where
         T: dock_alloc_core::SolverVariable + FromPrimitive + 'static,
@@ -51,17 +40,8 @@ pub mod prelude {
         Q: crate::berth::quay::QuayRead + Send + Sync + 'static,
     {
         vec![
-            Box::new(RandomSwapOperator::<T, C, Q>::from(problem)),
-            Box::new(RandomDestroyRepairOperator::<T, C, Q>::from(problem)),
-            Box::new(RelocateLocal::<T, C, Q>::from(problem)),
-            Box::new(MoveToLatestFeasibleOperator::<T, C, Q>::from(problem)),
-            Box::new(MoveToEarliestFeasibleOperator::<T, C, Q>::from(problem)),
-            Box::new(SpaceNudgeLeftOperator::<T, C, Q>::from(problem)),
-            Box::new(SpaceNudgeRightOperator::<T, C, Q>::from(problem)),
-            Box::new(GlobalRelocateRandomOperator::<T, C, Q>::from(problem)),
-            Box::new(GreedyRelocateBestOfKOperator::<T, C, Q>::from(problem)),
-            Box::new(EjectionChain2Operator::<T, C, Q>::from(problem)),
-            Box::new(MultiRelocateShakerOperator::<T, C, Q>::from(problem)),
+            Box::new(NoOpOperator::<T, C, Q>::default()),
+            Box::new(DestructOperator::<T, C, Q>::default()),
         ]
     }
 }
