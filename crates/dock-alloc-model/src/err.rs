@@ -351,6 +351,7 @@ where
     T: SolverVariable,
 {
     AssignmentBeforeArrivalTime(AssignmentBeforeArrivalTimeError<T>),
+    AssignmentOutsideSpaceWindow(AssignmentOutsideSpaceWindowError),
     Overlap(AssignmentOverlapError<T>),
 }
 
@@ -361,6 +362,7 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SolutionValidationError::AssignmentBeforeArrivalTime(e) => write!(f, "{e}"),
+            SolutionValidationError::AssignmentOutsideSpaceWindow(e) => write!(f, "{e}"),
             SolutionValidationError::Overlap(e) => write!(f, "{e}"),
         }
     }

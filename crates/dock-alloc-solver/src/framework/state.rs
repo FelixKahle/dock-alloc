@@ -31,7 +31,7 @@ use crate::{
 use dock_alloc_core::{
     SolverVariable,
     space::{SpaceInterval, SpacePosition},
-    time::{TimeInterval, TimePoint},
+    time::TimeInterval,
 };
 use dock_alloc_model::prelude::*;
 use std::fmt::{Debug, Display};
@@ -221,6 +221,11 @@ where
                 let rect = SpaceTimeRectangle::new(si, ti);
                 FeasibleStateError::Overlap(SolverStateOverlapError::new(a, b, rect))
             }
+            SolutionValidationError::AssignmentOutsideSpaceWindow(
+                assignment_outside_space_window_error,
+            ) => FeasibleStateError::AssignmentOutsideSpaceWindow(
+                assignment_outside_space_window_error,
+            ),
         }
     }
 }
@@ -285,43 +290,6 @@ impl<T: SolverVariable + Display + Debug> std::fmt::Display for FeasibleStateErr
 
 impl<T: SolverVariable + Display + Debug> std::error::Error for FeasibleStateError<T> {}
 
-#[derive(Clone, Debug)]
-struct Item<T: SolverVariable> {
-    req_id: RequestId,
-    rect: SpaceTimeRectangle<T>,
-    arrival_time: TimePoint<T>,
-    feasible_space_window: SpaceInterval,
-}
-
-impl<T: SolverVariable> Item<T> {
-    fn new(
-        req_id: RequestId,
-        rect: SpaceTimeRectangle<T>,
-        arrival_time: TimePoint<T>,
-        feasible_space_window: SpaceInterval,
-    ) -> Self {
-        Self {
-            req_id,
-            rect,
-            arrival_time,
-            feasible_space_window,
-        }
-    }
-}
-
-fn rect_for_assignment<K, T, C>(a: AssignmentRef<'_, K, T, C>) -> SpaceTimeRectangle<T>
-where
-    K: Kind,
-    T: SolverVariable,
-    C: SolverVariable,
-{
-    let t0 = a.start_time();
-    let t1 = t0 + a.request().processing_duration();
-    let s0 = a.start_position();
-    let s1 = SpacePosition::new(s0.value() + a.request().length().value());
-    SpaceTimeRectangle::new(SpaceInterval::new(s0, s1), TimeInterval::new(t0, t1))
-}
-
 impl<'p, T, C, Q> FeasibleSolverState<'p, T, C, Q>
 where
     T: SolverVariable,
@@ -334,11 +302,7 @@ where
         ledger: AssignmentLedger<'p, T, C>,
         berth: BerthOccupancy<T, Q>,
     ) -> Result<Self, FeasibleStateError<T>> {
-        Self::validate_state(&SolverState {
-            problem,
-            ledger: ledger.clone(),
-            berth: berth.clone(),
-        })?;
+        validate_ledger_solution(problem, &ledger)?;
 
         Ok(Self {
             problem,
@@ -360,10 +324,6 @@ where
     #[inline]
     pub fn berth(&self) -> &BerthOccupancy<T, Q> {
         &self.berth
-    }
-
-    fn validate_state(state: &SolverState<'p, T, C, Q>) -> Result<(), FeasibleStateError<T>> {
-        validate(state.problem, &state.ledger, &state.berth)
     }
 }
 
@@ -405,29 +365,21 @@ impl std::fmt::Display for MismatchedOperationsAmountsError {
 
 impl std::error::Error for MismatchedOperationsAmountsError {}
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum FeasibleSolverStateApplyError<T: SolverVariable> {
     Quay(QuaySpaceIntervalOutOfBoundsError),
     Ledger(LedgerApplyValidationError<T>),
     MismatchedAmounts(MismatchedOperationsAmountsError),
-}
-
-impl<T: SolverVariable + Clone> Clone for FeasibleSolverStateApplyError<T> {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Quay(arg0) => Self::Quay(arg0.clone()),
-            Self::Ledger(arg0) => Self::Ledger(arg0.clone()),
-            Self::MismatchedAmounts(arg0) => Self::MismatchedAmounts(arg0.clone()),
-        }
-    }
+    Infeasible(FeasibleStateError<T>),
 }
 
 impl<T: SolverVariable + Display + Debug> std::fmt::Display for FeasibleSolverStateApplyError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FeasibleSolverStateApplyError::Quay(e) => write!(f, "Quay error: {}", e),
-            FeasibleSolverStateApplyError::Ledger(e) => write!(f, "Ledger error: {}", e),
-            FeasibleSolverStateApplyError::MismatchedAmounts(e) => write!(f, "{}", e),
+            FeasibleSolverStateApplyError::Quay(e) => write!(f, "Quay error: {e}"),
+            FeasibleSolverStateApplyError::Ledger(e) => write!(f, "Ledger error: {e}"),
+            FeasibleSolverStateApplyError::MismatchedAmounts(e) => write!(f, "{e}"),
+            FeasibleSolverStateApplyError::Infeasible(e) => write!(f, "{e}"),
         }
     }
 }
@@ -466,28 +418,24 @@ where
             ));
         }
 
-        {
-            let mut tmp_ledger = self.ledger.clone();
-            tmp_ledger
-                .apply_validated(plan.ledger_commit())
-                .map_err(FeasibleSolverStateApplyError::Ledger)?;
-        }
+        let mut tmp_ledger = self.ledger.clone();
+        tmp_ledger
+            .apply_validated(plan.ledger_commit())
+            .map_err(FeasibleSolverStateApplyError::Ledger)?;
 
+        // single call does 1–5 (no berth):
+        validate_ledger_solution(self.problem, &tmp_ledger)
+            .map_err(FeasibleSolverStateApplyError::Infeasible)?;
+
+        // commit for real
         self.ledger
             .apply_validated(plan.ledger_commit())
-            .expect("Cannot recover from partial ledger apply. This should not happen if validation passed.");
-
-        // The berth apply is assumed to be valid if the ledger apply was valid.
-        // The berth only carries occupancy information, and does not a transactional
-        // nature like the ledger.
-        // Something is either free or occupied.
-        self.berth.apply(plan.berth_commit())?;
+            .expect("ledger validation already done, so this should not fail. It is unrecoverable if it does.");
+        self.berth
+            .apply(plan.berth_commit())
+            .map_err(FeasibleSolverStateApplyError::Quay)?;
 
         Ok(())
-    }
-
-    pub fn validate(&self) -> Result<(), FeasibleStateError<T>> {
-        validate(self.problem, &self.ledger, &self.berth)
     }
 }
 
@@ -543,137 +491,132 @@ where
     ) -> Result<SolutionRef<'p, T, C>, Self::SolveError>;
 }
 
-fn validate<'p, T, C, Q>(
+fn validate_ledger_solution<'p, T, C>(
     problem: &'p Problem<T, C>,
     ledger: &AssignmentLedger<'p, T, C>,
-    berth: &BerthOccupancy<T, Q>,
 ) -> Result<(), FeasibleStateError<T>>
 where
     T: SolverVariable,
     C: SolverVariable,
-    Q: QuayRead,
 {
-    let committed = ledger.committed();
-    let mut missing: Vec<RequestId> = Vec::new();
-    for mid in problem.movables().iter().map(|r| r.typed_id()) {
-        if !committed.contains_key(&mid) {
-            missing.push(RequestId::from(mid));
+    {
+        let committed = ledger.committed();
+        let mut missing = Vec::new();
+        for r in problem.movables().iter() {
+            if !committed.contains_key(&r.typed_id()) {
+                missing.push(r.id());
+            }
         }
-    }
-    if !missing.is_empty() {
-        return Err(FeasibleStateError::UnassignedRequests(missing));
+        if !missing.is_empty() {
+            return Err(FeasibleStateError::UnassignedRequests(missing));
+        }
     }
 
     let quay_len = problem.quay_length();
-    let mut items: Vec<Item<T>> = Vec::new();
+    let quay_bounds = problem.quay_interval();
+
+    #[derive(Clone)]
+    struct Rect<Tm: SolverVariable> {
+        id: RequestId,
+        t: TimeInterval<Tm>,
+        s: SpaceInterval,
+    }
+    let mut rects: Vec<Rect<T>> = Vec::new();
 
     for fa in problem.iter_fixed_assignments() {
-        let aref = AssignmentRef::new(fa.request(), fa.start_position(), fa.start_time());
-        items.push(Item::new(
-            fa.id(),
-            rect_for_assignment(aref),
-            fa.request().arrival_time(),
-            fa.request().feasible_space_window(),
-        ));
+        let rq = fa.request();
+
+        let t0 = fa.start_time();
+        let t1 = t0 + rq.processing_duration();
+        let s0 = fa.start_position();
+        let s1 = SpacePosition::new(s0.value() + rq.length().value());
+        let s_iv = SpaceInterval::new(s0, s1);
+
+        if t0 < rq.arrival_time() {
+            return Err(FeasibleStateError::AssignmentBeforeArrivalTime(
+                AssignmentBeforeArrivalTimeError::new(rq.id(), rq.arrival_time(), t0),
+            ));
+        }
+
+        let window = rq.feasible_space_window();
+        if !window.contains_interval(&s_iv) {
+            return Err(FeasibleStateError::AssignmentOutsideSpaceWindow(
+                AssignmentOutsideSpaceWindowError::new(rq.id(), window, s_iv),
+            ));
+        }
+
+        if !quay_bounds.contains_interval(&s_iv) {
+            return Err(FeasibleStateError::AssignmentExceedsQuay(
+                AssignmentExceedsQuayError::new(rq.id(), quay_len, s_iv),
+            ));
+        }
+
+        rects.push(Rect {
+            id: rq.id(),
+            t: TimeInterval::new(t0, t1),
+            s: s_iv,
+        });
     }
 
     for ma in ledger.iter_movable_assignments() {
-        let aref = AssignmentRef::new(ma.request(), ma.start_position(), ma.start_time());
-        items.push(Item::new(
-            ma.id(),
-            rect_for_assignment(aref),
-            ma.request().arrival_time(),
-            ma.request().feasible_space_window(),
-        ));
-    }
+        let rq = ma.request();
 
-    for it in &items {
-        let (sint, tint) = it.rect.into_inner();
+        let t0 = ma.start_time();
+        let t1 = t0 + rq.processing_duration();
+        let s0 = ma.start_position();
+        let s1 = SpacePosition::new(s0.value() + rq.length().value());
+        let s_iv = SpaceInterval::new(s0, s1);
 
-        if tint.start() < it.arrival_time {
+        if t0 < rq.arrival_time() {
             return Err(FeasibleStateError::AssignmentBeforeArrivalTime(
-                AssignmentBeforeArrivalTimeError::new(it.req_id, it.arrival_time, tint.start()),
+                AssignmentBeforeArrivalTimeError::new(rq.id(), rq.arrival_time(), t0),
             ));
         }
 
-        if !it.feasible_space_window.contains_interval(&sint) {
+        let window = rq.feasible_space_window();
+        if !window.contains_interval(&s_iv) {
             return Err(FeasibleStateError::AssignmentOutsideSpaceWindow(
-                AssignmentOutsideSpaceWindowError::new(it.req_id, it.feasible_space_window, sint),
+                AssignmentOutsideSpaceWindowError::new(rq.id(), window, s_iv),
             ));
         }
 
-        let quay_bounds = berth.quay_space_interval();
-        if !quay_bounds.contains_interval(&sint) {
+        if !quay_bounds.contains_interval(&s_iv) {
             return Err(FeasibleStateError::AssignmentExceedsQuay(
-                AssignmentExceedsQuayError::new(it.req_id, quay_len, sint),
+                AssignmentExceedsQuayError::new(rq.id(), quay_len, s_iv),
             ));
         }
 
-        match berth.is_occupied(&it.rect) {
-            Ok(true) => {} // good
-            Ok(false) => {
-                return Err(FeasibleStateError::AssignmentOutsideSpaceWindow(
-                    AssignmentOutsideSpaceWindowError::new(
-                        it.req_id,
-                        it.feasible_space_window,
-                        sint,
-                    ),
-                ));
-            }
-            Err(_) => {
-                return Err(FeasibleStateError::AssignmentExceedsQuay(
-                    AssignmentExceedsQuayError::new(it.req_id, quay_len, sint),
-                ));
-            }
-        }
+        rects.push(Rect {
+            id: rq.id(),
+            t: TimeInterval::new(t0, t1),
+            s: s_iv,
+        });
     }
 
-    let mut order: Vec<usize> = (0..items.len()).collect();
-    order.sort_by_key(|&i| items[i].rect.time().start().value());
+    rects.sort_by_key(|r| r.t.start().value());
+    let mut active: Vec<Rect<T>> = Vec::new();
 
-    let mut active: Vec<usize> = Vec::new();
-    let sort_active_by_end = |v: &mut Vec<usize>| {
-        v.sort_by(|&i, &j| {
-            items[i]
-                .rect
-                .time()
-                .end()
-                .value()
-                .cmp(&items[j].rect.time().end().value())
-        });
-    };
+    for cur in rects {
+        active.retain(|x| x.t.end() > cur.t.start());
 
-    for &i in &order {
-        let t_start_i = items[i].rect.time().start();
-
-        sort_active_by_end(&mut active);
-        let mut keep_from = 0;
-        for (k, &idx) in active.iter().enumerate() {
-            if items[idx].rect.time().end() > t_start_i {
-                keep_from = k;
-                break;
-            } else {
-                keep_from = k + 1;
-            }
-        }
-        if keep_from > 0 {
-            active.drain(0..keep_from);
-        }
-
-        for &j in &active {
-            if let Some(inter) = items[i].rect.intersection(&items[j].rect) {
-                let (ra, rb) = if items[i].req_id.value() <= items[j].req_id.value() {
-                    (items[i].req_id, items[j].req_id)
+        for other in &active {
+            if other.t.intersects(&cur.t) && other.s.intersects(&cur.s) {
+                let ti = other.t.intersection(&cur.t).unwrap();
+                let si = other.s.intersection(&cur.s).unwrap();
+                let (a, b) = if other.id.value() <= cur.id.value() {
+                    (other.id, cur.id)
                 } else {
-                    (items[j].req_id, items[i].req_id)
+                    (cur.id, other.id)
                 };
                 return Err(FeasibleStateError::Overlap(SolverStateOverlapError::new(
-                    ra, rb, inter,
+                    a,
+                    b,
+                    SpaceTimeRectangle::new(si, ti),
                 )));
             }
         }
 
-        active.push(i);
+        active.push(cur);
     }
 
     Ok(())
@@ -682,7 +625,7 @@ where
 #[cfg(test)]
 mod ledger_commit_tests {
     use crate::registry::commit::LedgerOverlayCommit;
-    use crate::registry::operations::Operation as LedgerOp; // build ops as needed
+    use crate::registry::operations::Operation as LedgerOp;
     type T = i64;
     type C = i64;
 
@@ -693,5 +636,217 @@ mod ledger_commit_tests {
         assert_eq!(lc.amount_unassigned(), 3);
         assert_eq!(lc.amount_assigned(), 2);
         assert!(lc.operations().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod validate_tests {
+    use super::*;
+    use dock_alloc_core::{
+        cost::Cost,
+        space::{SpaceInterval, SpaceLength, SpacePosition},
+        time::{TimeDelta, TimePoint},
+    };
+
+    type Tm = i64;
+    type Cm = i64;
+
+    fn req_movable(
+        id: u64,
+        len: usize,
+        arrival: i64,
+        proc_t: i64,
+        sw_start: usize,
+        sw_end: usize,
+    ) -> Request<Movable, Tm, Cm> {
+        Request::<Movable, _, _>::new(
+            RequestId::new(id),
+            SpaceLength::new(len),
+            TimePoint::new(arrival),
+            TimeDelta::new(proc_t),
+            SpacePosition::new(sw_start), // preferred start (not validated here)
+            Cost::new(1),
+            Cost::new(1),
+            SpaceInterval::new(SpacePosition::new(sw_start), SpacePosition::new(sw_end)),
+        )
+        .expect("valid movable request")
+    }
+
+    #[test]
+    fn validate_ok_non_overlapping() {
+        // quay: [0, 100)
+        let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
+        // full-space windows
+        let r1 = req_movable(1, 10, 0, 5, 0, 100);
+        let r2 = req_movable(2, 10, 0, 5, 0, 100);
+        b.add_movable_request(r1.clone()).unwrap();
+        b.add_movable_request(r2.clone()).unwrap();
+
+        let problem = b.build();
+        let mut ledger = AssignmentLedger::from(&problem);
+
+        // r1 at t=0, s=[0,10)
+        let req1 = problem
+            .get_movable(MovableRequestId::from(r1.id()))
+            .unwrap();
+        ledger
+            .commit_assignment(req1, TimePoint::new(0), SpacePosition::new(0))
+            .unwrap();
+
+        // r2 at t=0, s=[20,30) — same time, disjoint space ⇒ OK
+        let req2 = problem
+            .get_movable(MovableRequestId::from(r2.id()))
+            .unwrap();
+        ledger
+            .commit_assignment(req2, TimePoint::new(0), SpacePosition::new(20))
+            .unwrap();
+
+        assert!(validate_ledger_solution(&problem, &ledger).is_ok());
+    }
+
+    #[test]
+    fn validate_unassigned_err() {
+        let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(50));
+        let r1 = req_movable(1, 10, 0, 5, 0, 50);
+        let r2 = req_movable(2, 10, 0, 5, 0, 50);
+        b.add_movable_request(r1.clone()).unwrap();
+        b.add_movable_request(r2.clone()).unwrap();
+        let problem = b.build();
+
+        let mut ledger = AssignmentLedger::from(&problem);
+        let req1 = problem
+            .get_movable(MovableRequestId::from(r1.id()))
+            .unwrap();
+        ledger
+            .commit_assignment(req1, TimePoint::new(0), SpacePosition::new(0))
+            .unwrap();
+        // r2 left unassigned
+
+        let err = validate_ledger_solution(&problem, &ledger).unwrap_err();
+        match err {
+            FeasibleStateError::UnassignedRequests(v) => {
+                assert_eq!(v, vec![r2.id()]);
+            }
+            _ => panic!("expected UnassignedRequests, got {err}"),
+        }
+    }
+
+    #[test]
+    fn validate_exceeds_quay_err() {
+        // quay length 30
+        let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(30));
+        let r1 = req_movable(1, 15, 0, 5, 0, 30);
+        b.add_movable_request(r1.clone()).unwrap();
+        let problem = b.build();
+
+        let mut ledger = AssignmentLedger::from(&problem);
+        // place starting at s=20 ⇒ [20,35) spills beyond quay=30
+        let req1 = problem
+            .get_movable(MovableRequestId::from(r1.id()))
+            .unwrap();
+        ledger
+            .commit_assignment(req1, TimePoint::new(0), SpacePosition::new(20))
+            .unwrap();
+
+        let err = validate_ledger_solution(&problem, &ledger).unwrap_err();
+        matches!(err, FeasibleStateError::AssignmentExceedsQuay(_));
+    }
+
+    #[test]
+    fn validate_before_arrival_err() {
+        let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
+        // arrival at t=10
+        let r1 = req_movable(1, 10, 10, 5, 0, 100);
+        b.add_movable_request(r1.clone()).unwrap();
+        let problem = b.build();
+
+        let mut ledger = AssignmentLedger::from(&problem);
+        // start earlier than arrival (t=5)
+        let req1 = problem
+            .get_movable(MovableRequestId::from(r1.id()))
+            .unwrap();
+        ledger
+            .commit_assignment(req1, TimePoint::new(5), SpacePosition::new(0))
+            .unwrap();
+
+        let err = validate_ledger_solution(&problem, &ledger).unwrap_err();
+        matches!(err, FeasibleStateError::AssignmentBeforeArrivalTime(_));
+    }
+
+    #[test]
+    fn validate_outside_space_window_movable_err() {
+        let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
+        // feasible window [50,80)
+        let r1 = req_movable(1, 10, 0, 5, 50, 80);
+        b.add_movable_request(r1.clone()).unwrap();
+        let problem = b.build();
+
+        let mut ledger = AssignmentLedger::from(&problem);
+        // assign at s=[0,10) ⇒ outside feasible window
+        let req1 = problem
+            .get_movable(MovableRequestId::from(r1.id()))
+            .unwrap();
+        ledger
+            .commit_assignment(req1, TimePoint::new(0), SpacePosition::new(0))
+            .unwrap();
+
+        let err = validate_ledger_solution(&problem, &ledger).unwrap_err();
+        matches!(err, FeasibleStateError::AssignmentOutsideSpaceWindow(_));
+    }
+
+    #[test]
+    fn validate_overlap_err() {
+        let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
+        let r1 = req_movable(1, 10, 0, 5, 0, 100);
+        let r2 = req_movable(2, 10, 0, 5, 0, 100);
+        b.add_movable_request(r1.clone()).unwrap();
+        b.add_movable_request(r2.clone()).unwrap();
+        let problem = b.build();
+
+        let mut ledger = AssignmentLedger::from(&problem);
+        // both at t=0..5; spaces [0,10) and [5,15) ⇒ overlap
+        let m1 = problem
+            .get_movable(MovableRequestId::from(r1.id()))
+            .unwrap();
+        let m2 = problem
+            .get_movable(MovableRequestId::from(r2.id()))
+            .unwrap();
+        ledger
+            .commit_assignment(m1, TimePoint::new(0), SpacePosition::new(0))
+            .unwrap();
+        ledger
+            .commit_assignment(m2, TimePoint::new(0), SpacePosition::new(5))
+            .unwrap();
+
+        let err = validate_ledger_solution(&problem, &ledger).unwrap_err();
+        matches!(err, FeasibleStateError::Overlap(_));
+    }
+
+    #[test]
+    fn validate_touch_in_time_no_overlap_ok() {
+        // Touching in time (end==start) is allowed for half-open intervals
+        let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(100));
+        let r1 = req_movable(1, 10, 0, 5, 0, 100);
+        let r2 = req_movable(2, 10, 0, 5, 0, 100);
+        b.add_movable_request(r1.clone()).unwrap();
+        b.add_movable_request(r2.clone()).unwrap();
+        let problem = b.build();
+
+        let mut ledger = AssignmentLedger::from(&problem);
+        let m1 = problem
+            .get_movable(MovableRequestId::from(r1.id()))
+            .unwrap();
+        let m2 = problem
+            .get_movable(MovableRequestId::from(r2.id()))
+            .unwrap();
+        ledger
+            .commit_assignment(m1, TimePoint::new(0), SpacePosition::new(0))
+            .unwrap();
+        // second starts exactly when first ends (t=5), same space ⇒ OK
+        ledger
+            .commit_assignment(m2, TimePoint::new(5), SpacePosition::new(0))
+            .unwrap();
+
+        assert!(validate_ledger_solution(&problem, &ledger).is_ok());
     }
 }

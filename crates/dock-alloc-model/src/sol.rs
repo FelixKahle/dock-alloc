@@ -21,7 +21,10 @@
 
 use crate::{
     dec::{AnyAssignment, AnyAssignmentRef},
-    err::{AssignmentBeforeArrivalTimeError, AssignmentOverlapError, SolutionValidationError},
+    err::{
+        AssignmentBeforeArrivalTimeError, AssignmentOutsideSpaceWindowError,
+        AssignmentOverlapError, SolutionValidationError,
+    },
     id::RequestId,
 };
 use dock_alloc_core::{
@@ -296,6 +299,14 @@ where
             let s0 = a.start_position();
             let s1 = SpacePosition::new(s0.value() + r.length().value());
 
+            let assigned = SpaceInterval::new(s0, s1);
+            let window = r.feasible_space_window();
+            if !window.contains_interval(&assigned) {
+                return Err(SolutionValidationError::AssignmentOutsideSpaceWindow(
+                    AssignmentOutsideSpaceWindowError::new(id, window, assigned),
+                ));
+            }
+
             rects.push(Rect {
                 id,
                 t: TimeInterval::new(t0, t1),
@@ -526,5 +537,19 @@ mod tests {
 
         let sol = SolutionRef::from_assignments(m);
         assert!(sol.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_err_outside_space_window() {
+        let r = req_movable_ok(1, 4, 0, 3, /*window*/ 50, 100, /*target*/ 10);
+        let a = Assignment::new(r, SpacePosition::new(10), TimePoint::new(0)); // band [10,14) not in [50,100)
+        let mut m = HashMap::new();
+        m.insert(a.id(), any_ref(&a));
+        let sol = SolutionRef::from_assignments(m);
+        let err = sol.validate().unwrap_err();
+        assert!(matches!(
+            err,
+            SolutionValidationError::AssignmentOutsideSpaceWindow(_)
+        ));
     }
 }
