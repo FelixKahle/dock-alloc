@@ -50,6 +50,8 @@ fn main() {
     let mut greedy: GreedySolver<i64, i64, BTreeMapQuay> = GreedySolver::new();
     let greedy_solution = greedy.solve(&problem).unwrap();
 
+    greedy_solution.validate().unwrap();
+
     let greedy: GreedySolver<i64, i64, BTreeMapQuay> = GreedySolver::new();
     let operators = oplib::prelude::op_list::<i64, i64, BTreeMapQuay>(&problem);
     let mut meta: MetaEngine<i64, i64, BTreeMapQuay, GreedySolver<i64, i64, BTreeMapQuay>> =
@@ -57,7 +59,6 @@ fn main() {
     let meta_solution = meta.solve(&problem).unwrap();
 
     // Make sure the solutions are valid
-    greedy_solution.validate().unwrap();
     meta_solution.validate().unwrap();
 
     println!();

@@ -33,11 +33,10 @@ use crate::{
 use dock_alloc_core::{SolverVariable, cost::Cost};
 use dock_alloc_model::prelude::*;
 use num_traits::Zero;
-use rand::{SeedableRng, rngs::StdRng};
+use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
 use std::{
-    cell::RefCell,
     fmt::{Debug, Display},
     time::{Duration, Instant},
 };
@@ -164,12 +163,6 @@ where
     operator_records: Vec<OperatorRecord<T, C, Q>>,
     construction_solver: S,
     proposals_made: u64,
-}
-
-thread_local! {
-    static THREAD_RNG: RefCell<StdRng> = RefCell::new(StdRng::seed_from_u64(
-        0x9E37_79B1_85EB_CA87u64 ^ (rayon::current_thread_index().unwrap_or(0) as u64)
-    ));
 }
 
 #[derive(Debug, Clone, PartialEq)]
