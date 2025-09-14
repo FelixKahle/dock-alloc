@@ -611,6 +611,7 @@ where
         .min()
     }
 
+    #[inline]
     pub fn into_commit(self) -> BerthOverlayCommit<T> {
         BerthOverlayCommit::new(self.operations)
     }

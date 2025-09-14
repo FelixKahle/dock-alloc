@@ -19,13 +19,29 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+pub mod bandrepack;
+pub mod blockshift;
+pub mod cascaderelocate;
+pub mod crossinsert;
 pub mod destruct;
+pub mod exchangetime;
+pub mod latepenalty;
+pub mod neighborhoodruinrecreate;
+pub mod pairswap;
 pub mod pull;
+pub mod push;
 pub mod relocate;
+pub mod spaceshift;
+pub mod swap;
+pub mod windowtighten;
 
 pub mod prelude {
-    pub use super::{destruct::*, pull::*, relocate::*};
-    use crate::meta::operator::Operator;
+    pub use super::{
+        bandrepack::*, blockshift::*, cascaderelocate::*, crossinsert::*, destruct::*,
+        exchangetime::*, latepenalty::*, neighborhoodruinrecreate::*, pairswap::*, pull::*,
+        push::*, relocate::*, spaceshift::*, swap::*, windowtighten::*,
+    };
+    use crate::{berth::quay::QuayRead, meta::operator::Operator};
     use dock_alloc_model::prelude::*;
     use num_traits::FromPrimitive;
 
@@ -38,12 +54,24 @@ pub mod prelude {
             + core::convert::TryFrom<T>
             + core::convert::TryFrom<usize>
             + 'static,
-        Q: crate::berth::quay::QuayRead + Send + Sync + 'static,
+        Q: QuayRead + Send + Sync + 'static,
     {
         vec![
             Box::new(DestructOperator::<T, C, Q>::default()),
             Box::new(RelocateGreedyOperator::<T, C, Q>::default()),
             Box::new(PullForwardOperator::<T, C, Q>::default()),
+            Box::new(SwapOperator::<T, C, Q>::default()),
+            Box::new(CrossInsertOperator::<T, C, Q>::default()),
+            Box::new(BlockShiftOperator::<T, C, Q>::default()),
+            Box::new(SpaceShiftOperator::<T, C, Q>::default()),
+            Box::new(PushBackOperator::<T, C, Q>::default()),
+            Box::new(WindowTightenOperator::<T, C, Q>::default()),
+            Box::new(BandRepackOperator::<T, C, Q>::default()),
+            Box::new(TwoExchangeTimeOperator::<T, C, Q>::default()),
+            Box::new(CascadeRelocateOperator::<T, C, Q>::default()),
+            Box::new(NeighborhoodRuinRecreateOperator::<T, C, Q>::default()),
+            Box::new(LatePenaltyFocusOperator::<T, C, Q>::default()),
+            Box::new(PairSwapBandOperator::<T, C, Q>::default()),
         ]
     }
 }

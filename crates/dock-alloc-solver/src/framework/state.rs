@@ -196,6 +196,35 @@ impl<T: SolverVariable + Display> std::fmt::Display for SolverStateOverlapError<
 
 impl<T: SolverVariable + Display + Debug> std::error::Error for SolverStateOverlapError<T> {}
 
+impl<T> From<SolutionValidationError<T>> for FeasibleStateError<T>
+where
+    T: SolverVariable + std::fmt::Display + std::fmt::Debug,
+{
+    fn from(e: SolutionValidationError<T>) -> Self {
+        match e {
+            SolutionValidationError::AssignmentBeforeArrivalTime(inner) => {
+                FeasibleStateError::AssignmentBeforeArrivalTime(inner)
+            }
+            SolutionValidationError::Overlap(inner) => {
+                let a = inner.request_a();
+                let b = inner.request_b();
+                let time_a: TimeInterval<T> = inner.time_a();
+                let time_b: TimeInterval<T> = inner.time_b();
+                let space_a: SpaceInterval = inner.space_a();
+                let space_b: SpaceInterval = inner.space_b();
+                let ti = time_a
+                    .intersection(&time_b)
+                    .expect("model reported overlap but time intersection is None");
+                let si = space_a
+                    .intersection(&space_b)
+                    .expect("model reported overlap but space intersection is None");
+                let rect = SpaceTimeRectangle::new(si, ti);
+                FeasibleStateError::Overlap(SolverStateOverlapError::new(a, b, rect))
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FeasibleStateError<T: SolverVariable> {
     AssignmentBeforeArrivalTime(AssignmentBeforeArrivalTimeError<T>),

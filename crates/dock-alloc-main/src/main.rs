@@ -59,6 +59,10 @@ fn main() {
         MetaEngine::new(MetaConfig::default(), operators, greedy);
     let meta_solution = meta.solve(&problem).unwrap();
 
+    // Make sure the solutions are valid
+    greedy_solution.validate().unwrap();
+    meta_solution.validate().unwrap();
+
     println!("Greedy Solution: {}", greedy_solution.stats());
     println!("Meta Solution: {}", meta_solution.stats());
 }

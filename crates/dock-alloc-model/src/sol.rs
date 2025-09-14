@@ -21,9 +21,15 @@
 
 use crate::{
     dec::{AnyAssignment, AnyAssignmentRef},
+    err::{AssignmentBeforeArrivalTimeError, AssignmentOverlapError, SolutionValidationError},
     id::RequestId,
 };
-use dock_alloc_core::{SolverVariable, cost::Cost, space::SpaceLength, time::TimeDelta};
+use dock_alloc_core::{
+    SolverVariable,
+    cost::Cost,
+    space::{SpaceInterval, SpaceLength, SpacePosition},
+    time::{TimeDelta, TimeInterval},
+};
 use std::{collections::HashMap, fmt::Display};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,6 +265,66 @@ where
     }
 }
 
+impl<'a, T, C> SolutionRef<'a, T, C>
+where
+    T: SolverVariable,
+    C: SolverVariable,
+{
+    pub fn validate(&self) -> Result<(), SolutionValidationError<T>> {
+        #[derive(Clone)]
+        struct Rect<Tm: SolverVariable> {
+            id: RequestId,
+            t: TimeInterval<Tm>,
+            s: SpaceInterval,
+        }
+
+        let mut rects = Vec::with_capacity(self.decisions.len());
+
+        for (&id, a) in &self.decisions {
+            let r = a.request();
+
+            let start = a.start_time();
+            let arrival = r.arrival_time();
+            if start < arrival {
+                return Err(SolutionValidationError::AssignmentBeforeArrivalTime(
+                    AssignmentBeforeArrivalTimeError::new(id, arrival, start),
+                ));
+            }
+
+            let t0 = start;
+            let t1 = t0 + r.processing_duration();
+            let s0 = a.start_position();
+            let s1 = SpacePosition::new(s0.value() + r.length().value());
+
+            rects.push(Rect {
+                id,
+                t: TimeInterval::new(t0, t1),
+                s: SpaceInterval::new(s0, s1),
+            });
+        }
+
+        rects.sort_by_key(|r| r.t.start().value());
+        let mut active: Vec<Rect<T>> = Vec::new();
+
+        for cur in rects {
+            active.retain(|x| x.t.end() > cur.t.start());
+            for other in &active {
+                if other.t.intersects(&cur.t) && other.s.intersects(&cur.s) {
+                    return Err(SolutionValidationError::Overlap(
+                        AssignmentOverlapError::new(
+                            other.id, cur.id, other.t, cur.t, other.s, cur.s,
+                        ),
+                    ));
+                }
+            }
+
+            active.push(cur);
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,6 +339,32 @@ mod tests {
 
     type Tm = i64;
     type Cm = i64;
+
+    fn req_movable_ok(
+        id: u64,
+        len: usize,
+        arrival: i64,
+        proc_t: i64,
+        s_lo: usize,
+        s_hi: usize,
+        target: usize,
+    ) -> Request<Movable, Tm, Cm> {
+        Request::<Movable, _, _>::new(
+            RequestId::new(id),
+            SpaceLength::new(len),
+            TimePoint::new(arrival),
+            TimeDelta::new(proc_t),
+            SpacePosition::new(target),
+            Cost::new(1),
+            Cost::new(1),
+            SpaceInterval::new(SpacePosition::new(s_lo), SpacePosition::new(s_hi)),
+        )
+        .expect("valid req")
+    }
+
+    fn any_ref(a: &Assignment<Movable, Tm, Cm>) -> AnyAssignmentRef<'_, Tm, Cm> {
+        AnyAssignmentRef::from(a)
+    }
 
     #[test]
     fn cost_helpers_behave_like_solution_path() {
@@ -307,5 +399,132 @@ mod tests {
 
         // expected: cost = 2*4 + 3*3 = 8 + 9 = 17
         assert_eq!(sol.stats().total_cost(), Cost::new(17));
+    }
+
+    #[test]
+    fn validate_ok_no_overlap_same_band_separated_in_time() {
+        // Same space band, disjoint in time.
+        let r1 = req_movable_ok(1, 4, 0, 5, 0, 100, 10);
+        let r2 = req_movable_ok(2, 5, 0, 5, 0, 100, 30);
+
+        let a1 = Assignment::new(r1, SpacePosition::new(10), TimePoint::new(0));
+        // a1 time = [0,5)
+        let a2 = Assignment::new(r2, SpacePosition::new(10), TimePoint::new(5));
+        // a2 time = [5,10) — touches a1 at 5, half-open => OK
+
+        let mut m = HashMap::new();
+        m.insert(a1.id(), any_ref(&a1));
+        m.insert(a2.id(), any_ref(&a2));
+
+        let sol = SolutionRef::from_assignments(m);
+        assert!(sol.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_ok_time_overlap_but_disjoint_space() {
+        // Overlap in time windows but not in space => OK.
+        let r1 = req_movable_ok(1, 4, 0, 5, 0, 100, 10);
+        let r2 = req_movable_ok(2, 6, 0, 5, 0, 100, 40);
+
+        let a1 = Assignment::new(r1, SpacePosition::new(10), TimePoint::new(2)); // [2,7), space [10,14)
+        let a2 = Assignment::new(r2, SpacePosition::new(50), TimePoint::new(3)); // [3,8), space [50,56)
+
+        let mut m = HashMap::new();
+        m.insert(a1.id(), any_ref(&a1));
+        m.insert(a2.id(), any_ref(&a2));
+
+        let sol = SolutionRef::from_assignments(m);
+        assert!(sol.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_ok_space_touching_edges_same_time() {
+        // Same start time; space intervals touch at an edge => OK (half-open).
+        let r1 = req_movable_ok(1, 4, 0, 3, 0, 100, 10);
+        let r2 = req_movable_ok(2, 5, 0, 3, 0, 100, 14);
+
+        let a1 = Assignment::new(r1, SpacePosition::new(10), TimePoint::new(5)); // space [10,14)
+        let a2 = Assignment::new(r2, SpacePosition::new(14), TimePoint::new(5)); // space [14,19)
+
+        let mut m = HashMap::new();
+        m.insert(a1.id(), any_ref(&a1));
+        m.insert(a2.id(), any_ref(&a2));
+
+        let sol = SolutionRef::from_assignments(m);
+        assert!(sol.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_err_start_before_arrival() {
+        let r = req_movable_ok(7, 4, 10, 3, 0, 100, 10);
+        // start at t=9 but arrival is 10 => should fail
+        let a = Assignment::new(r, SpacePosition::new(10), TimePoint::new(9));
+
+        let mut m = HashMap::new();
+        m.insert(a.id(), any_ref(&a));
+        let sol = SolutionRef::from_assignments(m);
+
+        let err = sol.validate().unwrap_err();
+        assert!(matches!(
+            err,
+            SolutionValidationError::AssignmentBeforeArrivalTime(_)
+        ));
+    }
+
+    #[test]
+    fn validate_err_true_spacetime_overlap() {
+        // Overlap in time AND space => error.
+        let r1 = req_movable_ok(1, 4, 0, 5, 0, 100, 10);
+        let r2 = req_movable_ok(2, 5, 0, 5, 0, 100, 12);
+
+        let a1 = Assignment::new(r1, SpacePosition::new(10), TimePoint::new(1)); // time [1,6), space [10,14)
+        let a2 = Assignment::new(r2, SpacePosition::new(12), TimePoint::new(3)); // time [3,8), space [12,17) => overlaps both
+
+        let mut m = HashMap::new();
+        m.insert(a1.id(), any_ref(&a1));
+        m.insert(a2.id(), any_ref(&a2));
+
+        let sol = SolutionRef::from_assignments(m);
+
+        let err = sol.validate().unwrap_err();
+        assert!(matches!(err, SolutionValidationError::Overlap(_)));
+    }
+
+    #[test]
+    fn validate_ok_time_touching_edges_same_space() {
+        // Space overlaps, but time is just edge-touching => OK.
+        let r1 = req_movable_ok(1, 4, 0, 5, 0, 100, 10);
+        let r2 = req_movable_ok(2, 4, 0, 5, 0, 100, 10);
+
+        let a1 = Assignment::new(r1, SpacePosition::new(20), TimePoint::new(0)); // [0,5)
+        let a2 = Assignment::new(r2, SpacePosition::new(20), TimePoint::new(5)); // [5,10)
+
+        let mut m = HashMap::new();
+        m.insert(a1.id(), any_ref(&a1));
+        m.insert(a2.id(), any_ref(&a2));
+
+        let sol = SolutionRef::from_assignments(m);
+        assert!(sol.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_ok_many_mixed_active_window() {
+        // A small mixed instance to exercise the sweep-line active set.
+        // a1 overlaps in time with a2, but in disjoint space; a3 starts later and is disjoint.
+        let r1 = req_movable_ok(1, 3, 0, 4, 0, 100, 10);
+        let r2 = req_movable_ok(2, 3, 0, 4, 0, 100, 50);
+        let r3 = req_movable_ok(3, 6, 0, 3, 0, 100, 30);
+
+        let a1 = Assignment::new(r1, SpacePosition::new(10), TimePoint::new(1)); // [1,5), space [10,13)
+        let a2 = Assignment::new(r2, SpacePosition::new(60), TimePoint::new(2)); // [2,6), space [60,63)
+        let a3 = Assignment::new(r3, SpacePosition::new(30), TimePoint::new(7)); // [7,10), disjoint in time
+
+        let mut m = HashMap::new();
+        m.insert(a1.id(), any_ref(&a1));
+        m.insert(a2.id(), any_ref(&a2));
+        m.insert(a3.id(), any_ref(&a3));
+
+        let sol = SolutionRef::from_assignments(m);
+        assert!(sol.validate().is_ok());
     }
 }

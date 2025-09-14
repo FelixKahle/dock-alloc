@@ -23,7 +23,7 @@ use crate::id::{FixedRequestId, RequestId};
 use dock_alloc_core::{
     SolverVariable,
     space::{SpaceInterval, SpaceLength},
-    time::TimePoint,
+    time::{TimeInterval, TimePoint},
 };
 use std::fmt::Display;
 
@@ -214,6 +214,82 @@ impl Display for AssignmentExceedsQuayError {
 impl std::error::Error for AssignmentExceedsQuayError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AssignmentOverlapError<T: SolverVariable> {
+    a: RequestId,
+    b: RequestId,
+    time_a: TimeInterval<T>,
+    time_b: TimeInterval<T>,
+    space_a: SpaceInterval,
+    space_b: SpaceInterval,
+}
+
+impl<T: SolverVariable> AssignmentOverlapError<T> {
+    #[inline]
+    pub fn new(
+        a: RequestId,
+        b: RequestId,
+        time_a: TimeInterval<T>,
+        time_b: TimeInterval<T>,
+        space_a: SpaceInterval,
+        space_b: SpaceInterval,
+    ) -> Self {
+        Self {
+            a,
+            b,
+            time_a,
+            time_b,
+            space_a,
+            space_b,
+        }
+    }
+
+    #[inline]
+    pub fn request_a(&self) -> RequestId {
+        self.a
+    }
+
+    #[inline]
+    pub fn request_b(&self) -> RequestId {
+        self.b
+    }
+
+    #[inline]
+    pub fn time_a(&self) -> TimeInterval<T> {
+        self.time_a
+    }
+
+    #[inline]
+    pub fn time_b(&self) -> TimeInterval<T> {
+        self.time_b
+    }
+
+    #[inline]
+    pub fn space_a(&self) -> SpaceInterval {
+        self.space_a
+    }
+
+    #[inline]
+    pub fn space_b(&self) -> SpaceInterval {
+        self.space_b
+    }
+}
+
+impl<T: SolverVariable + Display> Display for AssignmentOverlapError<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Assignments for requests {} and {} overlap: time_a={}, time_b={}, space_a={}, space_b={}",
+            self.a, self.b, self.time_a, self.time_b, self.space_a, self.space_b
+        )
+    }
+}
+
+impl<T: SolverVariable + std::fmt::Debug + Display> std::error::Error
+    for AssignmentOverlapError<T>
+{
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PreassignedOverlapError {
     a: FixedRequestId,
     b: FixedRequestId,
@@ -268,3 +344,29 @@ impl<T: SolverVariable + Display> Display for ProblemBuildError<T> {
 }
 
 impl<T: SolverVariable + std::fmt::Debug + Display> std::error::Error for ProblemBuildError<T> {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SolutionValidationError<T = i64>
+where
+    T: SolverVariable,
+{
+    AssignmentBeforeArrivalTime(AssignmentBeforeArrivalTimeError<T>),
+    Overlap(AssignmentOverlapError<T>),
+}
+
+impl<T> std::fmt::Display for SolutionValidationError<T>
+where
+    T: SolverVariable + std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SolutionValidationError::AssignmentBeforeArrivalTime(e) => write!(f, "{e}"),
+            SolutionValidationError::Overlap(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<T> std::error::Error for SolutionValidationError<T> where
+    T: SolverVariable + std::fmt::Debug + std::fmt::Display
+{
+}
