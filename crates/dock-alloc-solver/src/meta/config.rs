@@ -16,8 +16,6 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-// ========================= config.rs =========================
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatsConfig {
     pub bootstrap_success_rate: f64, // was 0.05
@@ -126,7 +124,7 @@ pub struct MetaConfig {
 impl Default for MetaConfig {
     fn default() -> Self {
         Self {
-            max_solver_time_ms: 50000,
+            max_solver_time_ms: 30000, // 30 seconds
             stats: StatsConfig::default(),
             alloc: AllocationConfig::default(),
             anneal: AnnealingConfig::default(),

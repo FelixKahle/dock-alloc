@@ -33,10 +33,12 @@ impl<T> MaybeIter<T> {
 
 impl<I: Iterator> Iterator for MaybeIter<I> {
     type Item = I::Item;
+
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.inner.as_mut()?.next()
     }
+
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.inner.as_ref().map_or((0, Some(0)), |i| i.size_hint())

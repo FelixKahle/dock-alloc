@@ -33,9 +33,10 @@ use dock_alloc_core::{
     space::{SpaceInterval, SpaceLength},
     time::{TimeDelta, TimeInterval, TimePoint},
 };
-use num_traits::{One, PrimInt, Signed};
+//use num_traits::One;
 use std::iter::FusedIterator;
 
+#[derive(Debug, Clone)]
 struct CandidateStartIter<'a, T, V>
 where
     T: SolverVariable,
@@ -376,12 +377,6 @@ where
     }
 }
 
-#[inline]
-fn rep_start<T: PrimInt + Signed + Copy + One>(a: TimePoint<T>, b: TimePoint<T>) -> TimePoint<T> {
-    let one = TimeDelta::new(T::one());
-    if a + one < b { a + one } else { a }
-}
-
 impl<'a, T, V> Iterator for FeasibleRegionIter<'a, T, V>
 where
     T: SolverVariable,
@@ -413,7 +408,7 @@ where
                 continue;
             }
 
-            let representative_start = rep_start(self.seg_start, self.seg_end);
+            let representative_start = self.seg_start;
             self.cur_runs.clear();
             eroded_runs(
                 self.view,
@@ -813,6 +808,8 @@ mod tests {
     }
 
     fn sample_starts_in_band(a: T, b: T) -> Vec<T> {
+        use num_traits::One;
+
         if a >= b {
             return vec![];
         }

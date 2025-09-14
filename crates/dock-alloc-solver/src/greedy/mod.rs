@@ -30,7 +30,7 @@ use dock_alloc_core::{
     SolverVariable,
     time::{TimeInterval, TimePoint},
 };
-use dock_alloc_model::model::{AssignmentRef, Problem, SolutionRef};
+use dock_alloc_model::prelude::*;
 use std::{cmp::Reverse, collections::BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -252,10 +252,6 @@ mod tests {
         cost::Cost,
         space::{SpaceInterval, SpaceLength, SpacePosition},
         time::TimeDelta,
-    };
-    use dock_alloc_model::{
-        generator::{InstanceGenConfig, InstanceGenerator},
-        model::{Assignment, Fixed, Movable, ProblemBuilder, Request, RequestId},
     };
 
     type Tm = i64;

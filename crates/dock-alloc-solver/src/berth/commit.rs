@@ -19,6 +19,8 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+use std::fmt::Display;
+
 use crate::berth::operations::Operation;
 use dock_alloc_core::SolverVariable;
 
@@ -50,6 +52,21 @@ where
 
     pub fn is_empty(&self) -> bool {
         self.operations.is_empty()
+    }
+}
+
+impl<T> Display for BerthOverlayCommit<T>
+where
+    T: SolverVariable,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ops_string = self
+            .operations
+            .iter()
+            .map(|op| format!("{}", op))
+            .collect::<Vec<_>>()
+            .join(", ");
+        write!(f, "BerthOverlayCommit[{}]", ops_string)
     }
 }
 

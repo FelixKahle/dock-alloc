@@ -43,7 +43,7 @@ use dock_alloc_core::{
     space::{SpaceInterval, SpacePosition},
     time::{TimeDelta, TimeInterval, TimePoint},
 };
-use dock_alloc_model::model::{AnyAssignmentRef, AssignmentRef, Fixed, Kind, Problem};
+use dock_alloc_model::prelude::*;
 use std::fmt::{Debug, Display};
 
 pub struct PlanningContext<'p, 'al, 'bo, T, C, Q>
@@ -199,6 +199,41 @@ where
     ledger_commit: LedgerOverlayCommit<'p, T, C>,
 }
 
+impl<'p, T, C> Display for Plan<'p, T, C>
+where
+    T: SolverVariable + Display,
+    C: SolverVariable + Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let berth_op_string = self
+            .berth_commit
+            .operations()
+            .iter()
+            .map(|op| format!("{}", op))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let ledger_op_string = self
+            .ledger_commit
+            .operations()
+            .iter()
+            .map(|op| format!("{}", op))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        write!(
+            f,
+            "Plan(frees: {}, occupies: {}, eval: Δcost={}, Δwait={}, Δdev={} | berth_ops: [{}] | ledger_ops: [{}])",
+            self.berth_commit.operations().len(),
+            self.ledger_commit.operations().len(),
+            self.eval.delta_cost(),
+            self.eval.delta_wait(),
+            self.eval.delta_dev(),
+            berth_op_string,
+            ledger_op_string
+        )
+    }
+}
+
 impl<'p, T, C> Plan<'p, T, C>
 where
     T: SolverVariable,
@@ -215,6 +250,10 @@ where
             berth_commit,
             ledger_commit,
         }
+    }
+
+    pub fn operation_count(&self) -> usize {
+        self.berth_commit.operations().len() + self.ledger_commit.operations().len()
     }
 
     pub fn eval(&self) -> &PlanEval<T, C> {

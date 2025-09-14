@@ -19,28 +19,34 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-pub mod ec;
-pub mod grbok;
-pub mod grl;
-pub mod mrs;
-pub mod mtef;
-pub mod mtlf;
-pub mod rdr;
-pub mod rl;
-pub mod rs;
-pub mod sn;
-mod util;
+pub mod bandrepack;
+pub mod blockshift;
+pub mod cascaderelocate;
+pub mod crossinsert;
+pub mod destruct;
+pub mod exchangetime;
+pub mod latepenalty;
+pub mod neighborhoodruinrecreate;
+pub mod pairswap;
+pub mod pull;
+pub mod push;
+pub mod relocate;
+pub mod spaceshift;
+pub mod swap;
+pub mod windowtighten;
 
 pub mod prelude {
     pub use super::{
-        ec::*, grbok::*, grl::*, mrs::*, mtef::*, mtlf::*, rdr::*, rl::*, rs::*, sn::*,
+        bandrepack::*, blockshift::*, cascaderelocate::*, crossinsert::*, destruct::*,
+        exchangetime::*, latepenalty::*, neighborhoodruinrecreate::*, pairswap::*, pull::*,
+        push::*, relocate::*, spaceshift::*, swap::*, windowtighten::*,
     };
-    use crate::meta::operator::Operator;
-    use dock_alloc_model::model::Problem;
+    use crate::{berth::quay::QuayRead, meta::operator::Operator};
+    use dock_alloc_model::prelude::*;
     use num_traits::FromPrimitive;
 
     pub fn op_list<T, C, Q>(
-        problem: &Problem<T, C>,
+        _: &Problem<T, C>,
     ) -> Vec<Box<dyn Operator<Time = T, Cost = C, Quay = Q> + Send + Sync + 'static>>
     where
         T: dock_alloc_core::SolverVariable + FromPrimitive + 'static,
@@ -48,20 +54,24 @@ pub mod prelude {
             + core::convert::TryFrom<T>
             + core::convert::TryFrom<usize>
             + 'static,
-        Q: crate::berth::quay::QuayRead + Send + Sync + 'static,
+        Q: QuayRead + Send + Sync + 'static,
     {
         vec![
-            Box::new(RandomSwapOperator::<T, C, Q>::from(problem)),
-            Box::new(RandomDestroyRepairOperator::<T, C, Q>::from(problem)),
-            Box::new(RelocateLocal::<T, C, Q>::from(problem)),
-            Box::new(MoveToLatestFeasibleOperator::<T, C, Q>::from(problem)),
-            Box::new(MoveToEarliestFeasibleOperator::<T, C, Q>::from(problem)),
-            Box::new(SpaceNudgeLeftOperator::<T, C, Q>::from(problem)),
-            Box::new(SpaceNudgeRightOperator::<T, C, Q>::from(problem)),
-            Box::new(GlobalRelocateRandomOperator::<T, C, Q>::from(problem)),
-            Box::new(GreedyRelocateBestOfKOperator::<T, C, Q>::from(problem)),
-            Box::new(EjectionChain2Operator::<T, C, Q>::from(problem)),
-            Box::new(MultiRelocateShakerOperator::<T, C, Q>::from(problem)),
+            Box::new(DestructOperator::<T, C, Q>::default()),
+            Box::new(RelocateGreedyOperator::<T, C, Q>::default()),
+            Box::new(PullForwardOperator::<T, C, Q>::default()),
+            Box::new(SwapOperator::<T, C, Q>::default()),
+            Box::new(CrossInsertOperator::<T, C, Q>::default()),
+            Box::new(BlockShiftOperator::<T, C, Q>::default()),
+            Box::new(SpaceShiftOperator::<T, C, Q>::default()),
+            Box::new(PushBackOperator::<T, C, Q>::default()),
+            Box::new(WindowTightenOperator::<T, C, Q>::default()),
+            Box::new(BandRepackOperator::<T, C, Q>::default()),
+            Box::new(TwoExchangeTimeOperator::<T, C, Q>::default()),
+            Box::new(CascadeRelocateOperator::<T, C, Q>::default()),
+            Box::new(NeighborhoodRuinRecreateOperator::<T, C, Q>::default()),
+            Box::new(LatePenaltyFocusOperator::<T, C, Q>::default()),
+            Box::new(PairSwapBandOperator::<T, C, Q>::default()),
         ]
     }
 }

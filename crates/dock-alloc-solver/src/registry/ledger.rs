@@ -27,11 +27,7 @@ use dock_alloc_core::{
     space::{SpaceInterval, SpacePosition},
     time::TimePoint,
 };
-use dock_alloc_model::model::{
-    AnyAssignmentRef, AssignmentBeforeArrivalTimeError, AssignmentOutsideSpaceWindowError,
-    AssignmentRef, Fixed, FixedRequestId, Movable, MovableRequestId, Problem, Request, RequestId,
-    SolutionRef,
-};
+use dock_alloc_model::prelude::*;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -290,17 +286,13 @@ where
         let start = assignment.start_time();
         if start < arrival_time {
             return Err(LedgerApplyValidationError::AssignmentBeforeArrivalTime(
-                dock_alloc_model::model::AssignmentBeforeArrivalTimeError::new(
-                    r.id(),
-                    arrival_time,
-                    t0,
-                ),
+                AssignmentBeforeArrivalTimeError::new(r.id(), arrival_time, t0),
             ));
         }
         let sw = r.feasible_space_window();
         if !sw.contains_interval(&s_iv) {
             return Err(LedgerApplyValidationError::AssignmentOutsideSpaceWindow(
-                dock_alloc_model::model::AssignmentOutsideSpaceWindowError::new(r.id(), sw, s_iv),
+                AssignmentOutsideSpaceWindowError::new(r.id(), sw, s_iv),
             ));
         }
         Ok(())
@@ -349,7 +341,6 @@ mod ledger_overlay_tests {
         space::{SpaceInterval, SpaceLength},
         time::TimeDelta,
     };
-    use dock_alloc_model::model::{Assignment, ProblemBuilder, RequestId};
 
     type Tm = i64;
     type Cm = i64;

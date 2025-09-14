@@ -26,10 +26,7 @@ use dock_alloc_core::{
     space::{SpaceInterval, SpaceLength, SpacePosition},
     time::{TimeDelta, TimePoint},
 };
-use dock_alloc_model::model::{
-    AnyAssignmentRef, AssignmentRef, Fixed, FixedRequestId, Movable, MovableRequestId, Request,
-    RequestId, SolutionRef,
-};
+use dock_alloc_model::prelude::*;
 use std::collections::{BTreeSet, HashMap};
 
 use crate::registry::{
@@ -579,10 +576,6 @@ where
 mod tests {
     use super::*;
     use crate::registry::ledger::AssignmentLedger;
-    use dock_alloc_model::model::{
-        Assignment, AssignmentRef, Fixed, Movable, MovableRequestId, ProblemBuilder, Request,
-        RequestId,
-    };
 
     type Tm = i64;
     type Cm = i64;

@@ -19,17 +19,6 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use dock_alloc_core::{SolverVariable, cost::Cost};
-use num_traits::Zero;
-use rand::{Rng, SeedableRng, rngs::StdRng};
-use rand_chacha::ChaCha8Rng;
-use rayon::prelude::*;
-use std::{
-    cell::RefCell,
-    fmt::{Debug, Display},
-    time::{Duration, Instant},
-};
-
 use crate::{
     berth::quay::{QuayRead, QuayWrite},
     framework::{
@@ -41,6 +30,40 @@ use crate::{
         operator::Operator,
     },
 };
+use dock_alloc_core::{SolverVariable, cost::Cost};
+use dock_alloc_model::prelude::*;
+use num_traits::Zero;
+use rand::{SeedableRng, rngs::StdRng};
+use rand_chacha::ChaCha8Rng;
+use rayon::prelude::*;
+use std::{
+    cell::RefCell,
+    fmt::{Debug, Display},
+    time::{Duration, Instant},
+};
+use tracing::{debug, info, instrument, trace, warn};
+
+#[inline]
+fn acceptance_prob<C: SolverVariable>(delta: Cost<C>, temp: f64) -> f64 {
+    let dv = delta.value();
+    if dv < C::zero() {
+        1.0
+    } else if dv > C::zero() {
+        let f = dv.to_f64().unwrap_or(f64::INFINITY);
+        (-f / temp.max(1e-12)).exp()
+    } else {
+        0.0
+    }
+}
+
+#[derive(Debug)]
+struct Candidate<'p, T: SolverVariable, C: SolverVariable> {
+    op_idx: usize,
+    plan: Plan<'p, T, C>,
+    gen_ns: f64,
+    eval_ns: f64,
+    delta: Cost<C>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OperatorStats<C: SolverVariable> {
@@ -173,6 +196,22 @@ where
     }
 }
 
+impl<T, C, Q, S> Display for MetaEngineError<T, C, Q, S>
+where
+    T: SolverVariable,
+    C: SolverVariable,
+    Q: QuayRead + QuayWrite,
+    S: ConstructiveSolver<T, C, Q>,
+    S::SolveError: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MetaEngineError::ConstructionError(e) => write!(f, "Construction error: {e:?}"),
+            MetaEngineError::StepError(e) => write!(f, "Step error: {e}"),
+        }
+    }
+}
+
 #[inline]
 fn make_job_rng(base_seed: u64, op_idx: usize, k: usize, iter: usize) -> ChaCha8Rng {
     let s = base_seed
@@ -215,11 +254,12 @@ where
 
     pub fn construct_initial_state<'p>(
         &mut self,
-        problem: &'p dock_alloc_model::model::Problem<T, C>,
+        problem: &'p Problem<T, C>,
     ) -> Result<FeasibleSolverState<'p, T, C, Q>, S::SolveError> {
         self.construction_solver.build_state(problem)
     }
 
+    #[instrument(skip_all, fields(iteration, temp, tau), err(Display))]
     pub fn step(
         &mut self,
         state: &mut FeasibleSolverState<'_, T, C, Q>,
@@ -240,7 +280,12 @@ where
         let tau = alloc_cfg.softmax_tau_min
             + (alloc_cfg.softmax_tau_max - alloc_cfg.softmax_tau_min) * norm;
 
-        let alloc: Vec<usize> = softmax_alloc(
+        tracing::Span::current().record("iteration", iteration);
+        tracing::Span::current().record("temp", temp);
+        tracing::Span::current().record("tau", tau);
+
+        // Softmax allocation across operators
+        let alloc = softmax_alloc(
             &self
                 .operator_records
                 .iter()
@@ -251,96 +296,130 @@ where
             tau,
         );
 
-        let total: usize = alloc.iter().sum();
-        if total == 0 {
+        let total_jobs: usize = alloc.iter().sum();
+        if total_jobs == 0 {
+            trace!("No operators selected for this round (allocation sum = 0)");
             return Ok(None);
         }
+
+        // Build job list (op index, per-op counter)
         let jobs: Vec<(usize, usize)> = alloc
             .iter()
             .enumerate()
             .flat_map(|(op_idx, &n)| (0..n).map(move |k| (op_idx, k)))
             .collect();
+
         let base_seed = rng_cfg.seed_base_task ^ (iteration as u64);
 
-        #[allow(clippy::type_complexity)]
-        let candidates: Vec<(usize, Plan<'_, T, C>, f64, f64, Cost<C>)> = jobs
+        // Generate candidates in parallel
+        let candidates: Vec<Candidate<'_, T, C>> = jobs
             .par_iter()
             .filter_map(|&(op_idx, k)| {
+                // Every job gets its own RNG
+                let mut rng = make_job_rng(base_seed, op_idx, k, iteration);
                 let rec = &self.operator_records[op_idx];
+
+                // Context is cheap to build and read-only
                 let ctx = PlanningContext::new(ledger, berth, problem);
-                let do_sample = (((base_seed as usize) ^ op_idx ^ k) & 0x7) == 0;
-                if do_sample {
+
+                // Stochastic timing sampling to reduce overhead
+                let sample_timing = (((base_seed as usize) ^ op_idx ^ k) & 0x7) == 0;
+
+                let (plan, gen_ns) = if sample_timing {
                     let t0 = Instant::now();
-                    let mut rng = make_job_rng(base_seed, op_idx, k, iteration);
-                    let plan = rec.operator.propose(iteration, &mut rng, ctx);
-                    let gen_ns = t0.elapsed().as_nanos() as f64;
-
-                    if plan.ledger_commit().operations().is_empty() {
-                        return None;
-                    }
-
-                    let t1 = Instant::now();
-                    let delta = plan.eval().delta_cost();
-                    let eval_ns = t1.elapsed().as_nanos() as f64;
-
-                    Some((op_idx, plan, gen_ns, eval_ns, delta))
+                    let p = rec.operator.propose(iteration, &mut rng, ctx);
+                    (p, t0.elapsed().as_nanos() as f64)
                 } else {
-                    let mut rng = make_job_rng(base_seed, op_idx, k, iteration);
-                    let plan = rec.operator.propose(iteration, &mut rng, ctx);
-                    if plan.ledger_commit().operations().is_empty() {
-                        return None;
-                    }
-                    let delta = plan.eval().delta_cost();
-                    Some((op_idx, plan, 0.0, 0.0, delta))
+                    (rec.operator.propose(iteration, &mut rng, ctx), 0.0)
+                };
+
+                // Skip no-ops
+                if plan.ledger_commit().operations().is_empty() {
+                    return None;
                 }
+
+                // Evaluate delta; optionally sample eval timing too
+                let (delta, eval_ns) = if sample_timing {
+                    let t1 = Instant::now();
+                    let d = plan.eval().delta_cost();
+                    (d, t1.elapsed().as_nanos() as f64)
+                } else {
+                    (plan.eval().delta_cost(), 0.0)
+                };
+
+                Some(Candidate {
+                    op_idx,
+                    plan,
+                    gen_ns,
+                    eval_ns,
+                    delta,
+                })
             })
             .collect();
 
         if candidates.is_empty() {
+            trace!("All generated plans were no-ops; nothing to apply.");
             return Ok(None);
         }
-        // Collect useful stats from candidates
-        self.proposals_made += candidates.len() as u64;
 
-        let mut rng = StdRng::seed_from_u64(rng_cfg.seed_base_select ^ iteration as u64);
-        let mut winner_idx = 0usize;
-        for (i, cand) in candidates.iter().enumerate().skip(1) {
-            let w = &candidates[winner_idx];
-            let d = cand.4 - w.4;
-
-            let accept = if d.value() < C::zero() {
-                true
-            } else if d.value() > C::zero() {
-                let dv = d.value().to_f64().unwrap_or(0.0);
-                let p = (-dv / temp).exp();
-                rng.random::<f64>() < p
-            } else {
-                false
-            };
-
-            if accept {
-                winner_idx = i;
+        // Stats: mark an attempt for every *produced* candidate and feed timing into EWMA
+        for c in &candidates {
+            let rec = &mut self.operator_records[c.op_idx];
+            rec.stats_mut().on_attempt();
+            if c.gen_ns > 0.0 || c.eval_ns > 0.0 {
+                rec.stats_mut().on_timing(
+                    c.gen_ns,
+                    c.eval_ns,
+                    stats_cfg.gen_time_alpha,
+                    stats_cfg.eval_time_alpha,
+                );
             }
         }
 
-        let (w_op_idx, w_plan, w_gen_ns, w_eval_ns, w_delta) =
-            candidates.into_iter().nth(winner_idx).unwrap();
-        let rec = &mut self.operator_records[w_op_idx];
-        rec.stats_mut().on_attempt();
-        rec.stats_mut().on_timing(
-            w_gen_ns,
-            w_eval_ns,
-            stats_cfg.gen_time_alpha,
-            stats_cfg.eval_time_alpha,
-        );
-        println!("Winner Operator: {}", rec.operator.name());
-        println!("Delta: {}", w_delta);
+        self.proposals_made += candidates.len() as u64;
 
-        if state.apply_plan_validated(&w_plan).is_ok() {
-            rec.stats_mut().on_accept(-w_delta, stats_cfg.reward_alpha);
-            return Ok(Some(w_delta));
+        // Simulated annealing selection: walk once and decide acceptance against current winner
+        let mut winner_idx = 0usize;
+        for i in 1..candidates.len() {
+            let cur = &candidates[i];
+            let win = &candidates[winner_idx];
+            // Prefer moves with higher acceptance probability vs. current winner
+            let d = cur.delta - win.delta;
+            let p = acceptance_prob(d, temp);
+            if p > 0.0 {
+                // Flip once
+                if rand::random::<f64>() < p {
+                    winner_idx = i;
+                }
+            }
         }
-        Ok(None)
+
+        let winner = candidates
+            .into_iter()
+            .nth(winner_idx)
+            .expect("winner must exist");
+        let winner_op = self.operator_records[winner.op_idx].operator.name();
+
+        info!(op_index = winner.op_idx, op = winner_op, %temp, %tau, delta = %winner.delta, "Selected winner");
+
+        // Try to apply
+        match state.apply_plan_validated(&winner.plan) {
+            Ok(()) => {
+                // Reward the winning operator
+                let rec = &mut self.operator_records[winner.op_idx];
+                rec.stats_mut()
+                    .on_accept(winner.delta, stats_cfg.reward_alpha);
+
+                trace!("Applied plan successfully.");
+                Ok(Some(winner.delta))
+            }
+            Err(e) => {
+                // This shouldn’t happen often because we pre-validated ledger ops,
+                // but if it does, we just report and skip the delta.
+                warn!(error = %e, op = winner_op, "Plan application failed; skipping.");
+                Err(e)
+            }
+        }
     }
 }
 
@@ -350,51 +429,71 @@ where
     C: SolverVariable + TryFrom<T> + TryFrom<usize> + Send + Sync + Display,
     Q: QuayRead + QuayWrite + Send + Sync,
     S: ConstructiveSolver<T, C, Q> + Sync,
+    S::SolveError: std::fmt::Debug,
 {
     type SolveError = MetaEngineError<T, C, Q, S>;
 
+    #[instrument(skip_all, fields(max_ms = self.config.max_solver_time_ms), err(Display))]
     fn solve<'p>(
         &mut self,
-        problem: &'p dock_alloc_model::model::Problem<T, C>,
-    ) -> Result<dock_alloc_model::model::SolutionRef<'p, T, C>, Self::SolveError> {
-        // 1) build initial feasible state
+        problem: &'p Problem<T, C>,
+    ) -> Result<SolutionRef<'p, T, C>, Self::SolveError> {
+        // 1) Build initial feasible state
         let mut state = self
             .construction_solver
             .build_state(problem)
             .map_err(MetaEngineError::ConstructionError)?;
 
-        // 2) time budget
+        // 2) Budget
         let budget = Duration::from_millis(self.config.max_solver_time_ms);
         let t0 = Instant::now();
 
-        // 3) best-so-far tracking
+        // 3) Best-so-far tracking
         let mut cum_delta = Cost::<C>::zero();
         let mut best_cum = cum_delta;
         let mut best_state: Option<_> = Some(state.clone());
 
         let mut iter: usize = 0;
         while t0.elapsed() < budget {
-            if let Some(delta) = self.step(&mut state, iter)? {
-                cum_delta += delta;
-                if cum_delta < best_cum {
-                    best_cum = cum_delta;
-                    best_state = Some(state.clone());
+            match self.step(&mut state, iter) {
+                Ok(Some(delta)) => {
+                    cum_delta += delta;
+                    if cum_delta < best_cum {
+                        best_cum = cum_delta;
+                        best_state = Some(state.clone());
+                        debug!(%best_cum, "New best cumulative delta");
+                    }
+                }
+                Ok(None) => {
+                    // No accepted move; just continue
+                }
+                Err(e) => {
+                    // Application failed; continue search (state is still valid)
+                    warn!(error = %e, "Step failed; continuing.");
                 }
             }
+
             iter += 1;
+
+            // Cheap stop check every 16 iterations to avoid tight-loop overhead
             if (iter & 0xF) == 0 && t0.elapsed() >= budget {
                 break;
             }
         }
-        let final_state = best_state.unwrap_or(state);
-        println!("Iterations: {}", iter);
-        println!("Proposals made: {}", self.proposals_made);
-        println!("Temperature: {:.3}", {
-            let anneal = &self.config.anneal;
 
-            (anneal.initial_temperature * anneal.cooling_rate.powi(iter as i32))
-                .max(anneal.min_temperature)
-        });
+        let final_state = best_state.unwrap_or(state);
+        let final_temp = {
+            let a = &self.config.anneal;
+            (a.initial_temperature * a.cooling_rate.powi(iter as i32)).max(a.min_temperature)
+        };
+
+        info!(
+            iterations = iter,
+            proposals = self.proposals_made,
+            temperature = final_temp,
+            "Meta solve finished",
+        );
+
         Ok(final_state.into())
     }
 }
@@ -480,8 +579,6 @@ mod tests {
 
     #[allow(dead_code)]
     type DynOp = dyn Operator<Time = T, Cost = C, Quay = Q>;
-    type DynOpBox = Box<dyn Operator<Time = T, Cost = C, Quay = Q> + Send + Sync>;
-    assert_impl_all!(DynOpBox: Send, Sync);
 
     assert_impl_all!(Q: Send, Sync);
     assert_impl_all!(OperatorRecord<T, C, Q>: Send, Sync);

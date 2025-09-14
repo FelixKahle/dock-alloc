@@ -19,5 +19,14 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+pub mod dec;
+pub mod err;
 pub mod generator;
-pub mod model;
+pub mod id;
+pub mod problem;
+pub mod req;
+pub mod sol;
+
+pub mod prelude {
+    pub use crate::{dec::*, err::*, generator::*, id::*, problem::*, req::*, sol::*};
+}

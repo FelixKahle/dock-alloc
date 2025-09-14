@@ -30,5 +30,10 @@ pub mod primitives;
 pub mod space;
 pub mod time;
 
+/// A trait for integer types that can be used as variables in the Berth Allocation
+/// Problem Solver.
+///
+/// The trait is auto-implemented for all types that implement the required traits.
 pub trait SolverVariable: PrimInt + Signed + Zero + Send + Sync + Debug + Display {}
+
 impl<T> SolverVariable for T where T: PrimInt + Signed + Zero + Send + Sync + Debug + Display {}

@@ -19,10 +19,7 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use dock_alloc_model::{
-    generator::{InstanceGenConfig, InstanceGenerator},
-    model::Problem,
-};
+use dock_alloc_model::prelude::*;
 use dock_alloc_solver::meta::oplib::{self};
 use dock_alloc_solver::{
     berth::quay::BTreeMapQuay,
@@ -35,22 +32,19 @@ use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 #[allow(dead_code)]
 fn enable_tracing() {
     tracing_subscriber::fmt()
-        // Allow RUST_LOG but default to debug if unset
         .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug")),
         )
-        // ← this is the key: print #[instrument] span enter/exit/close
         .with_span_events(FmtSpan::ENTER | FmtSpan::EXIT | FmtSpan::CLOSE)
         .init();
 }
 
 fn main() {
-    //enable_tracing();
+    enable_tracing();
 
     // Generate the Problem
     let mut generator: InstanceGenerator<i64, i64> = InstanceGenConfig::default().into();
     let problem: Problem<i64, i64> = generator.generate();
-    println!("{}", problem);
 
     // Solve the Problem (greedy)
     let mut greedy: GreedySolver<i64, i64, BTreeMapQuay> = GreedySolver::new();
@@ -61,6 +55,16 @@ fn main() {
     let mut meta: MetaEngine<i64, i64, BTreeMapQuay, GreedySolver<i64, i64, BTreeMapQuay>> =
         MetaEngine::new(MetaConfig::default(), operators, greedy);
     let meta_solution = meta.solve(&problem).unwrap();
+
+    // Make sure the solutions are valid
+    greedy_solution.validate().unwrap();
+    meta_solution.validate().unwrap();
+
+    println!();
+    println!("=================================================================");
+    println!("==================== Solution Comparison ========================");
+    println!("=================================================================");
+    println!();
 
     println!("Greedy Solution: {}", greedy_solution.stats());
     println!("Meta Solution: {}", meta_solution.stats());

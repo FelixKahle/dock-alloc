@@ -32,7 +32,6 @@ pub trait Operator: Send + Sync {
     type Quay: QuayRead;
 
     fn name(&self) -> &'static str;
-
     fn propose<'p, 'al, 'bo>(
         &self,
         iteration: usize,

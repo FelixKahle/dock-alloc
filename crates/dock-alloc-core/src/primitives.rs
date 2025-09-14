@@ -447,6 +447,7 @@ impl<T> Interval<T> {
                 end_exclusive: other.end_exclusive,
             });
         }
+
         if other.is_empty() && !self.is_empty() {
             return Some(Self {
                 start_inclusive: self.start_inclusive,
