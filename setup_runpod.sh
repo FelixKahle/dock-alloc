@@ -62,7 +62,7 @@ cargo --version
 rustup --version
 clang --version 2>/dev/null | head -n1
 cmake --version 2>/dev/null | head -n1
-git --version 2>/dev/null
+git --version 2>/dev/null | head -n1
 set -e
 
 echo "==> Done. Rust is installed and configured."
