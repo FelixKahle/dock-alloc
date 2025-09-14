@@ -294,10 +294,10 @@ where
             )),
 
             // Mix
-            amount_movables: 600,
+            amount_movables: 70,
             amount_fixed: 50,
-            // 30 Tage = 43200 min
-            horizon: tp::<T>(45200),
+            // 10 Days = 14400 min
+            horizon: tp::<T>(14400),
 
             // Arrivals: ≈ 1 ship/hour (Poisson → bursts + gaps)
             lambda_per_time: 0.017,

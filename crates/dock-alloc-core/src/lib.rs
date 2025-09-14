@@ -20,6 +20,7 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 use num_traits::{PrimInt, Signed, Zero};
+use rand::distr::uniform::SampleUniform;
 use std::fmt::{Debug, Display};
 
 pub mod cost;
@@ -34,6 +35,12 @@ pub mod time;
 /// Problem Solver.
 ///
 /// The trait is auto-implemented for all types that implement the required traits.
-pub trait SolverVariable: PrimInt + Signed + Zero + Send + Sync + Debug + Display {}
+pub trait SolverVariable:
+    PrimInt + Signed + Zero + Send + Sync + Debug + Display + SampleUniform
+{
+}
 
-impl<T> SolverVariable for T where T: PrimInt + Signed + Zero + Send + Sync + Debug + Display {}
+impl<T> SolverVariable for T where
+    T: PrimInt + Signed + Zero + Send + Sync + Debug + Display + SampleUniform
+{
+}

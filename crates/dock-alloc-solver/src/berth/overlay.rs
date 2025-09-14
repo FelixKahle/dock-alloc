@@ -101,12 +101,6 @@ where
     }
 }
 
-/// A non-destructive overlay for a `BerthOccupancy`.
-///
-/// This struct allows for temporary modifications to the occupancy state without
-/// altering the underlying `BerthOccupancy`. It works by tracking occupied and freed
-/// regions as deltas in separate maps. This is useful for speculative modifications
-/// during a search algorithm.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BerthOccupancyOverlay<'brand, 'a, T, Q>
 where
@@ -172,17 +166,17 @@ where
             .next_back()
             .copied();
 
-        fn last_effective<'m, TimeType: SolverVariable>(
-            map: &'m BTreeMap<TimePoint<TimeType>, SpaceIntervalSet>,
+        fn last_effective<TimeType: SolverVariable>(
+            map: &BTreeMap<TimePoint<TimeType>, SpaceIntervalSet>,
             tp: TimePoint<TimeType>,
             last_barrier: Option<TimePoint<TimeType>>,
-        ) -> Option<(TimePoint<TimeType>, &'m SpaceIntervalSet)> {
+        ) -> Option<(TimePoint<TimeType>, &SpaceIntervalSet)> {
             let (k_ref, set) = map.range(..=tp).next_back()?;
             let k = *k_ref;
-            if let Some(b) = last_barrier {
-                if b > k {
-                    return None;
-                }
+            if let Some(b) = last_barrier
+                && b > k
+            {
+                return None;
             }
             Some((k, set))
         }
@@ -715,7 +709,6 @@ mod tests {
         SpaceTimeRectangle::new(si, tw)
     }
 
-    // ------- Smoke: construct overlay, no ops recorded initially -------
     #[test]
     fn test_overlay_constructs_empty_and_refs_base() {
         let berth = BO::new(len(10));
@@ -724,7 +717,6 @@ mod tests {
         assert!(ov.operations().is_empty());
     }
 
-    // ------- add_free / add_occupy (single timepoint deltas) + is_free / is_occupied -------
     #[test]
     fn test_overlay_add_free_and_add_occupy_affect_queries() {
         let mut berth = BO::new(len(10));
@@ -756,7 +748,6 @@ mod tests {
         assert!(ov.is_free(&rect(ti(4, 6), si(4, 5))).unwrap());
     }
 
-    // ------- iter_free_slots yields Branded wrapper and respects overlay -------
     fn collect_overlay_slots(
         ov: &BerthOccupancyOverlay<'_, '_, T, BooleanVecQuay>,
         tw: TimeInterval<T>,

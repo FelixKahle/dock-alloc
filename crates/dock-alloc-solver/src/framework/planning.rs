@@ -606,21 +606,43 @@ where
         t: TimePoint<T>,
         s: SpacePosition,
     ) -> Result<BrandedMovableAssignment<'alob, 'p, T, C>, ProposeError<T>> {
-        let rect = SpaceTimeRectangle::new(
+        // Validate that the chosen placement is within the region bounds
+        let region_time = region.region().rectangle().time();
+        let region_space = region.region().rectangle().space();
+
+        // Check time bounds
+        if t < region_time.start() || t >= region_time.end() {
+            return Err(ProposeError::FreeRegionViolation(FreeRegionViolationError(
+                SpaceTimeRectangle::new(
+                    SpaceInterval::new(s, s + req.length()),
+                    TimeInterval::new(t, t + req.processing_duration()),
+                ),
+            )));
+        }
+
+        // Check space bounds
+        let end_space = s + req.length();
+        if s < region_space.start() || end_space > region_space.end() {
+            return Err(ProposeError::FreeRegionViolation(FreeRegionViolationError(
+                SpaceTimeRectangle::new(
+                    SpaceInterval::new(s, end_space),
+                    TimeInterval::new(t, t + req.processing_duration()),
+                ),
+            )));
+        }
+
+        // The actual assignment rectangle (for the berth occupancy)
+        let assignment_rect = SpaceTimeRectangle::new(
             SpaceInterval::new(s, s + req.length()),
             TimeInterval::new(t, t + req.processing_duration()),
         );
-        if !region.region().rectangle().contains(&rect) {
-            return Err(ProposeError::FreeRegionViolation(FreeRegionViolationError(
-                rect,
-            )));
-        }
+
         let alov = self.alov.as_mut().expect("txn overlays already taken");
         let bov = self.bov.as_mut().expect("txn overlays already taken");
-        let a = AssignmentRef::new(req.request(), s, t);
-        let r2: SpaceTimeRectangle<T> = a.into();
+
         let ma = alov.commit_assignment(req.request(), t, s)?;
-        bov.occupy(&r2)?;
+        bov.occupy(&assignment_rect)?;
+
         Ok(ma)
     }
 

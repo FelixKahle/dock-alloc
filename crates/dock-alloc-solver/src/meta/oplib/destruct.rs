@@ -26,9 +26,13 @@ use crate::{
 };
 use dock_alloc_core::{
     SolverVariable,
+    space::SpacePosition,
     time::{TimeInterval, TimePoint},
 };
-use rand::seq::{IteratorRandom, SliceRandom};
+use rand::{
+    Rng,
+    seq::{IteratorRandom, SliceRandom},
+};
 use rand_chacha::ChaCha8Rng;
 
 pub struct DestructOperator<T, C, Q>
@@ -116,7 +120,7 @@ where
                 let option_slot = transaction.with_explorer(|explorer| {
                     explorer
                         .iter_slots_for_request_within(&request, time_search_window, quay_interval)
-                        .next()
+                        .choose(rng)
                 });
 
                 let res = match option_slot {
@@ -128,6 +132,151 @@ where
                 };
 
                 if res.is_err() {
+                    transaction.discard();
+                    return builder.build();
+                }
+            }
+
+            transaction.commit();
+            builder.build()
+        })
+    }
+}
+
+pub struct DestructRegionOperator<T, C, Q>
+where
+    T: SolverVariable,
+    C: SolverVariable,
+    Q: QuayRead,
+{
+    pub fraction: f64,
+    _phantom: core::marker::PhantomData<(T, C, Q)>,
+}
+
+impl<T, C, Q> Default for DestructRegionOperator<T, C, Q>
+where
+    T: SolverVariable,
+    C: SolverVariable,
+    Q: QuayRead,
+{
+    fn default() -> Self {
+        Self {
+            fraction: 0.05,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<T, C, Q> Operator for DestructRegionOperator<T, C, Q>
+where
+    T: SolverVariable,
+    C: SolverVariable + TryFrom<T> + TryFrom<usize>,
+    Q: QuayRead + Send + Sync,
+{
+    type Time = T;
+    type Cost = C;
+    type Quay = Q;
+
+    fn name(&self) -> &'static str {
+        "DestructRegionOperator"
+    }
+
+    fn propose<'p, 'al, 'bo>(
+        &self,
+        _: usize,
+        rng: &mut ChaCha8Rng,
+        ctx: PlanningContext<'p, 'al, 'bo, Self::Time, Self::Cost, Self::Quay>,
+    ) -> Plan<'p, Self::Time, Self::Cost> {
+        ctx.with_builder(|mut builder| {
+            let mut transaction = builder.begin();
+
+            let victims = transaction.with_explorer(|explorer| {
+                let n = explorer.iter_movable_assignments().count();
+                let f = self.fraction.clamp(0.0, 1.0);
+                let mut k = (f * n as f64).round() as usize;
+                if f > 0.0 {
+                    k = k.max(1);
+                }
+
+                explorer.iter_movable_assignments().choose_multiple(rng, k)
+            });
+
+            let mut unassigned: Vec<_> = victims
+                .into_iter()
+                .filter_map(|v| transaction.propose_unassign(&v).ok().map(|res| (v, res)))
+                .collect();
+
+            unassigned.shuffle(rng);
+
+            let latest_event_time = transaction
+                .problem()
+                .iter_any_requests()
+                .map(|r| r.arrival_time())
+                .max()
+                .unwrap_or(TimePoint::zero())
+                + transaction
+                    .problem()
+                    .iter_any_requests()
+                    .map(|r| r.processing_duration())
+                    .sum();
+            let quay_interval = transaction.problem().quay_interval();
+
+            for target in unassigned {
+                let request = target.0.branded_request();
+                let arrival = request.arrival_time();
+                let time_search_window = TimeInterval::new(arrival, latest_event_time);
+
+                let option_region = transaction.with_explorer(|explorer| {
+                    explorer
+                        .iter_regions_for_request_within(
+                            &request,
+                            time_search_window,
+                            quay_interval,
+                        )
+                        .choose(rng)
+                });
+
+                let branded_region = match option_region {
+                    Some(r) => r,
+                    None => {
+                        transaction.discard();
+                        return builder.build();
+                    }
+                };
+
+                let rectangle = branded_region.region().rectangle();
+
+                let time_bounds = rectangle.time();
+                let space_bounds = rectangle.space();
+                let proc_duration = request.processing_duration();
+                let req_length = request.length();
+
+                // Random start time (earliest possible to latest valid)
+                let latest_start_time = time_bounds.end() - proc_duration;
+                let chosen_time = if time_bounds.start() >= latest_start_time {
+                    time_bounds.start()
+                } else {
+                    let range = latest_start_time.value() - time_bounds.start().value();
+                    let offset = T::from(rng.random_range(T::zero()..=range)).unwrap_or(T::zero());
+                    TimePoint::new(time_bounds.start().value() + offset)
+                };
+
+                let latest_start_pos = space_bounds
+                    .end()
+                    .value()
+                    .saturating_sub(req_length.value());
+                let chosen_pos = if space_bounds.start().value() >= latest_start_pos {
+                    space_bounds.start()
+                } else {
+                    let range = latest_start_pos - space_bounds.start().value();
+                    let offset = rng.random_range(0..=range);
+                    SpacePosition::new(space_bounds.start().value() + offset)
+                };
+
+                if transaction
+                    .propose_assign_at(&request, &branded_region, chosen_time, chosen_pos)
+                    .is_err()
+                {
                     transaction.discard();
                     return builder.build();
                 }
