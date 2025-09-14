@@ -34,7 +34,7 @@ use rand_chacha::ChaCha8Rng;
 pub struct CascadeRelocateOperator<T, C, Q> {
     pub attempts: usize,
     pub max_group: usize,
-    _p: core::marker::PhantomData<(T, C, Q)>,
+    _phantom: core::marker::PhantomData<(T, C, Q)>,
 }
 
 impl<T, C, Q> Default for CascadeRelocateOperator<T, C, Q>
@@ -47,7 +47,7 @@ where
         Self {
             attempts: 16,
             max_group: 6,
-            _p: core::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         }
     }
 }

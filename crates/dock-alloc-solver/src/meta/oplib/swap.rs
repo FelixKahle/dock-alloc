@@ -29,7 +29,7 @@ use rand::seq::IteratorRandom;
 
 pub struct SwapOperator<T, C, Q> {
     pub attempts: usize,
-    _p: core::marker::PhantomData<(T, C, Q)>,
+    _phantom: core::marker::PhantomData<(T, C, Q)>,
 }
 
 impl<T: SolverVariable, C: SolverVariable + TryFrom<T> + TryFrom<usize>, Q: QuayRead + Send + Sync>
@@ -38,7 +38,7 @@ impl<T: SolverVariable, C: SolverVariable + TryFrom<T> + TryFrom<usize>, Q: Quay
     fn default() -> Self {
         Self {
             attempts: 32,
-            _p: core::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         }
     }
 }

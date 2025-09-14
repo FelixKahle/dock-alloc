@@ -37,7 +37,7 @@ where
     Q: QuayRead,
 {
     pub attempts: usize,
-    _p: core::marker::PhantomData<(T, C, Q)>,
+    _phantom: core::marker::PhantomData<(T, C, Q)>,
 }
 
 impl<T, C, Q> Default for LatePenaltyFocusOperator<T, C, Q>
@@ -49,7 +49,7 @@ where
     fn default() -> Self {
         Self {
             attempts: 8,
-            _p: core::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         }
     }
 }
