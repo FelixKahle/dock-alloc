@@ -39,7 +39,6 @@ use dock_alloc_core::{
 };
 use dock_alloc_model::prelude::*;
 use std::{fmt::Debug, ops::Bound::Excluded};
-use tracing::instrument;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Slices<'a, T, Q>
@@ -252,7 +251,6 @@ where
         self.timeline.at(t)
     }
 
-    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn is_free(
         &self,
@@ -275,7 +273,6 @@ where
         Ok(true)
     }
 
-    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn is_occupied(
         &self,
@@ -284,7 +281,6 @@ where
         Ok(!self.is_free(rect)?)
     }
 
-    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn iter_free_slots(
         &self,
@@ -299,7 +295,6 @@ where
         FreeSlotIter::new(self, time_window, duration, required_space, space_window)
     }
 
-    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn iter_free_regions(
         &self,
@@ -345,7 +340,6 @@ where
             })
     }
 
-    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn occupy(
         &mut self,
@@ -354,7 +348,6 @@ where
         self.apply_in(rect, |quay, space_interval| quay.occupy(space_interval))
     }
 
-    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn free(
         &mut self,
@@ -363,7 +356,6 @@ where
         self.apply_in(rect, |quay, space_interval| quay.free(space_interval))
     }
 
-    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn push_operation(
         &mut self,
@@ -380,7 +372,6 @@ where
         Ok(())
     }
 
-    #[instrument(level = "debug", skip_all)]
     #[inline]
     pub fn apply(
         &mut self,
