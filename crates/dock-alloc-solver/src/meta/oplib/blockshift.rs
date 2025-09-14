@@ -31,7 +31,7 @@ use rand_chacha::ChaCha8Rng;
 pub struct BlockShiftOperator<T, C, Q> {
     pub max_block: usize,
     pub attempts: usize,
-    _p: core::marker::PhantomData<(T, C, Q)>,
+    _phantom: core::marker::PhantomData<(T, C, Q)>,
 }
 
 impl<T, C, Q> Default for BlockShiftOperator<T, C, Q>
@@ -44,7 +44,7 @@ where
         Self {
             max_block: 4,
             attempts: 16,
-            _p: core::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         }
     }
 }

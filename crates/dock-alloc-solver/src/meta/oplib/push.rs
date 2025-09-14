@@ -34,7 +34,7 @@ use rand_chacha::ChaCha8Rng;
 
 pub struct PushBackOperator<T, C, Q> {
     pub attempts: usize,
-    _p: core::marker::PhantomData<(T, C, Q)>,
+    _phantom: core::marker::PhantomData<(T, C, Q)>,
 }
 
 impl<T, C, Q> Default for PushBackOperator<T, C, Q>
@@ -46,7 +46,7 @@ where
     fn default() -> Self {
         Self {
             attempts: 16,
-            _p: core::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         }
     }
 }

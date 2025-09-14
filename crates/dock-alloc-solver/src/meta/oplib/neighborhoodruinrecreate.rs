@@ -42,7 +42,7 @@ where
     pub space_radius: SpaceLength,
     pub attempts: usize,
     pub shuffle_recreate: bool,
-    _p: core::marker::PhantomData<(T, C, Q)>,
+    _phantom: core::marker::PhantomData<(T, C, Q)>,
 }
 
 impl<T, C, Q> Default for NeighborhoodRuinRecreateOperator<T, C, Q>
@@ -57,7 +57,7 @@ where
             space_radius: SpaceLength::new(0),
             attempts: 8,
             shuffle_recreate: true,
-            _p: core::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         }
     }
 }

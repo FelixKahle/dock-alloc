@@ -1,3 +1,24 @@
+// Copyright (c) 2025 Felix Kahle.
+//
+// Permission is hereby granted, free of charge, to any person obtaining
+// a copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to
+// permit persons to whom the Software is furnished to do so, subject to
+// the following conditions:
+//
+// The above copyright notice and this permission notice shall be
+// included in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 use crate::{
     berth::quay::QuayRead,
     framework::planning::{Plan, PlanningContext},
@@ -9,7 +30,7 @@ use rand_chacha::ChaCha8Rng;
 
 pub struct WindowTightenOperator<T, C, Q> {
     pub attempts: usize,
-    _p: core::marker::PhantomData<(T, C, Q)>,
+    _phantom: core::marker::PhantomData<(T, C, Q)>,
 }
 
 impl<T, C, Q> Default for WindowTightenOperator<T, C, Q>
@@ -21,7 +42,7 @@ where
     fn default() -> Self {
         Self {
             attempts: 4,
-            _p: core::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         }
     }
 }
@@ -50,106 +71,60 @@ where
             for _ in 0..self.attempts {
                 let mut txn = builder.begin();
 
-                let (Some(a), Some(b)) = txn.with_explorer(|ex| {
-                    (
-                        ex.iter_movable_assignments().choose(rng),
-                        ex.iter_movable_assignments().choose(rng),
-                    )
-                }) else {
+                let Some(x) = txn.with_explorer(|ex| ex.iter_movable_assignments().choose(rng))
+                else {
                     return builder.build();
                 };
 
-                let ta = a.assignment().start_time();
-                let tb = b.assignment().start_time();
-                let (t_lo, t_hi) = if ta <= tb { (ta, tb) } else { (tb, ta) };
+                let req = x.branded_request();
+                let cur_t = x.assignment().start_time();
+                let cur_s = x.assignment().start_position();
+                if cur_t <= req.arrival_time() {
+                    txn.discard();
+                    continue;
+                }
 
-                let mut within: Vec<_> = txn.with_explorer(|ex| {
-                    ex.iter_movable_assignments()
-                        .filter(|x| {
-                            let t = x.assignment().start_time();
-                            t >= t_lo && t <= t_hi
-                        })
-                        .collect()
+                let time_window = TimeInterval::new(req.arrival_time(), cur_t);
+                let space_window = SpaceInterval::new(cur_s, cur_s + req.length());
+
+                let best_earlier = txn.with_explorer(|ex| {
+                    ex.iter_slots_for_request_within(&req, time_window, space_window)
+                        .min_by_key(|s| s.slot().start_time())
                 });
 
-                if within.is_empty() {
+                let Some(preview) = best_earlier else {
+                    txn.discard();
+                    continue;
+                };
+                if preview.slot().start_time() >= cur_t {
                     txn.discard();
                     continue;
                 }
 
-                within.sort_by_key(|x| x.assignment().start_time());
-                within.reverse();
-
-                let mut changed = false;
-                let mut aborted = false;
-
-                for x in within {
-                    let req = x.branded_request();
-                    let cur_t = x.assignment().start_time();
-                    let cur_s = x.assignment().start_position();
-                    let len = req.length();
-
-                    if cur_t <= req.arrival_time() {
-                        continue;
-                    }
-
-                    let time_window = TimeInterval::new(req.arrival_time(), cur_t);
-                    let space_window = SpaceInterval::new(cur_s, cur_s + len);
-
-                    let best_earlier = txn.with_explorer(|ex| {
-                        ex.iter_slots_for_request_within(&req, time_window, space_window)
-                            .min_by_key(|s| s.slot().start_time())
-                    });
-
-                    let Some(preview_slot) = best_earlier else {
-                        continue;
-                    };
-                    if preview_slot.slot().start_time() >= cur_t {
-                        continue;
-                    }
-
-                    if txn.propose_unassign(&x).is_err() {
-                        aborted = true;
-                        break;
-                    }
-
-                    let still_free = txn.with_explorer(|ex| {
-                        ex.iter_slots_for_request_within(&req, time_window, space_window)
-                            .any(|cand| {
-                                cand.slot().start_time() == preview_slot.slot().start_time()
-                                    && cand.slot().space().start()
-                                        == preview_slot.slot().space().start()
-                                    && cand.slot().space().end()
-                                        == preview_slot.slot().space().end()
-                            })
-                    });
-
-                    if !still_free {
-                        aborted = true;
-                        break;
-                    }
-
-                    if txn.propose_assign(&req, preview_slot).is_err() {
-                        aborted = true;
-                        break;
-                    }
-
-                    changed = true;
+                if txn.propose_unassign(&x).is_err() {
+                    txn.discard();
+                    continue;
                 }
-
-                if aborted {
+                let fresh = txn.with_explorer(|ex| {
+                    ex.iter_slots_for_request_within(&req, time_window, space_window)
+                        .find(|cand| {
+                            cand.slot().start_time() == preview.slot().start_time()
+                                && cand.slot().space().start() == preview.slot().space().start()
+                                && cand.slot().space().end() == preview.slot().space().end()
+                        })
+                });
+                let Some(chosen) = fresh else {
+                    txn.discard();
+                    continue;
+                };
+                if txn.propose_assign(&req, chosen).is_err() {
                     txn.discard();
                     continue;
                 }
 
-                if changed {
-                    txn.commit();
-                    return builder.build();
-                } else {
-                    txn.discard();
-                }
+                txn.commit();
+                return builder.build();
             }
-
             builder.build()
         })
     }

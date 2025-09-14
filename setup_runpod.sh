@@ -48,6 +48,14 @@ if [[ -f "$HOME/.cargo/env" ]]; then
   source "$HOME/.cargo/env"
 fi
 
+# Ensure ~/.cargo/bin is permanently on PATH (idempotent)
+if ! grep -q 'export PATH="$HOME/.cargo/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null; then
+  echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$HOME/.bashrc"
+fi
+if [[ -f "$HOME/.profile" ]] && ! grep -q 'export PATH="$HOME/.cargo/bin:$PATH"' "$HOME/.profile"; then
+  echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$HOME/.profile"
+fi
+
 # Ensure stable toolchain and components
 echo "==> Ensuring stable toolchain + components..."
 rustup toolchain install stable -q || true

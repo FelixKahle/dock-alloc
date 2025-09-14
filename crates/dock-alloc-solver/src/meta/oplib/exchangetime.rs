@@ -29,9 +29,8 @@ use rand::seq::IteratorRandom;
 use rand_chacha::ChaCha8Rng;
 
 pub struct TwoExchangeTimeOperator<T, C, Q> {
-    /// How many random pairs to try per call.
     pub attempts: usize,
-    _p: core::marker::PhantomData<(T, C, Q)>,
+    _phantom: core::marker::PhantomData<(T, C, Q)>,
 }
 
 impl<T, C, Q> Default for TwoExchangeTimeOperator<T, C, Q>
@@ -43,7 +42,7 @@ where
     fn default() -> Self {
         Self {
             attempts: 32,
-            _p: core::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         }
     }
 }

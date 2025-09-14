@@ -43,7 +43,7 @@ where
 {
     pub attempts: usize,
     pub lateral_slack: usize,
-    _p: core::marker::PhantomData<(T, C, Q)>,
+    _phantom: core::marker::PhantomData<(T, C, Q)>,
 }
 
 impl<T, C, Q> Default for PairSwapBandOperator<T, C, Q>
@@ -56,7 +56,7 @@ where
         Self {
             attempts: 32,
             lateral_slack: 4,
-            _p: core::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         }
     }
 }
