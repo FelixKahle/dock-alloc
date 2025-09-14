@@ -78,6 +78,7 @@ where
                 }
 
                 within.sort_by_key(|x| x.assignment().start_time());
+                within.reverse();
 
                 let mut changed = false;
                 let mut aborted = false;
@@ -100,10 +101,10 @@ where
                             .min_by_key(|s| s.slot().start_time())
                     });
 
-                    let Some(slot) = best_earlier else {
+                    let Some(preview_slot) = best_earlier else {
                         continue;
                     };
-                    if slot.slot().start_time() >= cur_t {
+                    if preview_slot.slot().start_time() >= cur_t {
                         continue;
                     }
 
@@ -111,10 +112,28 @@ where
                         aborted = true;
                         break;
                     }
-                    if txn.propose_assign(&req, slot).is_err() {
+
+                    let still_free = txn.with_explorer(|ex| {
+                        ex.iter_slots_for_request_within(&req, time_window, space_window)
+                            .any(|cand| {
+                                cand.slot().start_time() == preview_slot.slot().start_time()
+                                    && cand.slot().space().start()
+                                        == preview_slot.slot().space().start()
+                                    && cand.slot().space().end()
+                                        == preview_slot.slot().space().end()
+                            })
+                    });
+
+                    if !still_free {
                         aborted = true;
                         break;
                     }
+
+                    if txn.propose_assign(&req, preview_slot).is_err() {
+                        aborted = true;
+                        break;
+                    }
+
                     changed = true;
                 }
 
@@ -128,7 +147,6 @@ where
                     return builder.build();
                 } else {
                     txn.discard();
-                    continue;
                 }
             }
 
