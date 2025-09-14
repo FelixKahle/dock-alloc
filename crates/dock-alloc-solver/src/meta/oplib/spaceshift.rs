@@ -88,26 +88,42 @@ where
                 let cur_s = a.assignment().start_position();
                 let len = req.length();
 
-                // choose random shift left (-) or right (+)
+                // Pick a signed space shift in [-max_shift, +max_shift]
                 let shift: i64 = rng.random_range(-(self.max_shift as i64)..=self.max_shift as i64);
                 if shift == 0 {
                     txn.discard();
                     continue;
                 }
 
-                // compute new position
-                let new_s = match (cur_s.value() as i64).try_into() {
-                    Ok(v) => SpacePosition::new(v),
-                    _ => {
-                        txn.discard();
-                        continue;
-                    }
+                // Apply shift with saturation (usize-safe)
+                let base = cur_s.value();
+                let new_s_val = if shift >= 0 {
+                    base.saturating_add(shift as usize)
+                } else {
+                    base.saturating_sub((-shift) as usize)
                 };
+                let new_s = SpacePosition::new(new_s_val);
+                if new_s == cur_s {
+                    txn.discard();
+                    continue;
+                }
 
-                let space_window = SpaceInterval::new(new_s, new_s + len);
-                let time_window = TimeInterval::new(cur_t, cur_t + req.processing_duration());
+                // Build exact band at the shifted position, using saturating math for the end
+                let end_s = SpacePosition::new(new_s.value().saturating_add(len.value()));
+                let space_window = SpaceInterval::new(new_s, end_s);
 
-                // find slot at same start time but shifted in space
+                // Early bounds checks: quay + request’s own feasible window
+                let quay_band = txn.problem().quay_interval();
+                if !quay_band.contains_interval(&space_window)
+                    || !req.feasible_space_window().contains_interval(&space_window)
+                {
+                    txn.discard();
+                    continue;
+                }
+
+                // Keep the same start time; search for a feasible slot in the shifted band
+                let proc = req.processing_duration();
+                let time_window = TimeInterval::new(cur_t, cur_t + proc);
                 let slot = txn.with_explorer(|ex| {
                     ex.iter_slots_for_request_within(&req, time_window, space_window)
                         .find(|s| s.slot().start_time() == cur_t)
@@ -118,7 +134,7 @@ where
                     continue;
                 };
 
-                // Apply: unassign + assign in new position
+                // Apply: unassign then reassign in the new band
                 if txn.propose_unassign(&a).is_err() {
                     txn.discard();
                     continue;
