@@ -108,10 +108,11 @@ where
                     .map(|r| r.processing_duration())
                     .sum();
             let quay_interval = transaction.problem().quay_interval();
-            let time_search_window = TimeInterval::new(TimePoint::zero(), latest_event_time);
 
             for target in unassigned {
                 let request = target.0.branded_request();
+                let arrival = request.arrival_time();
+                let time_search_window = TimeInterval::new(arrival, latest_event_time);
                 let option_slot = transaction.with_explorer(|explorer| {
                     explorer
                         .iter_slots_for_request_within(&request, time_search_window, quay_interval)

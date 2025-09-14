@@ -19,10 +19,7 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use dock_alloc_model::{
-    generator::{InstanceGenConfig, InstanceGenerator},
-    model::Problem,
-};
+use dock_alloc_model::prelude::*;
 use dock_alloc_solver::meta::oplib::{self};
 use dock_alloc_solver::{
     berth::quay::BTreeMapQuay,

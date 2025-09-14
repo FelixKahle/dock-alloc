@@ -64,6 +64,7 @@ pub struct DoubleBuf<T> {
 }
 
 impl<T> DoubleBuf<T> {
+    #[inline]
     pub fn new() -> Self {
         Self {
             a: Vec::new(),
@@ -71,6 +72,7 @@ impl<T> DoubleBuf<T> {
         }
     }
 
+    #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             a: Vec::with_capacity(capacity),

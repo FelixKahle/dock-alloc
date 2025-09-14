@@ -37,7 +37,7 @@ use dock_alloc_core::{
     space::{SpaceInterval, SpaceLength, SpacePosition},
     time::{TimeDelta, TimeInterval, TimePoint},
 };
-use dock_alloc_model::model::Problem;
+use dock_alloc_model::prelude::*;
 use std::{fmt::Debug, ops::Bound::Excluded};
 use tracing::instrument;
 

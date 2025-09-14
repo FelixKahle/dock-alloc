@@ -19,7 +19,6 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use crate::model::{Assignment, Fixed, Movable, Problem, ProblemBuilder, Request, RequestId};
 use dock_alloc_core::{
     SolverVariable,
     cost::Cost,
@@ -34,6 +33,13 @@ use rand_distr::{Distribution, Exp, Normal, Uniform, uniform::SampleUniform};
 use std::{
     cmp::Ordering,
     fmt::{Debug, Display},
+};
+
+use crate::{
+    dec::Assignment,
+    id::RequestId,
+    problem::{Problem, ProblemBuilder},
+    req::{Fixed, Movable, Request},
 };
 
 #[derive(Debug, Clone, PartialEq)]

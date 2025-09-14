@@ -77,6 +77,7 @@ impl<T: Copy> Cost<T> {
         Cost(self.0.saturating_sub(&other.0))
     }
 
+    #[inline]
     pub fn saturating_mul(self, factor: T) -> Self
     where
         T: SaturatingMul<Output = T> + Copy,
@@ -84,6 +85,7 @@ impl<T: Copy> Cost<T> {
         Cost(self.0.saturating_mul(&factor))
     }
 
+    #[inline]
     pub fn ratio<D>(self, divisor: Cost<T>) -> Option<D>
     where
         T: Copy + Zero + Into<D>,

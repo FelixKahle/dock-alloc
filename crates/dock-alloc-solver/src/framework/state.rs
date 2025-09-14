@@ -33,10 +33,7 @@ use dock_alloc_core::{
     space::{SpaceInterval, SpacePosition},
     time::{TimeInterval, TimePoint},
 };
-use dock_alloc_model::model::{
-    AssignmentBeforeArrivalTimeError, AssignmentExceedsQuayError,
-    AssignmentOutsideSpaceWindowError, AssignmentRef, Kind, Problem, RequestId, SolutionRef,
-};
+use dock_alloc_model::prelude::*;
 use std::fmt::{Debug, Display};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -379,11 +376,21 @@ impl std::fmt::Display for MismatchedOperationsAmountsError {
 
 impl std::error::Error for MismatchedOperationsAmountsError {}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum FeasibleSolverStateApplyError<T: SolverVariable> {
     Quay(QuaySpaceIntervalOutOfBoundsError),
     Ledger(LedgerApplyValidationError<T>),
     MismatchedAmounts(MismatchedOperationsAmountsError),
+}
+
+impl<T: SolverVariable + Clone> Clone for FeasibleSolverStateApplyError<T> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Quay(arg0) => Self::Quay(arg0.clone()),
+            Self::Ledger(arg0) => Self::Ledger(arg0.clone()),
+            Self::MismatchedAmounts(arg0) => Self::MismatchedAmounts(arg0.clone()),
+        }
+    }
 }
 
 impl<T: SolverVariable + Display + Debug> std::fmt::Display for FeasibleSolverStateApplyError<T> {

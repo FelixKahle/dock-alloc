@@ -19,10 +19,9 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use std::fmt::Display;
-
 use dock_alloc_core::SolverVariable;
-use dock_alloc_model::model::{AssignmentRef, Movable};
+use dock_alloc_model::prelude::*;
+use std::fmt::Display;
 
 #[repr(transparent)]
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -43,7 +43,7 @@ use dock_alloc_core::{
     space::{SpaceInterval, SpacePosition},
     time::{TimeDelta, TimeInterval, TimePoint},
 };
-use dock_alloc_model::model::{AnyAssignmentRef, AssignmentRef, Fixed, Kind, Problem};
+use dock_alloc_model::prelude::*;
 use std::fmt::{Debug, Display};
 
 pub struct PlanningContext<'p, 'al, 'bo, T, C, Q>

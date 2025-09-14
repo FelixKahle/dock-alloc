@@ -20,14 +20,13 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 pub mod destruct;
-pub mod noop;
 pub mod pull;
 pub mod relocate;
 
 pub mod prelude {
-    pub use super::{destruct::*, noop::*, pull::*, relocate::*};
+    pub use super::{destruct::*, pull::*, relocate::*};
     use crate::meta::operator::Operator;
-    use dock_alloc_model::model::Problem;
+    use dock_alloc_model::prelude::*;
     use num_traits::FromPrimitive;
 
     pub fn op_list<T, C, Q>(
@@ -42,7 +41,6 @@ pub mod prelude {
         Q: crate::berth::quay::QuayRead + Send + Sync + 'static,
     {
         vec![
-            Box::new(NoOpOperator::<T, C, Q>::default()),
             Box::new(DestructOperator::<T, C, Q>::default()),
             Box::new(RelocateGreedyOperator::<T, C, Q>::default()),
             Box::new(PullForwardOperator::<T, C, Q>::default()),

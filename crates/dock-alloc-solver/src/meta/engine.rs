@@ -19,17 +19,6 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-use dock_alloc_core::{SolverVariable, cost::Cost};
-use num_traits::Zero;
-use rand::{Rng, SeedableRng, rngs::StdRng};
-use rand_chacha::ChaCha8Rng;
-use rayon::prelude::*;
-use std::{
-    cell::RefCell,
-    fmt::{Debug, Display},
-    time::{Duration, Instant},
-};
-
 use crate::{
     berth::quay::{QuayRead, QuayWrite},
     framework::{
@@ -40,6 +29,17 @@ use crate::{
         config::{AllocationConfig, MetaConfig, StatsConfig},
         operator::Operator,
     },
+};
+use dock_alloc_core::{SolverVariable, cost::Cost};
+use dock_alloc_model::prelude::*;
+use num_traits::Zero;
+use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand_chacha::ChaCha8Rng;
+use rayon::prelude::*;
+use std::{
+    cell::RefCell,
+    fmt::{Debug, Display},
+    time::{Duration, Instant},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -215,7 +215,7 @@ where
 
     pub fn construct_initial_state<'p>(
         &mut self,
-        problem: &'p dock_alloc_model::model::Problem<T, C>,
+        problem: &'p Problem<T, C>,
     ) -> Result<FeasibleSolverState<'p, T, C, Q>, S::SolveError> {
         self.construction_solver.build_state(problem)
     }
@@ -359,8 +359,8 @@ where
 
     fn solve<'p>(
         &mut self,
-        problem: &'p dock_alloc_model::model::Problem<T, C>,
-    ) -> Result<dock_alloc_model::model::SolutionRef<'p, T, C>, Self::SolveError> {
+        problem: &'p Problem<T, C>,
+    ) -> Result<SolutionRef<'p, T, C>, Self::SolveError> {
         // 1) build initial feasible state
         let mut state = self
             .construction_solver
