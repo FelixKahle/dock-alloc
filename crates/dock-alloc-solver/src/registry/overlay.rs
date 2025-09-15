@@ -143,8 +143,8 @@ where
     }
 
     #[inline]
-    pub fn feasible_space_window(&self) -> SpaceInterval {
-        self.inner.feasible_space_window()
+    pub fn feasible_space_windows(&self) -> &[SpaceInterval] {
+        self.inner.feasible_space_windows()
     }
 
     #[inline]
@@ -596,7 +596,10 @@ mod tests {
             SpacePosition::new(s0),
             Cost::new(1),
             Cost::new(1),
-            SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
+            vec![SpaceInterval::new(
+                SpacePosition::new(s0),
+                SpacePosition::new(s1),
+            )],
         )
         .expect("valid movable request")
     }
@@ -617,7 +620,10 @@ mod tests {
             SpacePosition::new(s0),
             Cost::new(1),
             Cost::new(1),
-            SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
+            vec![SpaceInterval::new(
+                SpacePosition::new(s0),
+                SpacePosition::new(s1),
+            )],
         )
         .expect("valid fixed request")
     }

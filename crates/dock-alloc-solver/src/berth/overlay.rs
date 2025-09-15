@@ -101,12 +101,6 @@ where
     }
 }
 
-/// A non-destructive overlay for a `BerthOccupancy`.
-///
-/// This struct allows for temporary modifications to the occupancy state without
-/// altering the underlying `BerthOccupancy`. It works by tracking occupied and freed
-/// regions as deltas in separate maps. This is useful for speculative modifications
-/// during a search algorithm.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BerthOccupancyOverlay<'brand, 'a, T, Q>
 where
@@ -172,17 +166,17 @@ where
             .next_back()
             .copied();
 
-        fn last_effective<'m, TimeType: SolverVariable>(
-            map: &'m BTreeMap<TimePoint<TimeType>, SpaceIntervalSet>,
+        fn last_effective<TimeType: SolverVariable>(
+            map: &BTreeMap<TimePoint<TimeType>, SpaceIntervalSet>,
             tp: TimePoint<TimeType>,
             last_barrier: Option<TimePoint<TimeType>>,
-        ) -> Option<(TimePoint<TimeType>, &'m SpaceIntervalSet)> {
+        ) -> Option<(TimePoint<TimeType>, &SpaceIntervalSet)> {
             let (k_ref, set) = map.range(..=tp).next_back()?;
             let k = *k_ref;
-            if let Some(b) = last_barrier {
-                if b > k {
-                    return None;
-                }
+            if let Some(b) = last_barrier
+                && b > k
+            {
+                return None;
             }
             Some((k, set))
         }
@@ -615,34 +609,46 @@ where
 
     /// Returns an iterator over all `FreeSlot`s, considering the overlay.
     #[inline]
+    #[allow(clippy::type_complexity)]
     pub fn iter_free_slots(
-        &'a self,
+        &self,
         time_window: TimeInterval<T>,
         duration: TimeDelta<T>,
         required_space: SpaceLength,
         space_window: SpaceInterval,
-    ) -> impl Iterator<Item = BrandedFreeSlot<'brand, T>> + 'a
+    ) -> core::iter::Map<
+        FreeSlotIter<'_, T, BerthOccupancyOverlay<'brand, 'a, T, Q>>,
+        fn(FreeSlot<T>) -> BrandedFreeSlot<'brand, T>,
+    >
     where
         T: Copy,
     {
+        fn brand_slot<'b, Tx: SolverVariable>(x: FreeSlot<Tx>) -> BrandedFreeSlot<'b, Tx> {
+            BrandedFreeSlot::new(x)
+        }
+
         FreeSlotIter::new(self, time_window, duration, required_space, space_window)
-            .map(|slot| BrandedFreeSlot::new(slot))
+            .map(brand_slot::<'brand, T>)
     }
 
-    /// Returns an iterator over all feasible `SpaceTimeRectangle` regions, considering the overlay.
     #[inline]
+    #[allow(clippy::type_complexity)]
     pub fn iter_free_regions(
-        &'a self,
+        &self,
         window: TimeInterval<T>,
         duration: TimeDelta<T>,
         required_space: SpaceLength,
         space_window: SpaceInterval,
-    ) -> impl Iterator<Item = BrandedFreeRegion<'brand, T>> + 'a
-    where
-        T: Copy,
-    {
+    ) -> core::iter::Map<
+        FeasibleRegionIter<'_, T, BerthOccupancyOverlay<'brand, 'a, T, Q>>,
+        fn(FreeRegion<T>) -> BrandedFreeRegion<'brand, T>,
+    > {
+        fn brand_region<'b, Tx: SolverVariable>(r: FreeRegion<Tx>) -> BrandedFreeRegion<'b, Tx> {
+            BrandedFreeRegion::new(r)
+        }
+
         FeasibleRegionIter::new(self, window, duration, required_space, space_window)
-            .map(|region| BrandedFreeRegion::new(region))
+            .map(brand_region::<'brand, T>)
     }
 
     /// Finds the next timeline key after a given time point, considering base, overlay, and barriers.
@@ -715,7 +721,6 @@ mod tests {
         SpaceTimeRectangle::new(si, tw)
     }
 
-    // ------- Smoke: construct overlay, no ops recorded initially -------
     #[test]
     fn test_overlay_constructs_empty_and_refs_base() {
         let berth = BO::new(len(10));
@@ -724,7 +729,6 @@ mod tests {
         assert!(ov.operations().is_empty());
     }
 
-    // ------- add_free / add_occupy (single timepoint deltas) + is_free / is_occupied -------
     #[test]
     fn test_overlay_add_free_and_add_occupy_affect_queries() {
         let mut berth = BO::new(len(10));
@@ -756,7 +760,6 @@ mod tests {
         assert!(ov.is_free(&rect(ti(4, 6), si(4, 5))).unwrap());
     }
 
-    // ------- iter_free_slots yields Branded wrapper and respects overlay -------
     fn collect_overlay_slots(
         ov: &BerthOccupancyOverlay<'_, '_, T, BooleanVecQuay>,
         tw: TimeInterval<T>,

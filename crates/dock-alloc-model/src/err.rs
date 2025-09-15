@@ -120,10 +120,10 @@ impl<T: SolverVariable + std::fmt::Debug + Display> std::error::Error
 {
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AssignmentOutsideSpaceWindowError {
     id: RequestId,
-    space_window: SpaceInterval,
+    space_windows: Vec<SpaceInterval>,
     assigned_interval: SpaceInterval,
 }
 
@@ -131,12 +131,12 @@ impl AssignmentOutsideSpaceWindowError {
     #[inline]
     pub fn new(
         id: RequestId,
-        space_window: SpaceInterval,
+        space_windows: Vec<SpaceInterval>,
         assigned_interval: SpaceInterval,
     ) -> Self {
         Self {
             id,
-            space_window,
+            space_windows,
             assigned_interval,
         }
     }
@@ -147,8 +147,8 @@ impl AssignmentOutsideSpaceWindowError {
     }
 
     #[inline]
-    pub fn space_window(&self) -> SpaceInterval {
-        self.space_window
+    pub fn space_windows(&self) -> &[SpaceInterval] {
+        &self.space_windows
     }
 
     #[inline]
@@ -158,10 +158,16 @@ impl AssignmentOutsideSpaceWindowError {
 }
 impl Display for AssignmentOutsideSpaceWindowError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let windows = self
+            .space_windows
+            .iter()
+            .map(|w| w.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
         write!(
             f,
-            "Assignment for request {} is outside its space window: {} not in {}",
-            self.id, self.assigned_interval, self.space_window
+            "Assignment for request {} is outside its space windows: {} not in [{}]",
+            self.id, self.assigned_interval, windows
         )
     }
 }
@@ -322,7 +328,7 @@ impl Display for PreassignedOverlapError {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ProblemBuildError<T: SolverVariable> {
     DuplicateRequestId(RequestId),
     AssignmentBeforeArrivalTime(AssignmentBeforeArrivalTimeError<T>),

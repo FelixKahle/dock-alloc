@@ -300,10 +300,10 @@ where
             let s1 = SpacePosition::new(s0.value() + r.length().value());
 
             let assigned = SpaceInterval::new(s0, s1);
-            let window = r.feasible_space_window();
-            if !window.contains_interval(&assigned) {
+            let windows = r.feasible_space_windows();
+            if !windows.iter().any(|w| w.contains_interval(&assigned)) {
                 return Err(SolutionValidationError::AssignmentOutsideSpaceWindow(
-                    AssignmentOutsideSpaceWindowError::new(id, window, assigned),
+                    AssignmentOutsideSpaceWindowError::new(id, windows.to_vec(), assigned),
                 ));
             }
 
@@ -368,7 +368,10 @@ mod tests {
             SpacePosition::new(target),
             Cost::new(1),
             Cost::new(1),
-            SpaceInterval::new(SpacePosition::new(s_lo), SpacePosition::new(s_hi)),
+            vec![SpaceInterval::new(
+                SpacePosition::new(s_lo),
+                SpacePosition::new(s_hi),
+            )],
         )
         .expect("valid req")
     }
@@ -388,7 +391,10 @@ mod tests {
             SpacePosition::new(10),
             Cost::new(2), // per time unit
             Cost::new(3), // per space unit
-            SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(100)),
+            vec![SpaceInterval::new(
+                SpacePosition::new(0),
+                SpacePosition::new(100),
+            )],
         )
         .unwrap();
 

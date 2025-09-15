@@ -200,52 +200,111 @@ where
     }
 }
 
-struct Keys<'v, T, V>
-where
-    T: SolverVariable,
-    V: SliceView<T> + ?Sized + 'v,
-{
-    view: &'v V,
-    cursor: TimePoint<T>,
+fn keys_in<'a, T, V>(
+    view: &'a V,
+    from: TimePoint<T>,
     to: TimePoint<T>,
-    done: bool,
-    _phantom: std::marker::PhantomData<T>,
-}
-impl<'v, T, V> Keys<'v, T, V>
+) -> impl Iterator<Item = TimePoint<T>> + 'a
 where
-    T: SolverVariable,
-    V: SliceView<T> + ?Sized + 'v,
+    T: SolverVariable + 'a,
+    V: SliceView<T> + ?Sized + 'a,
 {
-    fn new(view: &'v V, from: TimePoint<T>, to: TimePoint<T>) -> Self {
-        Self {
-            view,
-            cursor: from,
-            to,
-            done: false,
-            _phantom: Default::default(),
-        }
+    struct Keys<'v, T: SolverVariable, V: ?Sized> {
+        view: &'v V,
+        cur: TimePoint<T>,
+        to: TimePoint<T>,
+        done: bool,
     }
-}
-impl<'v, T, V> Iterator for Keys<'v, T, V>
-where
-    T: SolverVariable,
-    V: SliceView<T> + ?Sized + 'v,
-{
-    type Item = TimePoint<T>;
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.done {
-            return None;
-        }
-        if let Some(tp) = self.view.next_key_after(self.cursor) {
-            if tp >= self.to {
-                self.done = true;
+
+    impl<'v, T, V: SliceView<T> + ?Sized> Iterator for Keys<'v, T, V>
+    where
+        T: SolverVariable,
+    {
+        type Item = TimePoint<T>;
+        fn next(&mut self) -> Option<Self::Item> {
+            if self.done {
                 return None;
             }
-            self.cursor = tp;
-            return Some(tp);
+            if let Some(tp) = self.view.next_key_after(self.cur) {
+                if tp >= self.to {
+                    self.done = true;
+                    return None;
+                }
+                self.cur = tp;
+                return Some(tp);
+            }
+            self.done = true;
+            None
         }
-        self.done = true;
-        None
+    }
+
+    Keys {
+        view,
+        cur: from,
+        to,
+        done: false,
+    }
+}
+
+/// Merge two sorted, strictly increasing streams; drop duplicates.
+use std::iter::Peekable;
+
+fn merge_unique<A, B, T>(a: A, b: B) -> impl Iterator<Item = T>
+where
+    A: Iterator<Item = T>,
+    B: Iterator<Item = T>,
+    T: Ord + Copy,
+{
+    struct MU<A, B>
+    where
+        A: Iterator,
+        B: Iterator,
+    {
+        a: Peekable<A>,
+        b: Peekable<B>,
+    }
+
+    impl<A, B, T> Iterator for MU<A, B>
+    where
+        A: Iterator<Item = T>,
+        B: Iterator<Item = T>,
+        T: Ord + Copy,
+    {
+        type Item = T;
+
+        #[inline]
+        fn next(&mut self) -> Option<Self::Item> {
+            match (self.a.peek(), self.b.peek()) {
+                (None, None) => None,
+                (Some(&x), None) => {
+                    self.a.next();
+                    Some(x)
+                }
+                (None, Some(&y)) => {
+                    self.b.next();
+                    Some(y)
+                }
+                (Some(&x), Some(&y)) => {
+                    if x < y {
+                        self.a.next();
+                        Some(x)
+                    } else if y < x {
+                        self.b.next();
+                        Some(y)
+                    } else {
+                        // equal: advance both, emit once
+                        self.a.next();
+                        self.b.next();
+                        Some(x)
+                    }
+                }
+            }
+        }
+    }
+
+    MU {
+        a: a.peekable(),
+        b: b.peekable(),
     }
 }
 
@@ -265,8 +324,7 @@ where
         return Vec::new();
     }
 
-    // Special-case: exactly one admissible start.
-    // Emit [tw_start, tw_start + 1) so regions represent “start at tw_start”.
+    // Special-case: exactly one admissible start => represent as [tw_start, tw_start + 1)
     if tw_start == latest_start {
         let one = TimeDelta::new(T::one());
         return vec![tw_start, tw_start + one];
@@ -274,50 +332,27 @@ where
 
     let one = TimeDelta::new(T::one());
 
-    // Left stream: keys in (tw_start, latest_start)
-    let mut left = Keys::<T, V>::new(view, tw_start, latest_start).peekable();
+    // Left: keys strictly inside (tw_start, latest_start)
+    let left = keys_in(view, tw_start, latest_start);
 
-    // Right stream: keys in [tw_start+duration, latest_start+duration), shifted to starts
+    // Right: keys in [tw_start+duration, latest_start+duration), shifted back to starts and clamped.
     let shifted_left = tw_start + duration;
     let shifted_right = latest_start + duration;
 
-    let base_right = Keys::<T, V>::new(view, shifted_left, shifted_right);
-    let prefix = if view.has_key_at(shifted_left) {
-        Some(shifted_left)
-    } else {
-        None
-    };
-
-    let mut right = prefix
+    let right = view
+        .has_key_at(shifted_left)
+        .then_some(shifted_left)
         .into_iter()
-        .chain(base_right)
+        .chain(keys_in(view, shifted_left, shifted_right))
         .map(move |t| t - duration + one)
-        .filter(move |&t| t > tw_start && t <= latest_start)
-        .peekable();
+        .filter(move |&s| s > tw_start && s <= latest_start);
 
-    let mut out = Vec::with_capacity(8);
-    out.push(tw_start);
-    let mut last = Some(tw_start);
+    // Compose: tw_start, merged internal points, ensure latest_start terminator.
+    let mut out: Vec<_> = std::iter::once(tw_start)
+        .chain(merge_unique(left, right))
+        .collect();
 
-    while left.peek().is_some() || right.peek().is_some() {
-        let take_left = match (left.peek(), right.peek()) {
-            (Some(&a), Some(&b)) => a <= b,
-            (Some(_), None) => true,
-            (None, Some(_)) => false,
-            (None, None) => false,
-        };
-        let x = if take_left {
-            left.next().unwrap()
-        } else {
-            right.next().unwrap()
-        };
-        if last != Some(x) {
-            out.push(x);
-            last = Some(x);
-        }
-    }
-
-    if last != Some(latest_start) {
+    if *out.last().unwrap() != latest_start {
         out.push(latest_start);
     }
     out
@@ -910,5 +945,13 @@ mod tests {
         assert_eq!(te, 1); // band represents “start at 0”
         let slots = slot_set_for_start(&b, tp(0), TimeDelta::new(5), len(2), si(0, 10));
         assert_eq!(spaces, slots);
+    }
+
+    #[test]
+    fn test_merge_unique_union_sorted_no_dups() {
+        let a = [1, 3, 5, 7];
+        let b = [2, 3, 6, 7, 8];
+        let out: Vec<_> = merge_unique(a.into_iter(), b.into_iter()).collect();
+        assert_eq!(out, vec![1, 2, 3, 5, 6, 7, 8]);
     }
 }

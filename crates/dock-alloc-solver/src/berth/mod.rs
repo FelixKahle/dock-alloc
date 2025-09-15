@@ -22,7 +22,7 @@
 pub mod berthocc;
 pub mod commit;
 pub mod domain;
-mod iter;
+pub mod iter;
 pub mod operations;
 pub mod overlay;
 pub mod quay;

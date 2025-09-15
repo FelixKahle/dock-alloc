@@ -58,6 +58,7 @@ pub mod prelude {
     {
         vec![
             Box::new(DestructOperator::<T, C, Q>::default()),
+            Box::new(DestructRegionOperator::<T, C, Q>::default()),
             Box::new(RelocateGreedyOperator::<T, C, Q>::default()),
             Box::new(PullForwardOperator::<T, C, Q>::default()),
             Box::new(SwapOperator::<T, C, Q>::default()),

@@ -283,18 +283,19 @@ where
         let s_iv = SpaceInterval::new(s0, s1);
 
         let arrival_time = r.arrival_time();
-        let start = assignment.start_time();
-        if start < arrival_time {
+        if t0 < arrival_time {
             return Err(LedgerApplyValidationError::AssignmentBeforeArrivalTime(
                 AssignmentBeforeArrivalTimeError::new(r.id(), arrival_time, t0),
             ));
         }
-        let sw = r.feasible_space_window();
-        if !sw.contains_interval(&s_iv) {
+
+        let windows = r.feasible_space_windows();
+        if !windows.iter().any(|w| w.contains_interval(&s_iv)) {
             return Err(LedgerApplyValidationError::AssignmentOutsideSpaceWindow(
-                AssignmentOutsideSpaceWindowError::new(r.id(), sw, s_iv),
+                AssignmentOutsideSpaceWindowError::new(r.id(), windows.to_vec(), s_iv),
             ));
         }
+
         Ok(())
     }
 }
@@ -361,7 +362,10 @@ mod ledger_overlay_tests {
             SpacePosition::new(s0),
             Cost::new(1),
             Cost::new(1),
-            SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
+            vec![SpaceInterval::new(
+                SpacePosition::new(s0),
+                SpacePosition::new(s1),
+            )],
         )
         .expect("valid movable request")
     }
@@ -382,7 +386,10 @@ mod ledger_overlay_tests {
             SpacePosition::new(s0),
             Cost::new(1),
             Cost::new(1),
-            SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
+            vec![SpaceInterval::new(
+                SpacePosition::new(s0),
+                SpacePosition::new(s1),
+            )],
         )
         .expect("valid fixed request")
     }
