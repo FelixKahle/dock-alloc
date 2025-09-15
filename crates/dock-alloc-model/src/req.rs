@@ -29,7 +29,7 @@ use dock_alloc_core::{
     space::{SpaceInterval, SpaceLength, SpacePosition},
     time::{TimeDelta, TimePoint},
 };
-use std::{fmt::Display, marker::PhantomData};
+use std::{cmp::Ordering, fmt::Display, marker::PhantomData};
 
 pub trait Kind: Clone {
     type Id: Copy
@@ -75,6 +75,35 @@ where
 }
 
 impl<K: Kind, T: SolverVariable, C: SolverVariable> Request<K, T, C> {
+    fn merge_space_windows(mut windows: Vec<SpaceInterval>) -> Vec<SpaceInterval> {
+        if windows.is_empty() {
+            return windows;
+        }
+        windows.sort_by(|a, b| {
+            let ord_start = a.start().cmp(&b.start());
+            if ord_start == Ordering::Equal {
+                a.end().cmp(&b.end())
+            } else {
+                ord_start
+            }
+        });
+
+        let mut merged: Vec<SpaceInterval> = Vec::with_capacity(windows.len());
+
+        for w in windows {
+            if let Some(last) = merged.last_mut() {
+                if let Some(u) = last.union(&w) {
+                    *last = u;
+                } else {
+                    merged.push(w);
+                }
+            } else {
+                merged.push(w);
+            }
+        }
+        merged
+    }
+
     #[allow(clippy::too_many_arguments)]
     #[inline]
     pub fn new(
@@ -87,7 +116,9 @@ impl<K: Kind, T: SolverVariable, C: SolverVariable> Request<K, T, C> {
         cost_per_position_deviation: Cost<C>,
         feasible_space_windows: Vec<SpaceInterval>,
     ) -> Result<Self, SpaceWindowTooShortError> {
-        for space_window in feasible_space_windows.iter().cloned() {
+        let merged_windows = Self::merge_space_windows(feasible_space_windows);
+
+        for space_window in merged_windows.iter().cloned() {
             if space_window.measure() < length {
                 return Err(SpaceWindowTooShortError::new(id, length, space_window));
             }
@@ -101,7 +132,7 @@ impl<K: Kind, T: SolverVariable, C: SolverVariable> Request<K, T, C> {
             target_position,
             cost_per_delay,
             cost_per_position_deviation,
-            feasible_space_windows,
+            feasible_space_windows: merged_windows,
             _k: PhantomData,
         })
     }
@@ -547,5 +578,40 @@ mod tests {
             assert_eq!(a.start(), b.start(), "window[{i}] start mismatch");
             assert_eq!(a.end(), b.end(), "window[{i}] end mismatch");
         }
+    }
+
+    #[test]
+    fn request_new_merges_overlapping_and_adjacent_windows() {
+        // Ship length 10
+        // Windows:
+        //   [0, 10)  and  [10, 20) -> adjacent -> should merge to [0, 20)
+        //   [5, 15)        overlaps with [10, 30) -> should merge to [5, 30)
+        // After a full pass, everything coalesces to [0, 30)
+        let r = Request::<Movable, _, _>::new(
+            RequestId::new(200),
+            SpaceLength::new(10),
+            TimePoint::new(0),
+            TimeDelta::new(3),
+            SpacePosition::new(0),
+            Cost::new(1),
+            Cost::new(1),
+            vec![
+                SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10)),
+                SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(20)),
+                SpaceInterval::new(SpacePosition::new(5), SpacePosition::new(15)),
+                SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(30)),
+            ],
+        )
+        .expect("should be valid");
+
+        let ws = r.feasible_space_windows();
+        assert_eq!(
+            ws.len(),
+            1,
+            "all overlapping/adjacent intervals should merge"
+        );
+        assert_eq!(ws[0].start().value(), 0);
+        assert_eq!(ws[0].end().value(), 30);
+        assert!(ws[0].measure() >= SpaceLength::new(10));
     }
 }
