@@ -249,7 +249,6 @@ where
 /// Merge two sorted, strictly increasing streams; drop duplicates.
 use std::iter::Peekable;
 
-/// Merge two sorted, strictly increasing streams; drop duplicates.
 fn merge_unique<A, B, T>(a: A, b: B) -> impl Iterator<Item = T>
 where
     A: Iterator<Item = T>,
