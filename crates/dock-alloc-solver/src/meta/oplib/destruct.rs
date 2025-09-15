@@ -258,8 +258,8 @@ where
                 } else {
                     let range = latest_start_time.value() - time_bounds.start().value();
                     let offset = match T::from(rng.random_range(T::zero()..=range)) {
-                        Ok(val) => val,
-                        Err(_) => {
+                        Some(val) => val,
+                        None => {
                             transaction.discard();
                             return builder.build();
                         }
