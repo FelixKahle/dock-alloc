@@ -257,7 +257,13 @@ where
                     time_bounds.start()
                 } else {
                     let range = latest_start_time.value() - time_bounds.start().value();
-                    let offset = T::from(rng.random_range(T::zero()..=range)).unwrap_or(T::zero());
+                    let offset = match T::from(rng.random_range(T::zero()..=range)) {
+                        Ok(val) => val,
+                        Err(_) => {
+                            transaction.discard();
+                            return builder.build();
+                        }
+                    };
                     TimePoint::new(time_bounds.start().value() + offset)
                 };
 
