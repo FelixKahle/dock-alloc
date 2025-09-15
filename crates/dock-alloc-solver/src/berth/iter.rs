@@ -206,7 +206,7 @@ fn keys_in<'a, T, V>(
     to: TimePoint<T>,
 ) -> impl Iterator<Item = TimePoint<T>> + 'a
 where
-    T: SolverVariable + 'a, // <-- add `'a` here
+    T: SolverVariable + 'a,
     V: SliceView<T> + ?Sized + 'a,
 {
     struct Keys<'v, T: SolverVariable, V: ?Sized> {
