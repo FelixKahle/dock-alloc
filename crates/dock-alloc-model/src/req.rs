@@ -70,7 +70,7 @@ where
     target_position: SpacePosition,
     cost_per_delay: Cost<C>,
     cost_per_position_deviation: Cost<C>,
-    feasible_space_window: SpaceInterval,
+    feasible_space_windows: Vec<SpaceInterval>,
     _k: PhantomData<K>,
 }
 
@@ -85,15 +85,12 @@ impl<K: Kind, T: SolverVariable, C: SolverVariable> Request<K, T, C> {
         target_position: SpacePosition,
         cost_per_delay: Cost<C>,
         cost_per_position_deviation: Cost<C>,
-        feasible_space_window: SpaceInterval,
+        feasible_space_windows: Vec<SpaceInterval>,
     ) -> Result<Self, SpaceWindowTooShortError> {
-        // Check if the space window is large enough to fit the request
-        if feasible_space_window.measure() < length {
-            return Err(SpaceWindowTooShortError::new(
-                id,
-                length,
-                feasible_space_window,
-            ));
+        for space_window in feasible_space_windows.iter().cloned() {
+            if space_window.measure() < length {
+                return Err(SpaceWindowTooShortError::new(id, length, space_window));
+            }
         }
 
         Ok(Self {
@@ -104,7 +101,7 @@ impl<K: Kind, T: SolverVariable, C: SolverVariable> Request<K, T, C> {
             target_position,
             cost_per_delay,
             cost_per_position_deviation,
-            feasible_space_window,
+            feasible_space_windows,
             _k: PhantomData,
         })
     }
@@ -150,8 +147,8 @@ impl<K: Kind, T: SolverVariable, C: SolverVariable> Request<K, T, C> {
     }
 
     #[inline]
-    pub fn feasible_space_window(&self) -> SpaceInterval {
-        self.feasible_space_window
+    pub fn feasible_space_windows(&self) -> &[SpaceInterval] {
+        &self.feasible_space_windows
     }
 }
 
@@ -179,11 +176,18 @@ impl<K: Kind, T: SolverVariable + Display, C: SolverVariable + Display> Display
     for Request<K, T, C>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let windows = self
+            .feasible_space_windows
+            .iter()
+            .map(|w| format!("{}", w))
+            .collect::<Vec<_>>()
+            .join(", ");
+
         write!(
             f,
             "{}Request(id: {}, length: {}, arrival_time: {}, processing_duration: {}, \
-            target_position: {}, cost_per_delay: {}, cost_per_position_deviation: {}, \
-            feasible_space_window: {})",
+                target_position: {}, cost_per_delay: {}, cost_per_position_deviation: {}, \
+                feasible_space_windows: [{}]",
             K::NAME,
             self.id,
             self.length,
@@ -192,7 +196,7 @@ impl<K: Kind, T: SolverVariable + Display, C: SolverVariable + Display> Display
             self.target_position,
             self.cost_per_delay,
             self.cost_per_position_deviation,
-            self.feasible_space_window
+            windows
         )
     }
 }
@@ -264,10 +268,10 @@ impl<T: SolverVariable, C: SolverVariable> AnyRequest<T, C> {
     }
 
     #[inline]
-    pub fn feasible_space_window(&self) -> SpaceInterval {
+    pub fn feasible_space_windows(&self) -> &[SpaceInterval] {
         match self {
-            AnyRequest::Movable(r) => r.feasible_space_window(),
-            AnyRequest::Fixed(r) => r.feasible_space_window(),
+            AnyRequest::Movable(r) => r.feasible_space_windows(),
+            AnyRequest::Fixed(r) => r.feasible_space_windows(),
         }
     }
 
@@ -365,10 +369,10 @@ where
     }
 
     #[inline]
-    pub fn feasible_space_window(&self) -> SpaceInterval {
+    pub fn feasible_space_windows(&self) -> &[SpaceInterval] {
         match self {
-            AnyRequestRef::Movable(r) => r.feasible_space_window(),
-            AnyRequestRef::Fixed(r) => r.feasible_space_window(),
+            AnyRequestRef::Movable(r) => r.feasible_space_windows(),
+            AnyRequestRef::Fixed(r) => r.feasible_space_windows(),
         }
     }
 
@@ -414,8 +418,134 @@ mod tests {
             SpacePosition::new(0),
             Cost::new(1),
             Cost::new(1),
-            SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(5)), // measure 5 < 10
+            vec![SpaceInterval::new(
+                SpacePosition::new(0),
+                SpacePosition::new(5),
+            )],
         );
         assert!(bad2.is_err());
+    }
+
+    #[test]
+    fn request_new_accepts_multiple_windows_each_long_enough() {
+        use dock_alloc_core::{
+            cost::Cost,
+            space::{SpaceInterval, SpaceLength, SpacePosition},
+            time::{TimeDelta, TimePoint},
+        };
+
+        // len = 10; each window has measure >= 10
+        let r = Request::<Movable, _, _>::new(
+            RequestId::new(100),
+            SpaceLength::new(10),
+            TimePoint::new(0),
+            TimeDelta::new(3),
+            SpacePosition::new(0),
+            Cost::new(1),
+            Cost::new(1),
+            vec![
+                SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10)), // measure 10
+                SpaceInterval::new(SpacePosition::new(15), SpacePosition::new(30)), // measure 15
+                SpaceInterval::new(SpacePosition::new(40), SpacePosition::new(50)), // measure 10
+            ],
+        );
+
+        assert!(
+            r.is_ok(),
+            "constructor should accept multiple long-enough windows"
+        );
+    }
+
+    #[test]
+    fn request_new_rejects_when_any_window_is_too_short() {
+        use dock_alloc_core::{
+            cost::Cost,
+            space::{SpaceInterval, SpaceLength, SpacePosition},
+            time::{TimeDelta, TimePoint},
+        };
+
+        // len = 12; second window is only 8 long -> should error
+        let r = Request::<Fixed, _, _>::new(
+            RequestId::new(101),
+            SpaceLength::new(12),
+            TimePoint::new(0),
+            TimeDelta::new(2),
+            SpacePosition::new(0),
+            Cost::new(1),
+            Cost::new(1),
+            vec![
+                SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(20)), // ok (20)
+                SpaceInterval::new(SpacePosition::new(30), SpacePosition::new(38)), // too short (8)
+                SpaceInterval::new(SpacePosition::new(50), SpacePosition::new(70)), // ok (20)
+            ],
+        );
+
+        assert!(
+            r.is_err(),
+            "constructor must reject if any window is shorter than length"
+        );
+    }
+
+    #[test]
+    fn request_new_accepts_windows_equal_to_length() {
+        use dock_alloc_core::{
+            cost::Cost,
+            space::{SpaceInterval, SpaceLength, SpacePosition},
+            time::{TimeDelta, TimePoint},
+        };
+
+        // len = 15; windows equal to length are allowed
+        let r = Request::<Movable, _, _>::new(
+            RequestId::new(102),
+            SpaceLength::new(15),
+            TimePoint::new(0),
+            TimeDelta::new(5),
+            SpacePosition::new(0),
+            Cost::new(1),
+            Cost::new(1),
+            vec![
+                SpaceInterval::new(SpacePosition::new(5), SpacePosition::new(20)), // measure 15
+                SpaceInterval::new(SpacePosition::new(30), SpacePosition::new(45)), // measure 15
+            ],
+        );
+
+        assert!(
+            r.is_ok(),
+            "windows with measure == length should be accepted"
+        );
+    }
+
+    #[test]
+    fn feasible_space_windows_returns_exact_input_order_and_bounds() {
+        use dock_alloc_core::{
+            cost::Cost,
+            space::{SpaceInterval, SpaceLength, SpacePosition},
+            time::{TimeDelta, TimePoint},
+        };
+
+        let windows = vec![
+            SpaceInterval::new(SpacePosition::new(10), SpacePosition::new(25)),
+            SpaceInterval::new(SpacePosition::new(40), SpacePosition::new(60)),
+            SpaceInterval::new(SpacePosition::new(70), SpacePosition::new(90)),
+        ];
+
+        let r = Request::<Fixed, _, _>::new(
+            RequestId::new(103),
+            SpaceLength::new(10),
+            TimePoint::new(0),
+            TimeDelta::new(1),
+            SpacePosition::new(0),
+            Cost::new(1),
+            Cost::new(1),
+            windows.clone(),
+        )
+        .expect("should be valid");
+
+        let got = r.feasible_space_windows();
+        assert_eq!(got.len(), windows.len(), "windows length must match");
+        for (i, (a, b)) in got.iter().zip(windows.iter()).enumerate() {
+            assert_eq!(a.start(), b.start(), "window[{i}] start mismatch");
+            assert_eq!(a.end(), b.end(), "window[{i}] end mismatch");
+        }
     }
 }

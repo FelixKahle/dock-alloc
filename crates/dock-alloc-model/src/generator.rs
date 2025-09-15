@@ -1289,7 +1289,7 @@ where
             target,
             cost_per_delay,
             cost_per_deviation,
-            space_window,
+            vec![space_window],
         )
         .expect("movable: constructed request must be feasible")
     }
@@ -1329,7 +1329,7 @@ where
                 target,
                 cost_per_delay,
                 cost_per_deviation,
-                space_window,
+                vec![space_window],
             )
             .expect("fixed: constructed request must be feasible");
 
@@ -1405,7 +1405,12 @@ mod tests {
         for request in problem.iter_movable_requests() {
             assert!(request.length() >= config.min_length());
             assert!(request.length() <= config.max_length());
-            assert!(request.feasible_space_window().measure() >= request.length());
+            assert!(
+                request
+                    .feasible_space_windows()
+                    .iter()
+                    .all(|w| w.measure() >= request.length())
+            );
             let max_start_pos = SpacePosition::new(config.quay_length().value()) - request.length();
             assert!(request.target_position() <= max_start_pos);
         }
@@ -1444,9 +1449,12 @@ mod tests {
             assert!(start_pos <= quay_end);
             assert!(end_pos <= quay_end);
 
-            let space_window = assignment.request().feasible_space_window();
-            assert!(space_window.contains(start_pos));
-            assert!(space_window.contains(end_pos) || end_pos == space_window.end());
+            let space_windows = assignment.request().feasible_space_windows();
+
+            for space_window in space_windows {
+                assert!(space_window.contains(start_pos));
+                assert!(space_window.contains(end_pos) || end_pos == space_window.end());
+            }
 
             assert_eq!(assignment.request().length(), end_pos - start_pos);
         }

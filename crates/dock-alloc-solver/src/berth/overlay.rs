@@ -609,34 +609,46 @@ where
 
     /// Returns an iterator over all `FreeSlot`s, considering the overlay.
     #[inline]
+    #[allow(clippy::type_complexity)]
     pub fn iter_free_slots(
-        &'a self,
+        &self,
         time_window: TimeInterval<T>,
         duration: TimeDelta<T>,
         required_space: SpaceLength,
         space_window: SpaceInterval,
-    ) -> impl Iterator<Item = BrandedFreeSlot<'brand, T>> + 'a
+    ) -> core::iter::Map<
+        FreeSlotIter<'_, T, BerthOccupancyOverlay<'brand, 'a, T, Q>>,
+        fn(FreeSlot<T>) -> BrandedFreeSlot<'brand, T>,
+    >
     where
         T: Copy,
     {
+        fn brand_slot<'b, Tx: SolverVariable>(x: FreeSlot<Tx>) -> BrandedFreeSlot<'b, Tx> {
+            BrandedFreeSlot::new(x)
+        }
+
         FreeSlotIter::new(self, time_window, duration, required_space, space_window)
-            .map(|slot| BrandedFreeSlot::new(slot))
+            .map(brand_slot::<'brand, T>)
     }
 
-    /// Returns an iterator over all feasible `SpaceTimeRectangle` regions, considering the overlay.
     #[inline]
+    #[allow(clippy::type_complexity)]
     pub fn iter_free_regions(
-        &'a self,
+        &self,
         window: TimeInterval<T>,
         duration: TimeDelta<T>,
         required_space: SpaceLength,
         space_window: SpaceInterval,
-    ) -> impl Iterator<Item = BrandedFreeRegion<'brand, T>> + 'a
-    where
-        T: Copy,
-    {
+    ) -> core::iter::Map<
+        FeasibleRegionIter<'_, T, BerthOccupancyOverlay<'brand, 'a, T, Q>>,
+        fn(FreeRegion<T>) -> BrandedFreeRegion<'brand, T>,
+    > {
+        fn brand_region<'b, Tx: SolverVariable>(r: FreeRegion<Tx>) -> BrandedFreeRegion<'b, Tx> {
+            BrandedFreeRegion::new(r)
+        }
+
         FeasibleRegionIter::new(self, window, duration, required_space, space_window)
-            .map(|region| BrandedFreeRegion::new(region))
+            .map(brand_region::<'brand, T>)
     }
 
     /// Finds the next timeline key after a given time point, considering base, overlay, and barriers.

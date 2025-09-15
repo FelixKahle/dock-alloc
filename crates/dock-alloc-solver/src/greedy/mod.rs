@@ -149,23 +149,28 @@ where
                 for (req, _len_key, _arr_key) in ready_order {
                     let decision = tx.with_explorer(|ex| {
                         let proc = req.processing_duration();
-                        let swin = req.feasible_space_window();
+                        let windows = req.feasible_space_windows();
 
                         // try to place now
                         let twin_now = TimeInterval::new(t, t + proc);
                         let mut best_now_cost = None;
                         let mut best_now_slot = None;
 
-                        for slot in ex.iter_slots_for_request_within(&req, twin_now, swin) {
-                            if slot.slot().start_time() != t {
-                                continue;
-                            }
-                            let c =
-                                AssignmentRef::new(req.request(), slot.slot().space().start(), t)
-                                    .cost();
-                            if best_now_cost.is_none_or(|b| c < b) {
-                                best_now_cost = Some(c);
-                                best_now_slot = Some(slot);
+                        for &w in windows {
+                            for slot in ex.iter_slots_for_request_within(&req, twin_now, w) {
+                                if slot.slot().start_time() != t {
+                                    continue;
+                                }
+                                let c = AssignmentRef::new(
+                                    req.request(),
+                                    slot.slot().space().start(),
+                                    t,
+                                )
+                                .cost();
+                                if best_now_cost.is_none_or(|b| c < b) {
+                                    best_now_cost = Some(c);
+                                    best_now_slot = Some(slot);
+                                }
                             }
                         }
 
@@ -173,19 +178,22 @@ where
                             Some(tn) if tn >= req.request().arrival_time() => {
                                 let twin_later = TimeInterval::new(tn, tn + proc);
                                 let mut best = None;
-                                for slot in ex.iter_slots_for_request_within(&req, twin_later, swin)
-                                {
-                                    if slot.slot().start_time() != tn {
-                                        continue;
-                                    }
-                                    let c = AssignmentRef::new(
-                                        req.request(),
-                                        slot.slot().space().start(),
-                                        tn,
-                                    )
-                                    .cost();
-                                    if best.is_none_or(|b| c < b) {
-                                        best = Some(c);
+                                for &w in windows {
+                                    for slot in
+                                        ex.iter_slots_for_request_within(&req, twin_later, w)
+                                    {
+                                        if slot.slot().start_time() != tn {
+                                            continue;
+                                        }
+                                        let c = AssignmentRef::new(
+                                            req.request(),
+                                            slot.slot().space().start(),
+                                            tn,
+                                        )
+                                        .cost();
+                                        if best.is_none_or(|b| c < b) {
+                                            best = Some(c);
+                                        }
                                     }
                                 }
                                 best
@@ -274,7 +282,10 @@ mod tests {
             SpacePosition::new(target),
             Cost::new(1),
             Cost::new(1),
-            SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
+            vec![SpaceInterval::new(
+                SpacePosition::new(s0),
+                SpacePosition::new(s1),
+            )],
         )
         .expect("valid movable request")
     }
@@ -296,7 +307,10 @@ mod tests {
             SpacePosition::new(target),
             Cost::new(1),
             Cost::new(1),
-            SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
+            vec![SpaceInterval::new(
+                SpacePosition::new(s0),
+                SpacePosition::new(s1),
+            )],
         )
         .expect("valid fixed request")
     }
@@ -326,8 +340,12 @@ mod tests {
             // We don't assert exact position, but ensure it's inside feasible window and <= target dev.
             let r = a.request();
             let s = a.start_position();
-            let sw = r.feasible_space_window();
-            assert!(sw.contains(s), "start pos {s} not in window {sw}");
+            let ok = r.feasible_space_windows().iter().any(|w| w.contains(s));
+            assert!(
+                ok,
+                "start pos {s} not in any feasible window {:?}",
+                r.feasible_space_windows()
+            );
         }
     }
 
@@ -417,8 +435,12 @@ mod tests {
 
         for a in sol.decisions().values() {
             assert_eq!(a.start_time(), TimePoint::new(0));
-            let sw = a.request().feasible_space_window();
-            assert!(sw.contains(a.start_position()));
+            let ok = a
+                .request()
+                .feasible_space_windows()
+                .iter()
+                .any(|w| w.contains(a.start_position()));
+            assert!(ok);
         }
     }
 
@@ -439,7 +461,10 @@ mod tests {
             SpacePosition::new(0),
             Cost::new(1),
             Cost::new(1),
-            SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10)),
+            vec![SpaceInterval::new(
+                SpacePosition::new(0),
+                SpacePosition::new(10),
+            )],
         )
         .unwrap();
 
@@ -451,7 +476,10 @@ mod tests {
             SpacePosition::new(0),
             Cost::new(1),
             Cost::new(1),
-            SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10)),
+            vec![SpaceInterval::new(
+                SpacePosition::new(0),
+                SpacePosition::new(10),
+            )],
         )
         .unwrap();
 

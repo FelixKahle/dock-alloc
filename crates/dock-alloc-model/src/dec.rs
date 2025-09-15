@@ -656,7 +656,10 @@ mod tests {
             SpacePosition::new(s0),
             Cost::new(1),
             Cost::new(1),
-            SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
+            vec![SpaceInterval::new(
+                SpacePosition::new(s0),
+                SpacePosition::new(s1),
+            )],
         )
         .expect("valid movable request")
     }

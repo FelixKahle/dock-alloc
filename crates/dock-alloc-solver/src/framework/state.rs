@@ -538,10 +538,10 @@ where
             ));
         }
 
-        let window = rq.feasible_space_window();
-        if !window.contains_interval(&s_iv) {
+        let windows = rq.feasible_space_windows();
+        if !windows.iter().any(|w| w.contains_interval(&s_iv)) {
             return Err(FeasibleStateError::AssignmentOutsideSpaceWindow(
-                AssignmentOutsideSpaceWindowError::new(rq.id(), window, s_iv),
+                AssignmentOutsideSpaceWindowError::new(rq.id(), windows.to_vec(), s_iv),
             ));
         }
 
@@ -573,10 +573,10 @@ where
             ));
         }
 
-        let window = rq.feasible_space_window();
-        if !window.contains_interval(&s_iv) {
+        let windows = rq.feasible_space_windows();
+        if !windows.iter().any(|w| w.contains_interval(&s_iv)) {
             return Err(FeasibleStateError::AssignmentOutsideSpaceWindow(
-                AssignmentOutsideSpaceWindowError::new(rq.id(), window, s_iv),
+                AssignmentOutsideSpaceWindowError::new(rq.id(), windows.to_vec(), s_iv),
             ));
         }
 
@@ -667,7 +667,10 @@ mod validate_tests {
             SpacePosition::new(sw_start), // preferred start (not validated here)
             Cost::new(1),
             Cost::new(1),
-            SpaceInterval::new(SpacePosition::new(sw_start), SpacePosition::new(sw_end)),
+            vec![SpaceInterval::new(
+                SpacePosition::new(sw_start),
+                SpacePosition::new(sw_end),
+            )],
         )
         .expect("valid movable request")
     }
@@ -845,6 +848,200 @@ mod validate_tests {
         // second starts exactly when first ends (t=5), same space ⇒ OK
         ledger
             .commit_assignment(m2, TimePoint::new(5), SpacePosition::new(0))
+            .unwrap();
+
+        assert!(validate_ledger_solution(&problem, &ledger).is_ok());
+    }
+
+    // Add inside `#[cfg(test)] mod validate_tests { ... }`
+
+    fn req_movable_multi(
+        id: u64,
+        len: usize,
+        arrival: i64,
+        proc_t: i64,
+        windows: &[(usize, usize)],
+    ) -> Request<Movable, Tm, Cm> {
+        let sw: Vec<SpaceInterval> = windows
+            .iter()
+            .map(|&(lo, hi)| SpaceInterval::new(SpacePosition::new(lo), SpacePosition::new(hi)))
+            .collect();
+        Request::<Movable, _, _>::new(
+            RequestId::new(id),
+            SpaceLength::new(len),
+            TimePoint::new(arrival),
+            TimeDelta::new(proc_t),
+            SpacePosition::new(windows[0].0), // target not validated here
+            Cost::new(1),
+            Cost::new(1),
+            sw,
+        )
+        .expect("valid movable request")
+    }
+
+    fn req_fixed_multi(
+        id: u64,
+        len: usize,
+        arrival: i64,
+        proc_t: i64,
+        windows: &[(usize, usize)],
+    ) -> Request<Fixed, Tm, Cm> {
+        let sw: Vec<SpaceInterval> = windows
+            .iter()
+            .map(|&(lo, hi)| SpaceInterval::new(SpacePosition::new(lo), SpacePosition::new(hi)))
+            .collect();
+        Request::<Fixed, _, _>::new(
+            RequestId::new(id),
+            SpaceLength::new(len),
+            TimePoint::new(arrival),
+            TimeDelta::new(proc_t),
+            SpacePosition::new(windows[0].0), // target placeholder
+            Cost::new(1),
+            Cost::new(1),
+            sw,
+        )
+        .expect("valid fixed request")
+    }
+
+    #[test]
+    fn validate_ok_movable_assigns_in_first_of_two_windows() {
+        // windows: [0,10) and [30,50), len=5 -> place in first
+        let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(60));
+        let r = req_movable_multi(1, 5, 0, 4, &[(0, 10), (30, 50)]);
+        b.add_movable_request(r.clone()).unwrap();
+        let problem = b.build();
+
+        let mut ledger = AssignmentLedger::from(&problem);
+        let req = problem.get_movable(MovableRequestId::from(r.id())).unwrap();
+        // Assign at s=[4,9) inside first window
+        ledger
+            .commit_assignment(req, TimePoint::new(0), SpacePosition::new(4))
+            .unwrap();
+
+        assert!(validate_ledger_solution(&problem, &ledger).is_ok());
+    }
+
+    #[test]
+    fn validate_ok_movable_assigns_in_second_of_two_windows() {
+        // same two windows, assign in second
+        let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(60));
+        let r = req_movable_multi(1, 5, 0, 4, &[(0, 10), (30, 50)]);
+        b.add_movable_request(r.clone()).unwrap();
+        let problem = b.build();
+
+        let mut ledger = AssignmentLedger::from(&problem);
+        let req = problem.get_movable(MovableRequestId::from(r.id())).unwrap();
+        // Assign at s=[44,49) inside [30,50)
+        ledger
+            .commit_assignment(req, TimePoint::new(0), SpacePosition::new(44))
+            .unwrap();
+
+        assert!(validate_ledger_solution(&problem, &ledger).is_ok());
+    }
+
+    #[test]
+    fn validate_err_movable_spanning_gap_between_windows() {
+        // Each window individually long enough (20 and 20). Request len=15.
+        // Place at s=10 -> band [10,25) exceeds first window end (20) => invalid.
+        let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(80));
+        let r = req_movable_multi(1, 15, 0, 3, &[(0, 20), (30, 50)]);
+        b.add_movable_request(r.clone()).unwrap();
+        let problem = b.build();
+
+        let mut ledger = AssignmentLedger::from(&problem);
+        let req = problem.get_movable(MovableRequestId::from(r.id())).unwrap();
+
+        // This band crosses out of the first window; not contained in any single window.
+        ledger
+            .commit_assignment(req, TimePoint::new(0), SpacePosition::new(10))
+            .unwrap();
+
+        let err = validate_ledger_solution(&problem, &ledger).unwrap_err();
+        matches!(err, FeasibleStateError::AssignmentOutsideSpaceWindow(_));
+    }
+
+    #[test]
+    fn validate_ok_two_movables_same_time_different_windows_no_overlap() {
+        // r1 allowed only in [0,10), r2 only in [30,50). Both start at t=0, no space overlap.
+        let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(60));
+        let r1 = req_movable_multi(1, 8, 0, 5, &[(0, 10)]);
+        let r2 = req_movable_multi(2, 8, 0, 5, &[(30, 50)]);
+        b.add_movable_request(r1.clone()).unwrap();
+        b.add_movable_request(r2.clone()).unwrap();
+
+        let problem = b.build();
+        let mut ledger = AssignmentLedger::from(&problem);
+        let m1 = problem
+            .get_movable(MovableRequestId::from(r1.id()))
+            .unwrap();
+        let m2 = problem
+            .get_movable(MovableRequestId::from(r2.id()))
+            .unwrap();
+
+        ledger
+            .commit_assignment(m1, TimePoint::new(0), SpacePosition::new(2))
+            .unwrap(); // [2,10)
+        ledger
+            .commit_assignment(m2, TimePoint::new(0), SpacePosition::new(40))
+            .unwrap(); // [40,48)
+
+        assert!(validate_ledger_solution(&problem, &ledger).is_ok());
+    }
+
+    #[test]
+    fn validate_ok_boundary_touch_at_window_end() {
+        // window [20,30), len=5 -> start at 25 gives [25,30) touching end (OK: half-open)
+        let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(60));
+        let r = req_movable_multi(1, 5, 0, 2, &[(20, 30)]);
+        b.add_movable_request(r.clone()).unwrap();
+        let problem = b.build();
+
+        let mut ledger = AssignmentLedger::from(&problem);
+        let req = problem.get_movable(MovableRequestId::from(r.id())).unwrap();
+        ledger
+            .commit_assignment(req, TimePoint::new(0), SpacePosition::new(25))
+            .unwrap();
+
+        assert!(validate_ledger_solution(&problem, &ledger).is_ok());
+    }
+
+    #[test]
+    fn validate_err_boundary_past_window_end() {
+        // window [20,30), len=5 -> start at 26 => [26,31) exceeds window (must fail)
+        let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(60));
+        let r = req_movable_multi(1, 5, 0, 2, &[(20, 30)]);
+        b.add_movable_request(r.clone()).unwrap();
+        let problem = b.build();
+
+        let mut ledger = AssignmentLedger::from(&problem);
+        let req = problem.get_movable(MovableRequestId::from(r.id())).unwrap();
+        ledger
+            .commit_assignment(req, TimePoint::new(0), SpacePosition::new(26))
+            .unwrap();
+
+        let err = validate_ledger_solution(&problem, &ledger).unwrap_err();
+        matches!(err, FeasibleStateError::AssignmentOutsideSpaceWindow(_));
+    }
+
+    #[test]
+    fn validate_ok_fixed_in_one_of_many_windows() {
+        // fixed request with three windows; preassigned in the third is valid
+        let mut b = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(80));
+        let rf = req_fixed_multi(99, 6, 0, 4, &[(0, 10), (20, 30), (50, 70)]);
+        let a =
+            Assignment::<Fixed, _, _>::new(rf.clone(), SpacePosition::new(62), TimePoint::new(0)); // [62,68) ⊂ [50,70)
+        b.add_preassigned(a).unwrap();
+
+        // also add one movable to satisfy "missing assignment" checks later when used standalone
+        let r = req_movable_multi(1, 6, 0, 4, &[(0, 10), (50, 70)]);
+        b.add_movable_request(r.clone()).unwrap();
+
+        let problem = b.build();
+        // Commit the movable so validation doesn't fail for unassigned movables
+        let mut ledger = AssignmentLedger::from(&problem);
+        let m = problem.get_movable(MovableRequestId::from(r.id())).unwrap();
+        ledger
+            .commit_assignment(m, TimePoint::new(0), SpacePosition::new(0))
             .unwrap();
 
         assert!(validate_ledger_solution(&problem, &ledger).is_ok());

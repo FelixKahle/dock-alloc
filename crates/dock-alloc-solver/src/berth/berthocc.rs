@@ -22,7 +22,6 @@
 use crate::{
     berth::{
         commit::BerthOverlayCommit,
-        domain::{FreeRegion, FreeSlot},
         iter::{FeasibleRegionIter, FreeSlotIter},
         operations::Operation,
         overlay::BerthOccupancyOverlay,
@@ -288,7 +287,7 @@ where
         duration: TimeDelta<T>,
         required_space: SpaceLength,
         space_window: SpaceInterval,
-    ) -> impl Iterator<Item = FreeSlot<T>> + '_
+    ) -> FreeSlotIter<'_, T, BerthOccupancy<T, Q>>
     where
         T: Copy,
     {
@@ -302,7 +301,7 @@ where
         duration: TimeDelta<T>,
         required_space: SpaceLength,
         space_window: SpaceInterval,
-    ) -> impl Iterator<Item = FreeRegion<T>> + '_
+    ) -> FeasibleRegionIter<'_, T, BerthOccupancy<T, Q>>
     where
         T: Copy,
     {

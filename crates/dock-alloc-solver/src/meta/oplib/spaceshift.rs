@@ -114,9 +114,13 @@ where
 
                 // Early bounds checks: quay + request’s own feasible window
                 let quay_band = txn.problem().quay_interval();
-                if !quay_band.contains_interval(&space_window)
-                    || !req.feasible_space_window().contains_interval(&space_window)
-                {
+                let fits_quay = quay_band.contains_interval(&space_window);
+                let fits_any_req_window = req
+                    .feasible_space_windows()
+                    .iter()
+                    .any(|w| w.contains_interval(&space_window));
+
+                if !fits_quay || !fits_any_req_window {
                     txn.discard();
                     continue;
                 }

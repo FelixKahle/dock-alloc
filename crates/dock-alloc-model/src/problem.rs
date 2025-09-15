@@ -289,10 +289,14 @@ impl<T: SolverVariable + ToPrimitive + FromPrimitive, C: SolverVariable> Problem
 
         let (tspan, sspan) = Self::assignment_spans(a);
 
-        let sw = r.feasible_space_window();
-        if !sw.contains_interval(&sspan) {
+        let windows = r.feasible_space_windows();
+        if !windows.iter().any(|w| w.contains_interval(&sspan)) {
             return Err(ProblemBuildError::AssignmentOutsideSpaceWindow(
-                AssignmentOutsideSpaceWindowError::new(id, sw, sspan),
+                AssignmentOutsideSpaceWindowError::new(
+                    id,
+                    r.feasible_space_windows().to_vec(),
+                    sspan,
+                ),
             ));
         }
 
@@ -487,7 +491,10 @@ mod tests {
             SpacePosition::new(s0),
             Cost::new(1),
             Cost::new(1),
-            SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
+            vec![SpaceInterval::new(
+                SpacePosition::new(s0),
+                SpacePosition::new(s1),
+            )],
         )
         .expect("valid movable request")
     }
@@ -508,7 +515,10 @@ mod tests {
             SpacePosition::new(s0),
             Cost::new(1),
             Cost::new(1),
-            SpaceInterval::new(SpacePosition::new(s0), SpacePosition::new(s1)),
+            vec![SpaceInterval::new(
+                SpacePosition::new(s0),
+                SpacePosition::new(s1),
+            )],
         )
         .expect("valid fixed request")
     }

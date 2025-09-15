@@ -27,6 +27,7 @@ use crate::{
         quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError},
     },
     domain::SpaceTimeRectangle,
+    framework::iter::{RegionsForRequestIter, SlotsForRequestIter},
     registry::{
         commit::LedgerOverlayCommit,
         ledger::AssignmentLedger,
@@ -403,64 +404,64 @@ where
         self.assignment_overlay.iter_assignments()
     }
 
-    pub fn iter_slots_for_request_within(
-        &self,
-        request: &BrandedMovableRequest<'alob, 'p, T, C>,
+    pub fn iter_slots_for_request_within<'s>(
+        &'s self,
+        request: &'s BrandedMovableRequest<'alob, 'p, T, C>,
         time_search_window: TimeInterval<T>,
         space_search_window: SpaceInterval,
-    ) -> impl Iterator<Item = BrandedFreeSlot<'boob, T>> + '_ {
+    ) -> SlotsForRequestIter<'s, 's, 'boob, 'bo, T, Q> {
         let p = request.processing_duration();
         let len = request.length();
 
-        let t0 = request.arrival_time();
-        let clamped_time = {
-            let start = if time_search_window.start() < t0 {
-                t0
-            } else {
-                time_search_window.start()
-            };
-            TimeInterval::new(start, time_search_window.end())
+        let arrival = request.arrival_time();
+        let twin_start = if time_search_window.start() < arrival {
+            arrival
+        } else {
+            time_search_window.start()
         };
+        let twin_end = time_search_window.end();
+        let twin = TimeInterval::new(twin_start, twin_end);
 
-        let s_opt = space_search_window.intersection(&request.feasible_space_window());
+        let windows = request.feasible_space_windows();
 
-        clamped_time
-            .intersection(&clamped_time) // no-op; keeps type symmetry
-            .and_then(|twin| s_opt.map(|swin| (twin, swin)))
-            .filter(|(twin, swin)| twin.duration() >= p && swin.measure() >= len)
-            .map(move |(twin, swin)| self.berth_overlay.iter_free_slots(twin, p, len, swin))
-            .into_iter()
-            .flatten()
+        SlotsForRequestIter::new(
+            self.berth_overlay,
+            windows,
+            twin,
+            p,
+            len,
+            space_search_window,
+        )
     }
 
-    pub fn iter_regions_for_request_within(
-        &self,
-        request: &BrandedMovableRequest<'alob, 'p, T, C>,
+    pub fn iter_regions_for_request_within<'s>(
+        &'s self,
+        request: &'s BrandedMovableRequest<'alob, 'p, T, C>,
         time_search_window: TimeInterval<T>,
         space_search_window: SpaceInterval,
-    ) -> impl Iterator<Item = BrandedFreeRegion<'boob, T>> + '_ {
+    ) -> RegionsForRequestIter<'s, 's, 'boob, 'bo, T, Q> {
         let p = request.processing_duration();
         let len = request.length();
 
-        let t0 = request.arrival_time();
-        let clamped_time = {
-            let start = if time_search_window.start() < t0 {
-                t0
-            } else {
-                time_search_window.start()
-            };
-            TimeInterval::new(start, time_search_window.end())
+        let arrival = request.arrival_time();
+        let twin_start = if time_search_window.start() < arrival {
+            arrival
+        } else {
+            time_search_window.start()
         };
+        let twin_end = time_search_window.end();
+        let twin = TimeInterval::new(twin_start, twin_end);
 
-        let s_opt = space_search_window.intersection(&request.feasible_space_window());
+        let windows = request.feasible_space_windows();
 
-        clamped_time
-            .intersection(&clamped_time) // no-op; keeps type symmetry
-            .and_then(|twin| s_opt.map(|swin| (twin, swin)))
-            .filter(|(twin, swin)| twin.duration() >= p && swin.measure() >= len)
-            .map(move |(twin, swin)| self.berth_overlay.iter_free_regions(twin, p, len, swin))
-            .into_iter()
-            .flatten()
+        RegionsForRequestIter::new(
+            self.berth_overlay,
+            windows,
+            twin,
+            p,
+            len,
+            space_search_window,
+        )
     }
 }
 
@@ -606,43 +607,21 @@ where
         t: TimePoint<T>,
         s: SpacePosition,
     ) -> Result<BrandedMovableAssignment<'alob, 'p, T, C>, ProposeError<T>> {
-        // Validate that the chosen placement is within the region bounds
-        let region_time = region.region().rectangle().time();
-        let region_space = region.region().rectangle().space();
-
-        // Check time bounds
-        if t < region_time.start() || t >= region_time.end() {
-            return Err(ProposeError::FreeRegionViolation(FreeRegionViolationError(
-                SpaceTimeRectangle::new(
-                    SpaceInterval::new(s, s + req.length()),
-                    TimeInterval::new(t, t + req.processing_duration()),
-                ),
-            )));
-        }
-
-        // Check space bounds
-        let end_space = s + req.length();
-        if s < region_space.start() || end_space > region_space.end() {
-            return Err(ProposeError::FreeRegionViolation(FreeRegionViolationError(
-                SpaceTimeRectangle::new(
-                    SpaceInterval::new(s, end_space),
-                    TimeInterval::new(t, t + req.processing_duration()),
-                ),
-            )));
-        }
-
-        // The actual assignment rectangle (for the berth occupancy)
-        let assignment_rect = SpaceTimeRectangle::new(
+        let rect = SpaceTimeRectangle::new(
             SpaceInterval::new(s, s + req.length()),
             TimeInterval::new(t, t + req.processing_duration()),
         );
-
+        if !region.region().rectangle().contains(&rect) {
+            return Err(ProposeError::FreeRegionViolation(FreeRegionViolationError(
+                rect,
+            )));
+        }
         let alov = self.alov.as_mut().expect("txn overlays already taken");
         let bov = self.bov.as_mut().expect("txn overlays already taken");
-
+        let a = AssignmentRef::new(req.request(), s, t);
+        let r2: SpaceTimeRectangle<T> = a.into();
         let ma = alov.commit_assignment(req.request(), t, s)?;
-        bov.occupy(&assignment_rect)?;
-
+        bov.occupy(&r2)?;
         Ok(ma)
     }
 
