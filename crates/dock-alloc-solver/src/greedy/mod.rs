@@ -227,11 +227,10 @@ where
                         }
                     });
 
-                    if let Some((req2, slot, proc)) = decision {
-                        if tx.propose_assign(&req2, slot).is_ok() {
+                    if let Some((req2, slot, proc)) = decision
+                        && tx.propose_assign(&req2, slot).is_ok() {
                             deps.push(t + proc);
                         }
-                    }
                 }
 
                 tx.commit();
@@ -251,14 +250,12 @@ where
                 for d in departures {
                     events.insert(d);
                 }
-            } else {
-                if events.is_empty() {
-                    let any_left = ctx.with_builder(|b| {
-                        b.with_explorer(|ex| ex.iter_unassigned_requests().next().is_some())
-                    });
-                    if any_left {
-                        return Err(GreedySolverError::Infeasible);
-                    }
+            } else if events.is_empty() {
+                let any_left = ctx.with_builder(|b| {
+                    b.with_explorer(|ex| ex.iter_unassigned_requests().next().is_some())
+                });
+                if any_left {
+                    return Err(GreedySolverError::Infeasible);
                 }
             }
         }
@@ -536,6 +533,58 @@ mod tests {
         assert_eq!(
             state.ledger().iter_movable_assignments().count(),
             problem.iter_movable_requests().count()
+        );
+    }
+
+    #[test]
+    fn test_greedy_prefers_later_if_cheaper_due_to_deviation() {
+        // quay length big enough to host anywhere
+        let mut pb = ProblemBuilder::<Tm, Cm>::new(SpaceLength::new(200));
+
+        // A fixed assignment blocks the *target* space [0,10) until t=5.
+        let fixed = req_fixed_ok(100, 10, 0, 5, 0, 200, 0);
+        pb.add_preassigned(Assignment::new(
+            fixed.clone(),
+            SpacePosition::new(0),
+            TimePoint::new(0),
+        ))
+        .unwrap();
+
+        // Movable wants len=10, arrives at t=0, proc=5, target near 0.
+        // Windows allow either [0,10) (target area) or [100,110) (far away).
+        // Deviation cost will strongly prefer starting near 0; waiting adds some cost,
+        // but starting *now* at the far window should be costlier than waiting to t=5 at target.
+        let r = Request::<Movable, _, _>::new(
+            RequestId::new(1),
+            SpaceLength::new(10),
+            TimePoint::new(0),     // arrival
+            TimeDelta::new(5),     // processing
+            SpacePosition::new(0), // target position
+            Cost::new(1),          // wait weight
+            Cost::new(10),         // deviation weight (make deviation expensive)
+            vec![
+                SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10)), // near target (blocked until t=5)
+                SpaceInterval::new(SpacePosition::new(100), SpacePosition::new(110)), // far (free now)
+            ],
+        )
+        .unwrap();
+        pb.add_movable_request(r).unwrap();
+
+        let problem = pb.build();
+        let mut solver: GreedySolver<Tm, Cm, BooleanVecQuay> = GreedySolver::new();
+        let state = solver.build_state(&problem).expect("should be feasible");
+
+        // Expect the solver to *wait* until t=5 (the next event) instead of taking the far-now slot.
+        let asgs: Vec<_> = state.ledger().iter_movable_assignments().collect();
+        assert_eq!(asgs.len(), 1);
+        let a = asgs[0];
+        assert_eq!(a.start_time(), TimePoint::new(5));
+        // It should also choose the near-target window (0..10).
+        assert!(
+            SpaceInterval::new(SpacePosition::new(0), SpacePosition::new(10))
+                .contains(a.start_position()),
+            "expected start near target; got pos {}",
+            a.start_position().value()
         );
     }
 }
