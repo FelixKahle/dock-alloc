@@ -25,6 +25,8 @@ use std::{
     fmt::{Debug, Display},
 };
 
+use crate::container::intervalset::IntervalSet;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct QuayOutOfBoundsError<T> {
     violation: T,
@@ -870,6 +872,154 @@ impl QuayWrite for BitPackedQuay {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IntervalSetQuay {
+    total: SpaceLength,
+    free: IntervalSet<SpacePosition>, // stores FREE segments
+}
+
+impl IntervalSetQuay {
+    #[inline]
+    pub fn new(total_space: SpaceLength, initially_free: bool) -> Self {
+        let mut free = IntervalSet::new();
+        if initially_free && total_space > SpaceLength::zero() {
+            free.insert_and_coalesce(SpaceInterval::new(
+                SpacePosition::zero(),
+                SpacePosition::zero() + total_space,
+            ));
+        }
+        Self {
+            total: total_space,
+            free,
+        }
+    }
+}
+
+pub struct IntervalSetFreeIter<'a> {
+    slice: &'a [SpaceInterval], // free runs (sorted, disjoint)
+    idx: usize,                 // current index into slice
+    bounds: SpaceInterval,      // search_range clamped to universe
+    required: SpaceLength,      // minimal length to yield
+}
+
+impl<'a> Iterator for IntervalSetFreeIter<'a> {
+    type Item = SpaceInterval;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.idx < self.slice.len() {
+            let iv = self.slice[self.idx];
+            // If the next interval starts at/after bounds.end, we're done.
+            if iv.start() >= self.bounds.end() {
+                return None;
+            }
+            self.idx += 1;
+
+            // Intersect with bounds and enforce required length.
+            if let Some(clamped) = iv.clamp(&self.bounds)
+                && clamped.extent().value() >= self.required.value() {
+                    return Some(clamped);
+                }
+            // Else continue scanning.
+        }
+        None
+    }
+}
+
+impl QuayRead for IntervalSetQuay {
+    type FreeIter<'a>
+        = IntervalSetFreeIter<'a>
+    where
+        Self: 'a;
+
+    #[inline]
+    fn new(total_space: SpaceLength, initially_free: bool) -> Self {
+        Self::new(total_space, initially_free)
+    }
+
+    #[inline]
+    fn check_free(
+        &self,
+        interval: SpaceInterval,
+    ) -> Result<bool, QuaySpaceIntervalOutOfBoundsError> {
+        let (start, end) = normalize_in_range(self.capacity(), interval)?;
+        if start >= end {
+            return Ok(true);
+        }
+        let req = SpaceInterval::new(start, end);
+        Ok(self.free.covers(req))
+    }
+
+    #[inline]
+    fn check_occupied(
+        &self,
+        interval: SpaceInterval,
+    ) -> Result<bool, QuaySpaceIntervalOutOfBoundsError> {
+        let (start, end) = normalize_in_range(self.capacity(), interval)?;
+        if start >= end {
+            return Ok(false);
+        }
+        let req = SpaceInterval::new(start, end);
+        // Fully occupied iff there is no FREE segment overlapping req.
+        Ok(!self.free.overlaps(req))
+    }
+
+    #[inline]
+    fn capacity(&self) -> SpaceLength {
+        self.total
+    }
+
+    #[inline]
+    fn iter_free_intervals(
+        &self,
+        required_space: SpaceLength,
+        search_range: SpaceInterval,
+    ) -> Self::FreeIter<'_> {
+        // Clamp search to the quay universe.
+        let (search_start, search_end) = clamp(self.capacity(), search_range);
+        let bounds = SpaceInterval::new(search_start, search_end);
+
+        // We want to begin at the first interval that could intersect bounds:
+        // find the first interval whose start >= bounds.start,
+        // but also consider its predecessor (might overlap from the left).
+        let slice = self.free.as_slice();
+
+        // Binary search on starts (sorted by start).
+        let mut idx = slice.partition_point(|iv| iv.start() < bounds.start());
+        idx = idx.saturating_sub(1);
+
+        IntervalSetFreeIter {
+            slice,
+            idx,
+            bounds,
+            required: required_space,
+        }
+    }
+}
+
+impl QuayWrite for IntervalSetQuay {
+    #[inline]
+    fn free(&mut self, space: SpaceInterval) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
+        let (start, end) = normalize_in_range(self.capacity(), space)?;
+        if start >= end {
+            return Ok(());
+        }
+        self.free
+            .insert_and_coalesce(SpaceInterval::new(start, end));
+        Ok(())
+    }
+
+    #[inline]
+    fn occupy(&mut self, space: SpaceInterval) -> Result<(), QuaySpaceIntervalOutOfBoundsError> {
+        let (start, end) = normalize_in_range(self.capacity(), space)?;
+        if start >= end {
+            return Ok(());
+        }
+        self.free.subtract_interval(SpaceInterval::new(start, end));
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1448,4 +1598,5 @@ mod tests {
     test_quay_impl!(btree_quay_tests, BTreeMapQuay);
     test_quay_impl!(boolvec_quay_tests, BooleanVecQuay);
     test_quay_impl!(bitpacked_quay_tests, BitPackedQuay);
+    test_quay_impl!(intervalset_quay_tests, IntervalSetQuay);
 }

@@ -25,7 +25,7 @@ use criterion::{
 };
 use dock_alloc_core::space::{SpaceInterval, SpaceLength, SpacePosition};
 use dock_alloc_solver::berth::quay::{
-    BTreeMapQuay, BitPackedQuay, BooleanVecQuay, QuayRead, QuayWrite,
+    BTreeMapQuay, BitPackedQuay, BooleanVecQuay, IntervalSetQuay, QuayRead, QuayWrite,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -284,14 +284,17 @@ struct Impls {
     btree: bool,
     boolvec: bool,
     bitpack: bool,
+    intervalset: bool,
 }
 impl Impls {
     fn from_env() -> Self {
-        let s = env::var("QUAY_IMPLS").unwrap_or_else(|_| "btreemap,boolvec,bitpacked".to_string());
+        let s = env::var("QUAY_IMPLS")
+            .unwrap_or_else(|_| "btreemap,boolvec,bitpacked,intervalset".to_string());
         Self {
             btree: s.contains("btreemap"),
             boolvec: s.contains("boolvec"),
             bitpack: s.contains("bitpacked"),
+            intervalset: s.contains("intervalset"),
         }
     }
 }
@@ -306,6 +309,9 @@ fn register_apply_all(c: &mut Criterion, size: usize, ops_n: usize, impls: Impls
     }
     if impls.bitpack {
         register_apply_for_impl::<BitPackedQuay>(&mut group, "bitpacked", size, ops_n);
+    }
+    if impls.intervalset {
+        register_apply_for_impl::<IntervalSetQuay>(&mut group, "intervalset", size, ops_n);
     }
     group.finish();
 }
@@ -327,6 +333,15 @@ fn register_queries_all(
     if impls.bitpack {
         register_queries_for_impl::<BitPackedQuay>(&mut group, "bitpacked", size, ops_n, queries_n);
     }
+    if impls.intervalset {
+        register_queries_for_impl::<IntervalSetQuay>(
+            &mut group,
+            "intervalset",
+            size,
+            ops_n,
+            queries_n,
+        );
+    }
     group.finish();
 }
 
@@ -343,6 +358,9 @@ fn register_iter_all(c: &mut Criterion, size: usize, ops_n: usize, iters_n: usiz
     }
     if impls.bitpack {
         register_iter_for_impl::<BitPackedQuay>(&mut group, "bitpacked", size2, ops2, iters_n);
+    }
+    if impls.intervalset {
+        register_iter_for_impl::<IntervalSetQuay>(&mut group, "intervalset", size2, ops2, iters_n);
     }
     group.finish();
 }
@@ -380,6 +398,16 @@ fn register_mixed_all(
         register_mixed_for_impl::<BitPackedQuay>(
             &mut group,
             "bitpacked",
+            size,
+            ops_n,
+            queries_n / 2,
+            iters_n / 2,
+        );
+    }
+    if impls.intervalset {
+        register_mixed_for_impl::<IntervalSetQuay>(
+            &mut group,
+            "intervalset",
             size,
             ops_n,
             queries_n / 2,
