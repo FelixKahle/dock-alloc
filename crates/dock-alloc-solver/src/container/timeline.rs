@@ -98,6 +98,16 @@ where
         self.map.get_mut(&t)
     }
 
+    #[inline]
+    pub fn first_key(&self) -> K {
+        *self.map.keys().next().expect("timeline has origin")
+    }
+
+    #[inline]
+    pub fn last_key(&self) -> K {
+        *self.map.keys().next_back().expect("timeline has origin")
+    }
+
     /// Returns the key of the keyframe active at time `t` (largest key <= `t`).
     #[inline]
     pub fn prev_key(&self, t: K) -> Option<K> {

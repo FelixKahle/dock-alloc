@@ -170,6 +170,16 @@ where
         Self: 's;
 
     #[inline]
+    fn first_key(&self) -> Option<TimePoint<T>> {
+        Some(self.timeline.first_key())
+    }
+
+    #[inline]
+    fn last_key(&self) -> Option<TimePoint<T>> {
+        Some(self.timeline.last_key())
+    }
+
+    #[inline]
     fn pred(&self, time_point: TimePoint<T>) -> Option<TimePoint<T>> {
         self.slice_predecessor_timepoint(time_point)
     }
@@ -1209,5 +1219,28 @@ mod tests {
         // Tight bounds force the free slot to be exactly that window
         let slots = collect_free_iter(&b, ti(0, 12), TimeDelta::new(2), len(3), si(0, 3));
         assert!(slots.iter().all(|&(_, (a, b))| a == 0 && b == 3));
+    }
+
+    #[test]
+    fn test_first_last_key_initial_base() {
+        let b = BO::new(len(10));
+        // Only the origin exists.
+        assert_eq!(<BO as SliceView<T>>::first_key(&b), Some(tp(0)));
+        assert_eq!(<BO as SliceView<T>>::last_key(&b), Some(tp(0)));
+    }
+
+    #[test]
+    fn test_first_last_key_after_occupy_and_free_base() {
+        let mut b = BO::new(len(10));
+
+        // Occupy [5,10) -> keys {0,5,10} so last_key == 10
+        b.occupy(&rect(ti(5, 10), si(2, 5))).unwrap();
+        assert_eq!(<BO as SliceView<T>>::first_key(&b), Some(tp(0)));
+        assert_eq!(<BO as SliceView<T>>::last_key(&b), Some(tp(10)));
+
+        // Free everything -> coalesce back to single origin key {0}
+        b.free(&rect(ti(5, 10), si(2, 5))).unwrap();
+        assert_eq!(<BO as SliceView<T>>::first_key(&b), Some(tp(0)));
+        assert_eq!(<BO as SliceView<T>>::last_key(&b), Some(tp(0)));
     }
 }

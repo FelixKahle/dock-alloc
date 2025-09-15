@@ -31,7 +31,7 @@ use dock_alloc_core::{
     time::{TimeInterval, TimePoint},
 };
 use dock_alloc_model::prelude::*;
-use std::{cmp::Reverse, collections::BTreeSet};
+use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GreedySolverError {
@@ -117,45 +117,57 @@ where
             events.insert(a.start_time() + a.request().processing_duration());
         }
 
-        while let Some(t) = events.pop_first() {
+        while {
+            if events.is_empty() {
+                let have_unassigned = {
+                    let ctx = PlanningContext::new(state.ledger(), state.berth(), problem);
+                    ctx.with_builder(|b| {
+                        b.with_explorer(|ex| ex.iter_unassigned_requests().next().is_some())
+                    })
+                };
+
+                if have_unassigned {
+                    let t_tail = {
+                        let ctx = PlanningContext::new(state.ledger(), state.berth(), problem);
+                        ctx.with_builder(|b| b.with_explorer(|ex| ex.latest_event_time()))
+                    };
+                    events.insert(t_tail);
+                }
+            }
+
+            !events.is_empty()
+        } {
+            let t = events.pop_first().unwrap();
             let t_next_opt = events.first().copied();
             let ctx = PlanningContext::new(state.ledger(), state.berth(), problem);
 
             let (plan_opt, departures) = ctx.with_builder(|mut b| {
-                // Start a transactional child over the current overlays
                 let mut tx = b.begin();
 
-                // Decide using the (old) read facade over the parent overlay:
-                // For this greedy example we don't need to "see" incremental txn changes while we place,
-                // so using b.with_explorer(...) is fine. (If you later need reads to see txn deltas,
-                // add an Explorer::new_from(&alov, &bov) and call tx.ex().)
                 let mut ready_order = tx.with_explorer(|ex| {
                     ex.iter_unassigned_requests()
                         .filter(|req| req.request().arrival_time() <= t)
                         .map(|req| {
                             (
                                 req.clone(),
-                                Reverse(req.length().value()),
+                                std::cmp::Reverse(req.length().value()),
                                 req.request().arrival_time().value(),
                             )
                         })
                         .collect::<Vec<_>>()
                 });
-
                 ready_order.sort_by_key(|&(_, len_key, arr_key)| (len_key, arr_key));
 
                 let mut deps = Vec::new();
 
-                for (req, _len_key, _arr_key) in ready_order {
+                for (req, _, _) in ready_order {
                     let decision = tx.with_explorer(|ex| {
                         let proc = req.processing_duration();
                         let windows = req.feasible_space_windows();
 
-                        // try to place now
                         let twin_now = TimeInterval::new(t, t + proc);
                         let mut best_now_cost = None;
                         let mut best_now_slot = None;
-
                         for &w in windows {
                             for slot in ex.iter_slots_for_request_within(&req, twin_now, w) {
                                 if slot.slot().start_time() != t {
@@ -216,17 +228,14 @@ where
                     });
 
                     if let Some((req2, slot, proc)) = decision {
-                        // Stage using the NEW transactional API
                         if tx.propose_assign(&req2, slot).is_ok() {
                             deps.push(t + proc);
                         }
                     }
                 }
 
-                // Merge txn changes back into the builder overlays and build the plan
                 tx.commit();
                 let built = b.build();
-
                 let plan = if built.ledger_commit().operations().is_empty() {
                     None
                 } else {
@@ -241,6 +250,15 @@ where
                     .map_err(|_| GreedySolverError::Infeasible)?;
                 for d in departures {
                     events.insert(d);
+                }
+            } else {
+                if events.is_empty() {
+                    let any_left = ctx.with_builder(|b| {
+                        b.with_explorer(|ex| ex.iter_unassigned_requests().next().is_some())
+                    });
+                    if any_left {
+                        return Err(GreedySolverError::Infeasible);
+                    }
                 }
             }
         }

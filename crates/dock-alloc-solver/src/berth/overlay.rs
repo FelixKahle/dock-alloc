@@ -127,6 +127,26 @@ where
         Self: 's;
 
     #[inline]
+    fn first_key(&self) -> Option<TimePoint<T>> {
+        let base = self.berth_occupancy.first_key();
+        let free = self.free_by_time.keys().next().copied();
+        let occ = self.occupied_by_time.keys().next().copied();
+        let bar_f = self.barrier_free_times.iter().next().copied();
+        let bar_o = self.barrier_occupied_times.iter().next().copied();
+        [base, free, occ, bar_f, bar_o].into_iter().flatten().min()
+    }
+
+    #[inline]
+    fn last_key(&self) -> Option<TimePoint<T>> {
+        let base = self.berth_occupancy.last_key();
+        let free = self.free_by_time.keys().next_back().copied();
+        let occ = self.occupied_by_time.keys().next_back().copied();
+        let bar_f = self.barrier_free_times.iter().next_back().copied();
+        let bar_o = self.barrier_occupied_times.iter().next_back().copied();
+        [base, free, occ, bar_f, bar_o].into_iter().flatten().max()
+    }
+
+    #[inline]
     fn pred(&self, tp: TimePoint<T>) -> Option<TimePoint<T>> {
         let base = self.berth_occupancy.slice_predecessor_timepoint(tp);
         let free = self.free_by_time.range(..tp).next_back().map(|(t, _)| *t);
@@ -1668,5 +1688,85 @@ mod tests {
                 .collect();
             assert_eq!(pairs, expect(t), "unexpected free runs at t={}", t);
         }
+    }
+
+    #[test]
+    fn test_overlay_first_last_keys_base_only() {
+        let berth = BO::new(len(10)); // base has only origin at 0
+        let ov = BerthOccupancyOverlay::new(&berth);
+
+        assert_eq!(
+            <BerthOccupancyOverlay<'_, '_, T, BooleanVecQuay> as SliceView<T>>::first_key(&ov),
+            Some(tp(0))
+        );
+        assert_eq!(
+            <BerthOccupancyOverlay<'_, '_, T, BooleanVecQuay> as SliceView<T>>::last_key(&ov),
+            Some(tp(0))
+        );
+    }
+
+    #[test]
+    fn test_overlay_first_last_keys_with_overlay_keys_and_barriers() {
+        let berth = BO::new(len(10));
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+
+        // Introduce an overlay-only key at t=7 via add_occupy; no barrier is created by add_* helpers.
+        ov.add_occupy(tp(7), si(1, 2)).unwrap();
+        assert_eq!(
+            <BerthOccupancyOverlay<'_, '_, T, BooleanVecQuay> as SliceView<T>>::first_key(&ov),
+            Some(tp(0))
+        );
+        assert_eq!(
+            <BerthOccupancyOverlay<'_, '_, T, BooleanVecQuay> as SliceView<T>>::last_key(&ov),
+            Some(tp(7))
+        );
+
+        // Now introduce a *barrier* by recording a full rectangle with end at t=12.
+        // This should push the overlay's last_key to 12.
+        let r = rect(ti(4, 12), si(3, 5));
+        ov.occupy(&r).unwrap(); // creates entries at 4 and barrier at 12
+        assert_eq!(
+            <BerthOccupancyOverlay<'_, '_, T, BooleanVecQuay> as SliceView<T>>::first_key(&ov),
+            Some(tp(0))
+        );
+        assert_eq!(
+            <BerthOccupancyOverlay<'_, '_, T, BooleanVecQuay> as SliceView<T>>::last_key(&ov),
+            Some(tp(12))
+        );
+
+        // Add a later free rectangle ending at t=15; last_key should advance to 15.
+        let r_free = rect(ti(6, 15), si(4, 6));
+        let _ = ov.free(&r_free).unwrap();
+        assert_eq!(
+            <BerthOccupancyOverlay<'_, '_, T, BooleanVecQuay> as SliceView<T>>::last_key(&ov),
+            Some(tp(15))
+        );
+    }
+
+    #[test]
+    fn test_overlay_first_last_keys_reset_on_clear() {
+        let berth = BO::new(len(10));
+        let mut ov = BerthOccupancyOverlay::new(&berth);
+
+        ov.occupy(&rect(ti(2, 6), si(1, 3))).unwrap(); // barrier at 6
+        assert_eq!(
+            <BerthOccupancyOverlay<'_, '_, T, BooleanVecQuay> as SliceView<T>>::first_key(&ov),
+            Some(tp(0))
+        );
+        assert_eq!(
+            <BerthOccupancyOverlay<'_, '_, T, BooleanVecQuay> as SliceView<T>>::last_key(&ov),
+            Some(tp(6))
+        );
+
+        ov.clear();
+        // After clear, overlay should again reflect only base origin.
+        assert_eq!(
+            <BerthOccupancyOverlay<'_, '_, T, BooleanVecQuay> as SliceView<T>>::first_key(&ov),
+            Some(tp(0))
+        );
+        assert_eq!(
+            <BerthOccupancyOverlay<'_, '_, T, BooleanVecQuay> as SliceView<T>>::last_key(&ov),
+            Some(tp(0))
+        );
     }
 }

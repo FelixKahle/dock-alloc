@@ -25,6 +25,7 @@ use crate::{
         commit::BerthOverlayCommit,
         overlay::{BerthOccupancyOverlay, BrandedFreeRegion, BrandedFreeSlot},
         quay::{QuayRead, QuaySpaceIntervalOutOfBoundsError},
+        slice::SliceView,
     },
     domain::SpaceTimeRectangle,
     framework::iter::{RegionsForRequestIter, SlotsForRequestIter},
@@ -357,6 +358,16 @@ where
             assignment_overlay,
             berth_overlay,
         }
+    }
+
+    #[inline]
+    pub fn latest_event_time(&self) -> TimePoint<T> {
+        self.berth_overlay.last_key().unwrap_or(TimePoint::zero())
+    }
+
+    #[inline]
+    pub fn earliest_event_time(&self) -> TimePoint<T> {
+        self.berth_overlay.first_key().unwrap_or(TimePoint::zero())
     }
 
     #[inline]

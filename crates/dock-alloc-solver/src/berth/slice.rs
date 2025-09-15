@@ -30,6 +30,8 @@ pub trait SliceView<T: SolverVariable> {
     fn next_key_after(&self, after: TimePoint<T>) -> Option<TimePoint<T>>;
     fn has_key_at(&self, time_point: TimePoint<T>) -> bool;
     fn free_runs_at(&self, time_point: TimePoint<T>) -> Self::FreeRunsIter<'_>;
+    fn first_key(&self) -> Option<TimePoint<T>>;
+    fn last_key(&self) -> Option<TimePoint<T>>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
