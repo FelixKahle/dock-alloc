@@ -25,19 +25,18 @@ use crate::{
         planning::{Plan, PlanningContext},
         state::{ConstructiveSolver, FeasibleSolverState, FeasibleSolverStateApplyError, Solver},
     },
-    meta::{
-        config::{AllocationConfig, MetaConfig, StatsConfig},
-        operator::Operator,
-    },
+    meta::{config::MetaConfig, operator::Operator},
 };
 use dock_alloc_core::{SolverVariable, cost::Cost};
 use dock_alloc_model::prelude::*;
 use num_traits::Zero;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
+use rand_distr::{Distribution, weighted::WeightedIndex};
 use rayon::prelude::*;
 use std::{
     fmt::{Debug, Display},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing::{debug, info, instrument, trace, warn};
@@ -59,8 +58,6 @@ fn acceptance_prob<C: SolverVariable>(delta: Cost<C>, temp: f64) -> f64 {
 struct Candidate<'p, T: SolverVariable, C: SolverVariable> {
     op_idx: usize,
     plan: Plan<'p, T, C>,
-    gen_ns: f64,
-    eval_ns: f64,
     delta: Cost<C>,
 }
 
@@ -152,6 +149,172 @@ where
     }
 }
 
+/// Small wrapper to encapsulate operator records & stats plumbing.
+pub struct OperatorPool<T, C, Q>
+where
+    T: SolverVariable,
+    C: SolverVariable,
+    Q: QuayRead,
+{
+    records: Vec<OperatorRecord<T, C, Q>>,
+}
+
+impl<T, C, Q> OperatorPool<T, C, Q>
+where
+    T: SolverVariable,
+    C: SolverVariable,
+    Q: QuayRead,
+{
+    fn new(records: Vec<OperatorRecord<T, C, Q>>) -> Self {
+        Self { records }
+    }
+
+    #[inline]
+    fn len(&self) -> usize {
+        self.records.len()
+    }
+
+    #[inline]
+    fn get(&self, i: usize) -> &OperatorRecord<T, C, Q> {
+        &self.records[i]
+    }
+
+    #[inline]
+    fn get_mut(&mut self, i: usize) -> &mut OperatorRecord<T, C, Q> {
+        &mut self.records[i]
+    }
+
+    #[inline]
+    pub fn records(&self) -> &[OperatorRecord<T, C, Q>] {
+        &self.records
+    }
+
+    /// Compute raw (speed, success) score for index `i` (no temperature/exploration yet).
+    #[inline]
+    fn raw_score_at(
+        &self,
+        i: usize,
+        alloc: &crate::meta::config::AllocationConfig,
+        stats: &crate::meta::config::StatsConfig,
+    ) -> f64 {
+        let s = &self.records[i].stats;
+        let ns_per = (s.emwa_gen_ns_per_proposal + s.emwa_eval_ns_per_proposal)
+            .max(stats.min_ns_per_proposal);
+        let speed = 1.0 / ns_per;
+        let succ = if s.attempts > 0 {
+            s.accepted as f64 / s.attempts as f64
+        } else {
+            stats.bootstrap_success_rate
+        };
+        alloc.speed_weight * speed + alloc.success_weight * succ
+    }
+
+    fn apply_aggregates(&mut self, aggs: &[OpAgg], stats_cfg: &crate::meta::config::StatsConfig) {
+        for (i, a) in aggs.iter().enumerate() {
+            if a.attempts == 0 {
+                continue;
+            }
+            let st = &mut self.records[i].stats;
+            st.attempts += a.attempts;
+            if a.gen_ns_count > 0 || a.eval_ns_count > 0 {
+                let gene = if a.gen_ns_count > 0 {
+                    a.gen_ns_sum / a.gen_ns_count as f64
+                } else {
+                    0.0
+                };
+                let eval = if a.eval_ns_count > 0 {
+                    a.eval_ns_sum / a.eval_ns_count as f64
+                } else {
+                    0.0
+                };
+                st.on_timing(
+                    gene,
+                    eval,
+                    stats_cfg.gen_time_alpha,
+                    stats_cfg.eval_time_alpha,
+                );
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct OpAgg {
+    attempts: u64,
+    gen_ns_sum: f64,
+    eval_ns_sum: f64,
+    gen_ns_count: u64,
+    eval_ns_count: u64,
+}
+
+impl OpAgg {
+    #[inline]
+    fn add_attempt(&mut self) {
+        self.attempts += 1;
+    }
+    #[inline]
+    fn add_timing(&mut self, gen_ns: f64, eval_ns: f64) {
+        if gen_ns > 0.0 {
+            self.gen_ns_sum += gen_ns;
+            self.gen_ns_count += 1;
+        }
+        if eval_ns > 0.0 {
+            self.eval_ns_sum += eval_ns;
+            self.eval_ns_count += 1;
+        }
+    }
+}
+
+struct ThreadAccum<'p, T: SolverVariable, C: SolverVariable> {
+    candidate: Option<Candidate<'p, T, C>>,
+    per_op: Vec<OpAgg>,
+}
+
+impl<'p, T: SolverVariable, C: SolverVariable> ThreadAccum<'p, T, C> {
+    #[inline]
+    fn empty(n_ops: usize) -> Self {
+        Self {
+            candidate: None,
+            per_op: vec![OpAgg::default(); n_ops],
+        }
+    }
+
+    #[inline]
+    fn merge(mut self, mut other: Self, temp: f64) -> Self {
+        for (i, o) in other.per_op.iter_mut().enumerate() {
+            let s = &mut self.per_op[i];
+            s.attempts += o.attempts;
+            s.gen_ns_sum += o.gen_ns_sum;
+            s.eval_ns_sum += o.eval_ns_sum;
+            s.gen_ns_count += o.gen_ns_count;
+            s.eval_ns_count += o.eval_ns_count;
+        }
+        self.candidate = choose_sa(self.candidate, other.candidate, temp);
+        self
+    }
+}
+
+#[inline]
+fn choose_sa<'p, T: SolverVariable, C: SolverVariable>(
+    a: Option<Candidate<'p, T, C>>,
+    b: Option<Candidate<'p, T, C>>,
+    temp: f64,
+) -> Option<Candidate<'p, T, C>> {
+    match (a, b) {
+        (None, None) => None,
+        (Some(x), None) | (None, Some(x)) => Some(x),
+        (Some(x), Some(y)) => {
+            let d = y.delta - x.delta;
+            let p = acceptance_prob(d, temp);
+            if p > 0.0 && rand::random::<f64>() < p {
+                Some(y)
+            } else {
+                Some(x)
+            }
+        }
+    }
+}
+
 pub struct MetaEngine<T, C, Q, S>
 where
     T: SolverVariable,
@@ -160,9 +323,10 @@ where
     S: ConstructiveSolver<T, C, Q>,
 {
     config: MetaConfig,
-    operator_records: Vec<OperatorRecord<T, C, Q>>,
+    operator_pool: OperatorPool<T, C, Q>,
     construction_solver: S,
     proposals_made: u64,
+    weights_buf: Vec<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -206,11 +370,8 @@ where
 }
 
 #[inline]
-fn make_job_rng(base_seed: u64, op_idx: usize, k: usize, iter: usize) -> ChaCha8Rng {
-    let s = base_seed
-        ^ ((op_idx as u64).wrapping_mul(0x9E37_79B1_85EB_CA87))
-        ^ ((k as u64).rotate_left(17))
-        ^ ((iter as u64).wrapping_mul(0xD134_2543_DE82_E285));
+fn make_job_rng(base_seed: u64, j: usize) -> ChaCha8Rng {
+    let s = base_seed ^ ((j as u64).rotate_left(17)) ^ 0x9E37_79B1_85EB_CA87u64;
     ChaCha8Rng::seed_from_u64(s)
 }
 
@@ -226,23 +387,19 @@ where
         ops: impl IntoIterator<Item = Box<dyn Operator<Time = T, Cost = C, Quay = Q> + Send + Sync>>,
         construction_solver: S,
     ) -> Self {
-        let operator_records = ops.into_iter().map(|op| OperatorRecord::new(op)).collect();
+        let records = ops.into_iter().map(|op| OperatorRecord::new(op)).collect();
         Self {
             config,
-            operator_records,
+            operator_pool: OperatorPool::new(records),
             construction_solver,
             proposals_made: 0,
+            weights_buf: Vec::new(),
         }
     }
 
     #[inline]
     pub fn construction_solver(&self) -> &S {
         &self.construction_solver
-    }
-
-    #[inline]
-    pub fn operator_records(&self) -> &[OperatorRecord<T, C, Q>] {
-        &self.operator_records
     }
 
     pub fn construct_initial_state<'p>(
@@ -277,139 +434,148 @@ where
         tracing::Span::current().record("temp", temp);
         tracing::Span::current().record("tau", tau);
 
-        // Softmax allocation across operators
-        let alloc = softmax_alloc(
-            &self
-                .operator_records
-                .iter()
-                .map(|r| r.stats.clone())
-                .collect::<Vec<_>>(),
-            alloc_cfg,
-            stats_cfg,
-            tau,
-        );
-
-        let total_jobs: usize = alloc.iter().sum();
-        if total_jobs == 0 {
-            trace!("No operators selected for this round (allocation sum = 0)");
+        let n_ops = self.operator_pool.len();
+        if n_ops == 0 {
+            trace!("No operators available.");
             return Ok(None);
         }
 
-        // Build job list (op index, per-op counter)
-        let jobs: Vec<(usize, usize)> = alloc
-            .iter()
-            .enumerate()
-            .flat_map(|(op_idx, &n)| (0..n).map(move |k| (op_idx, k)))
-            .collect();
+        if self.weights_buf.len() != n_ops {
+            self.weights_buf.resize(n_ops, 0.0);
+        }
+
+        let mut maxv = f64::NEG_INFINITY;
+        for i in 0..n_ops {
+            let s = self.operator_pool.raw_score_at(i, alloc_cfg, stats_cfg);
+            if s > maxv {
+                maxv = s;
+            }
+            self.weights_buf[i] = s;
+        }
+
+        let t = tau.max(1e-6);
+        for w in &mut self.weights_buf {
+            *w = ((*w - maxv) / t).exp();
+        }
+
+        if alloc_cfg.explore_frac > 0.0 {
+            // average of current (softmaxed) weights
+            let mut sum = 0.0;
+            for &w in &self.weights_buf {
+                sum += w;
+            }
+            // guard against pathological zero sum
+            let avg = if sum > 0.0 {
+                sum / n_ops as f64
+            } else {
+                1.0 / n_ops as f64
+            };
+            let e = alloc_cfg.explore_frac;
+            for w in &mut self.weights_buf {
+                *w = (1.0 - e) * *w + e * avg;
+            }
+        }
+
+        let dist = Arc::new(
+            WeightedIndex::new(self.weights_buf.iter().cloned())
+                .expect("weights must be non-negative and finite"),
+        );
+
+        let total_draws = usize::max(
+            n_ops,
+            self.config.alloc.target_total_proposals_per_round,
+        );
 
         let base_seed = rng_cfg.seed_base_task ^ (iteration as u64);
 
-        // Generate candidates in parallel
-        let candidates: Vec<Candidate<'_, T, C>> = jobs
-            .par_iter()
-            .filter_map(|&(op_idx, k)| {
-                // Every job gets its own RNG
-                let mut rng = make_job_rng(base_seed, op_idx, k, iteration);
-                let rec = &self.operator_records[op_idx];
+        let reduced = (0..total_draws)
+            .into_par_iter()
+            .fold(
+                || ThreadAccum::empty(n_ops), // one per worker
+                |mut acc, j| {
+                    let mut rng = make_job_rng(base_seed, j);
+                    let op_idx = dist.sample(&mut rng);
 
-                // Context is cheap to build and read-only
-                let ctx = PlanningContext::new(ledger, berth, problem);
-
-                // Stochastic timing sampling to reduce overhead
-                let sample_timing = (((base_seed as usize) ^ op_idx ^ k) & 0x7) == 0;
-
-                let (plan, gen_ns) = if sample_timing {
+                    let ctx = PlanningContext::new(ledger, berth, problem);
                     let t0 = Instant::now();
-                    let p = rec.operator.propose(iteration, &mut rng, ctx);
-                    (p, t0.elapsed().as_nanos() as f64)
-                } else {
-                    (rec.operator.propose(iteration, &mut rng, ctx), 0.0)
-                };
+                    let plan = self
+                        .operator_pool
+                        .get(op_idx)
+                        .operator()
+                        .propose(iteration, &mut rng, ctx);
+                    let gen_ns = t0.elapsed().as_nanos() as f64;
 
-                // Skip no-ops
-                if plan.ledger_commit().operations().is_empty() {
-                    return None;
-                }
+                    // Count attempt *always*, even if no-op
+                    acc.per_op[op_idx].add_attempt();
 
-                // Evaluate delta; optionally sample eval timing too
-                let (delta, eval_ns) = if sample_timing {
+                    if plan.ledger_commit().operations().is_empty() {
+                        return acc; // nothing else to do
+                    }
+
                     let t1 = Instant::now();
-                    let d = plan.eval().delta_cost();
-                    (d, t1.elapsed().as_nanos() as f64)
-                } else {
-                    (plan.eval().delta_cost(), 0.0)
-                };
+                    let delta = plan.eval().delta_cost();
+                    let eval_ns = t1.elapsed().as_nanos() as f64;
 
-                Some(Candidate {
-                    op_idx,
-                    plan,
-                    gen_ns,
-                    eval_ns,
-                    delta,
-                })
-            })
-            .collect();
+                    // Fold timing into aggregates
+                    acc.per_op[op_idx].add_timing(gen_ns, eval_ns);
 
-        if candidates.is_empty() {
+                    // Maintain a per-worker candidate using SA reduction semantics
+                    let cand = Candidate {
+                        op_idx,
+                        plan,
+                        delta,
+                    };
+                    acc.candidate = choose_sa(acc.candidate, Some(cand), temp);
+                    acc
+                },
+            )
+            .reduce(|| ThreadAccum::empty(n_ops), |a, b| a.merge(b, temp));
+
+        // If nothing useful was produced
+        if reduced.per_op.iter().all(|agg| agg.attempts == 0) {
             trace!("All generated plans were no-ops; nothing to apply.");
             return Ok(None);
         }
 
-        // Stats: mark an attempt for every *produced* candidate and feed timing into EWMA
-        for c in &candidates {
-            let rec = &mut self.operator_records[c.op_idx];
-            rec.stats_mut().on_attempt();
-            if c.gen_ns > 0.0 || c.eval_ns > 0.0 {
-                rec.stats_mut().on_timing(
-                    c.gen_ns,
-                    c.eval_ns,
-                    stats_cfg.gen_time_alpha,
-                    stats_cfg.eval_time_alpha,
-                );
-            }
+        // Update per-operator attempts & timings (EWMA) once
+        self.operator_pool
+            .apply_aggregates(&reduced.per_op, stats_cfg);
+
+        // Track proposals count accurately
+        let mut attempts_sum: u64 = 0;
+        for a in &reduced.per_op {
+            attempts_sum += a.attempts;
         }
+        self.proposals_made = self.proposals_made.saturating_add(attempts_sum);
 
-        self.proposals_made += candidates.len() as u64;
+        // Apply winner if present
+        let Some(winner) = reduced.candidate else {
+            trace!("No candidate survived the reduction.");
+            return Ok(None);
+        };
 
-        // Simulated annealing selection: walk once and decide acceptance against current winner
-        let mut winner_idx = 0usize;
-        for i in 1..candidates.len() {
-            let cur = &candidates[i];
-            let win = &candidates[winner_idx];
-            // Prefer moves with higher acceptance probability vs. current winner
-            let d = cur.delta - win.delta;
-            let p = acceptance_prob(d, temp);
-            if p > 0.0 {
-                // Flip once
-                if rand::random::<f64>() < p {
-                    winner_idx = i;
-                }
-            }
-        }
+        let winner_op_name = self.operator_pool.get(winner.op_idx).operator().name();
 
-        let winner = candidates
-            .into_iter()
-            .nth(winner_idx)
-            .expect("winner must exist");
-        let winner_op = self.operator_records[winner.op_idx].operator.name();
+        info!(
+            op_index = winner.op_idx,
+            op = winner_op_name,
+            %temp,
+            %tau,
+            delta = %winner.delta,
+            "Selected winner"
+        );
 
-        info!(op_index = winner.op_idx, op = winner_op, %temp, %tau, delta = %winner.delta, "Selected winner");
-
-        // Try to apply
         match state.apply_plan_validated(&winner.plan) {
             Ok(()) => {
                 // Reward the winning operator
-                let rec = &mut self.operator_records[winner.op_idx];
+                let rec = self.operator_pool.get_mut(winner.op_idx);
                 rec.stats_mut()
                     .on_accept(winner.delta, stats_cfg.reward_alpha);
-
                 trace!("Applied plan successfully.");
                 Ok(Some(winner.delta))
             }
             Err(e) => {
-                // This shouldn’t happen often because we pre-validated ledger ops,
-                // but if it does, we just report and skip the delta.
-                warn!(error = %e, op = winner_op, "Plan application failed; skipping.");
+                warn!(error = %e, op = winner_op_name, "Plan application failed; skipping.");
                 Err(e)
             }
         }
@@ -457,18 +623,14 @@ where
                         debug!(%best_cum, "New best cumulative delta");
                     }
                 }
-                Ok(None) => {
-                    // No accepted move; just continue
-                }
+                Ok(None) => {}
                 Err(e) => {
-                    // Application failed; continue search (state is still valid)
                     warn!(error = %e, "Step failed; continuing.");
                 }
             }
 
             iter += 1;
 
-            // Cheap stop check every 16 iterations to avoid tight-loop overhead
             if (iter & 0xF) == 0 && t0.elapsed() >= budget {
                 break;
             }
@@ -498,62 +660,6 @@ fn ewma(prev: f64, x: f64, alpha: f64) -> f64 {
     } else {
         alpha * x + (1.0 - alpha) * prev
     }
-}
-
-fn softmax_alloc<C: SolverVariable>(
-    stats: &[OperatorStats<C>],
-    alloc: &AllocationConfig,
-    stats_cfg: &StatsConfig,
-    tau: f64,
-) -> Vec<usize> {
-    let n = stats.len();
-    if n == 0 {
-        return vec![];
-    }
-
-    // base scores from speed and success
-    let raw: Vec<f64> = stats
-        .iter()
-        .map(|s| {
-            let ns_per = (s.emwa_gen_ns_per_proposal + s.emwa_eval_ns_per_proposal)
-                .max(stats_cfg.min_ns_per_proposal);
-            let speed = 1.0 / ns_per;
-            let succ = if s.attempts > 0 {
-                s.accepted as f64 / s.attempts as f64
-            } else {
-                stats_cfg.bootstrap_success_rate
-            };
-            alloc.speed_weight * speed + alloc.success_weight * succ
-        })
-        .collect();
-
-    let maxv = raw.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let t = tau.max(1e-6); // guard
-    let exps: Vec<f64> = raw.iter().map(|&v| ((v - maxv) / t).exp()).collect();
-    let sum: f64 = exps.iter().sum::<f64>().max(alloc.softmax_eps);
-
-    let mut out: Vec<usize> = exps
-        .into_iter()
-        .map(|w| (w / sum) * alloc.target_total_proposals_per_round as f64)
-        .map(|x| x.round() as usize)
-        .map(|a| a.clamp(alloc.min_per_op, alloc.max_per_op))
-        .collect();
-
-    // optional: exploration mass (uniform) — simple mix
-    if alloc.explore_frac > 0.0 {
-        let total: usize = out.iter().sum();
-        if total > 0 {
-            let explore = ((alloc.explore_frac * alloc.target_total_proposals_per_round as f64)
-                .round() as usize)
-                .max(n); // at least 1 each
-            let base = explore / n;
-            for v in &mut out {
-                *v = (*v + base).clamp(alloc.min_per_op, alloc.max_per_op);
-            }
-        }
-    }
-
-    out
 }
 
 #[cfg(test)]

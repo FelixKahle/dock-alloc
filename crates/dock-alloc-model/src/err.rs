@@ -22,10 +22,56 @@
 use crate::id::{FixedRequestId, RequestId};
 use dock_alloc_core::{
     SolverVariable,
-    space::{SpaceInterval, SpaceLength},
+    space::{SpaceInterval, SpaceLength, SpacePosition},
     time::{TimeInterval, TimePoint},
 };
 use std::fmt::Display;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EmptyProcessingTimeGridError;
+
+impl Display for EmptyProcessingTimeGridError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "The time grid is empty")
+    }
+}
+
+impl std::error::Error for EmptyProcessingTimeGridError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ProcessingTimeGridOutOfBoundsError {
+    position: SpacePosition,
+    length: SpaceLength,
+}
+
+impl ProcessingTimeGridOutOfBoundsError {
+    #[inline]
+    pub fn new(position: SpacePosition, length: SpaceLength) -> Self {
+        Self { position, length }
+    }
+
+    #[inline]
+    pub fn position(&self) -> SpacePosition {
+        self.position
+    }
+
+    #[inline]
+    pub fn length(&self) -> SpaceLength {
+        self.length
+    }
+}
+
+impl Display for ProcessingTimeGridOutOfBoundsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "The position {} is out of bounds for the processing time grid of length {}",
+            self.position, self.length
+        )
+    }
+}
+
+impl std::error::Error for ProcessingTimeGridOutOfBoundsError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SpaceWindowTooShortError {

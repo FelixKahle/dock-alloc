@@ -24,6 +24,7 @@ pub mod err;
 pub mod generator;
 pub mod id;
 pub mod problem;
+pub mod procgrid;
 pub mod req;
 pub mod sol;
 
