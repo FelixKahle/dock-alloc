@@ -81,15 +81,18 @@ where
     pub fn ledger(&self) -> &'al AssignmentLedger<'p, T, C> {
         self.ledger
     }
+
     #[inline]
     pub fn berth(&self) -> &'bo BerthOccupancy<T, Q> {
         self.berth
     }
+
     #[inline]
     pub fn problem(&self) -> &'p Problem<T, C> {
         self.problem
     }
 
+    #[inline]
     pub fn with_builder<F, R>(&self, f: F) -> R
     where
         F: for<'alob, 'boob> FnOnce(PlanBuilder<'alob, 'boob, 'p, 'bo, 'al, T, C, Q>) -> R,
