@@ -49,11 +49,11 @@ where
     berth: &'ov BerthOccupancyOverlay<'b, 'bo, T, Q>,
     windows: &'alw [SpaceInterval],
     idx: usize,
-    twin: TimeInterval<T>,
-    p: TimeDelta<T>,
+    time_interval: TimeInterval<T>,
+    processing_time: TimeDelta<T>,
     len: SpaceLength,
     space_search: SpaceInterval,
-    cur: Option<SlotsInner<'ov, 'b, 'bo, T, Q>>,
+    current: Option<SlotsInner<'ov, 'b, 'bo, T, Q>>,
 }
 
 impl<'ov, 'alw, 'b, 'bo, T, Q> SlotsForRequestIter<'ov, 'alw, 'b, 'bo, T, Q>
@@ -64,8 +64,8 @@ where
     pub fn new(
         berth: &'ov BerthOccupancyOverlay<'b, 'bo, T, Q>,
         windows: &'alw [SpaceInterval],
-        twin: TimeInterval<T>,
-        p: TimeDelta<T>,
+        time_interval: TimeInterval<T>,
+        processing_time: TimeDelta<T>,
         len: SpaceLength,
         space_search: SpaceInterval,
     ) -> Self {
@@ -73,11 +73,11 @@ where
             berth,
             windows,
             idx: 0,
-            twin,
-            p,
+            time_interval,
+            processing_time,
             len,
             space_search,
-            cur: None,
+            current: None,
         }
     }
 }
@@ -90,11 +90,11 @@ where
     berth: &'ov BerthOccupancyOverlay<'b, 'bo, T, Q>,
     windows: &'alw [SpaceInterval],
     idx: usize,
-    twin: TimeInterval<T>,
-    p: TimeDelta<T>,
+    time_interval: TimeInterval<T>,
+    processing_time: TimeDelta<T>,
     len: SpaceLength,
     space_search: SpaceInterval,
-    cur: Option<RegionsInner<'ov, 'b, 'bo, T, Q>>,
+    current: Option<RegionsInner<'ov, 'b, 'bo, T, Q>>,
 }
 
 impl<'ov, 'alw, 'b, 'bo, T, Q> RegionsForRequestIter<'ov, 'alw, 'b, 'bo, T, Q>
@@ -114,11 +114,11 @@ where
             berth,
             windows,
             idx: 0,
-            twin,
-            p,
+            time_interval: twin,
+            processing_time: p,
             len,
             space_search,
-            cur: None,
+            current: None,
         }
     }
 }
@@ -132,11 +132,11 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some(iter) = &mut self.cur {
+            if let Some(iter) = &mut self.current {
                 if let Some(x) = iter.next() {
                     return Some(x);
                 }
-                self.cur = None;
+                self.current = None;
             }
 
             while self.idx < self.windows.len() {
@@ -144,16 +144,20 @@ where
                 self.idx += 1;
 
                 if let Some(swin) = self.space_search.intersection(&wf)
-                    && self.twin.duration() >= self.p && swin.measure() >= self.len {
-                        self.cur = Some(
-                            self.berth
-                                .iter_free_slots(self.twin, self.p, self.len, swin),
-                        );
-                        break;
-                    }
+                    && self.time_interval.duration() >= self.processing_time
+                    && swin.measure() >= self.len
+                {
+                    self.current = Some(self.berth.iter_free_slots(
+                        self.time_interval,
+                        self.processing_time,
+                        self.len,
+                        swin,
+                    ));
+                    break;
+                }
             }
 
-            self.cur.as_ref()?;
+            self.current.as_ref()?;
         }
     }
 }
@@ -167,11 +171,11 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some(iter) = &mut self.cur {
+            if let Some(iter) = &mut self.current {
                 if let Some(x) = iter.next() {
                     return Some(x);
                 }
-                self.cur = None;
+                self.current = None;
             }
 
             while self.idx < self.windows.len() {
@@ -179,16 +183,20 @@ where
                 self.idx += 1;
 
                 if let Some(swin) = self.space_search.intersection(&wf)
-                    && self.twin.duration() >= self.p && swin.measure() >= self.len {
-                        self.cur = Some(
-                            self.berth
-                                .iter_free_regions(self.twin, self.p, self.len, swin),
-                        );
-                        break;
-                    }
+                    && self.time_interval.duration() >= self.processing_time
+                    && swin.measure() >= self.len
+                {
+                    self.current = Some(self.berth.iter_free_regions(
+                        self.time_interval,
+                        self.processing_time,
+                        self.len,
+                        swin,
+                    ));
+                    break;
+                }
             }
 
-            self.cur.as_ref()?;
+            self.current.as_ref()?;
         }
     }
 }

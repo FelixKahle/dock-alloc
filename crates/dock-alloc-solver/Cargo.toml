@@ -53,3 +53,8 @@ harness = false
 name = "quay_bench"
 path = "benches/berth/quay_bench.rs"
 harness = false
+
+[[bench]]
+name = "berthocc_bench"
+path = "benches/berth/berthocc_bench.rs"
+harness = false

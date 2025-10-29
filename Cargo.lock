@@ -193,6 +193,8 @@ dependencies = [
  "dock_alloc_core",
  "dock_alloc_model",
  "dock_alloc_solver",
+ "serde",
+ "serde_json",
  "tracing",
  "tracing-subscriber",
 ]
